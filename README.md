@@ -17,6 +17,10 @@ drop-in `OpenEXR` Python module.
 
 **[Documentation](https://ssoj13.github.io/exr-rs/)** · **[Releases](https://github.com/ssoj13/exr-rs/releases)**
 
+[![exr-rs view: an EXR with alpha, the Lens Flare OpenFX effect, scopes and OCIO settings on an HDR10 display (click for full size)](docs/book/src/assets/viewer-lens-flare-1600.jpg)](docs/book/src/assets/viewer-lens-flare.jpg)
+
+<sub>`exr-rs view` on an HDR10 (PQ) display: an RGBA EXR under the Lens Flare effect, the Effects, Metadata and Colour panels, waveform. Click for full size.</sub>
+
 </div>
 
 ---
