@@ -219,6 +219,35 @@ pub(crate) fn halves(bytes: &[u8]) -> Vec<f32> {
     bytes.as_chunks::<2>().0.iter().map(|b| Half::from_bits(u16::from_le_bytes(*b)).to_f32()).collect()
 }
 
+/// The draw list of `state` at `zoom` (image origin at the top-left of a `w x h`
+/// canvas), once the workers have finished, so the frame draws the level it picked, not
+/// a fallback.
+fn settled_list(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    gpu: &mut TileGpu,
+    state: &mut TileState,
+    zoom: f32,
+    w: u32,
+    h: u32,
+) -> super::render::DrawList {
+    let place = Placement {
+        origin: egui::pos2(0.0, 0.0),
+        zoom,
+        clip: egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(w as f32, h as f32)),
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let TileGpu { atlas, pipe, .. } = &mut *gpu;
+        view::frame(state, atlas, device, queue, &pipe.page_bgl, place, usize::MAX);
+        if state.pending() == 0 {
+            break view::frame(state, atlas, device, queue, &pipe.page_bgl, place, usize::MAX);
+        }
+        assert!(std::time::Instant::now() < deadline, "tiles never landed");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
 /// Render `state`'s content at `zoom` (image origin at the target's top-left)
 /// into a `w x h` canvas-format target and read the RGBA values back.
 #[allow(clippy::too_many_arguments)]
@@ -232,23 +261,7 @@ fn render(
     w: u32,
     h: u32,
 ) -> Vec<f32> {
-    let place = Placement {
-        origin: egui::pos2(0.0, 0.0),
-        zoom,
-        clip: egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(w as f32, h as f32)),
-    };
-    // Let the workers finish, so the frame draws the level it picked, not a fallback.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    let list = loop {
-        let TileGpu { atlas, pipe, .. } = &mut *gpu;
-        view::frame(state, atlas, device, queue, &pipe.page_bgl, place, usize::MAX);
-        if state.pending() == 0 {
-            break view::frame(state, atlas, device, queue, &pipe.page_bgl, place, usize::MAX);
-        }
-        assert!(std::time::Instant::now() < deadline, "tiles never landed");
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    };
-
+    let list = settled_list(device, queue, gpu, state, zoom, w, h);
     let texture = target(device, crate::present::CANVAS_FORMAT, w, h);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     gpu.pipe.prepare(device, queue, look, gpu.atlas.layout.size, &list);
@@ -608,5 +621,92 @@ fn single_slot_atlas_accepts_overview_when_optional_fine_uploads_are_refused() {
         assert_eq!(state.accepted_description(), Some(&desc));
         assert_eq!(list.instances.len(), 2, "both fine rectangles must use the complete overview");
         assert_eq!(gpu.atlas.pages().len(), 1, "optional fine uploads cannot grow this atlas");
+    }
+}
+
+/// The reported bug end to end: a texel with light and no coverage (a lens flare:
+/// `rgb > 0`, `a == 0`) goes through the real tile pass onto a cleared canvas and the
+/// real present pass over each backdrop, and keeps its light. The canvas the tile
+/// shader writes is encoded associated light (the contract of `egui_display::backdrop`),
+/// so the result in scRGB (linear, white 80 nits) is `light + backdrop * (1 - a)` for
+/// every texel: emissive, partial alpha and opaque.
+#[test]
+#[ignore = "needs a GPU adapter"]
+fn emissive_texel_survives_the_backdrop_present() {
+    use egui_display::{Backdrop, BackdropKind, BackdropView, Output, PresentPass, Target};
+    let (device, queue) = device();
+    let mut gpu = TileGpu {
+        atlas: TileAtlas::new(PageLayout::new(1024, 64 << 20)),
+        pipe: TilePipeline::new(&device),
+        direct: None,
+        vram_budget: 64 << 20,
+        canvas_bytes: 0,
+    };
+    let (w, h) = (8u32, 4u32);
+    // Associated (premultiplied) EXR light per column: flare, tiny alpha, half alpha, opaque.
+    let texels: [[f32; 4]; 4] =
+        [[2.0, 0.5, 0.05, 0.0], [3.0, 1.0, 0.2, 1e-4], [0.2, 0.1, 0.05, 0.5], [0.3, 0.6, 0.9, 1.0]];
+    let rgba: Vec<f32> = (0..w * h).flat_map(|i| texels[(i % 4) as usize]).collect();
+    let mut state = TileState::new(usize::MAX);
+    state.set_source(
+        SourceDesc { frame: 1, view: crate::image::Selection::default(), pixels_gen: 0, stage: 0 },
+        Arc::new(FrameSource { rgba: Arc::new(rgba), w, h }),
+    );
+    let list = settled_list(&device, &queue, &mut gpu, &mut state, 1.0, w, h);
+    let look = Look { hdr: true, ..test_look() };
+    gpu.pipe.prepare(&device, &queue, look, gpu.atlas.layout.size, &list);
+
+    let mut pass = PresentPass::new(&device, wgpu::TextureFormat::Rgba16Float, Output::Scrgb);
+    pass.dither = false;
+    let canvas = pass.canvas(&device, w, h).clone();
+    let frame = target(&device, wgpu::TextureFormat::Rgba16Float, w, h);
+    let levels = Target { hdr: true, white: 80.0, peak: 1000.0 };
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w as f32, h as f32));
+    for kind in [BackdropKind::Black, BackdropKind::Gray50] {
+        let backdrop = Backdrop { kind, ..Backdrop::default() };
+        let uniform = backdrop.uniform(&BackdropView::new(egui::Pos2::ZERO, 1.0), rect);
+        pass.backdrop = Some(uniform);
+        let bd = uniform.color_at([0.5, 0.5]).map(crate::transfer::eotf);
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            // What `show_backdrop` does to the canvas, then the tiles on top of it.
+            let mut rp = enc
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("emissive-test.canvas"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &canvas,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                })
+                .forget_lifetime();
+            gpu.pipe.paint(&mut rp, gpu.atlas.pages(), &list);
+        }
+        pass.draw(&queue, &mut enc, &frame.create_view(&wgpu::TextureViewDescriptor::default()), levels);
+        queue.submit([enc.finish()]);
+        let out = halves(&read_texture(&device, &queue, &frame, w, h, 8));
+        for y in 0..h {
+            for x in 0..w {
+                let t = texels[(x % 4) as usize];
+                let i = ((y * w + x) * 4) as usize;
+                for c in 0..3 {
+                    let want = t[c] + bd[c] * (1.0 - t[3]);
+                    let tol = 4e-3 * (1.0 + want);
+                    assert!(
+                        (out[i + c] - want).abs() <= tol,
+                        "{kind:?} texel {x},{y} ch{c}: got {} want {want} (texel {t:?})",
+                        out[i + c]
+                    );
+                }
+            }
+        }
     }
 }

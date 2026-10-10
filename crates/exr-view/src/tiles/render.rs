@@ -4,10 +4,15 @@
 //!
 //! The fragment shader is the display transform: exposure x 2^EV, the gamma dial,
 //! channel isolate and the sRGB OETF spliced from [`crate::transfer`]. It writes
-//! the canvas (`present::CANVAS_FORMAT`) in the canvas encoding, extended sRGB,
-//! exactly as egui writes its UI there (`fs_main_gamma_framebuffer`), with egui's
-//! premultiplied blending; dithering and the surface's own encoding are the
-//! present pass's (`present.rs`), so this shader does not know the monitor.
+//! the canvas (`present::CANVAS_FORMAT`) in the canvas encoding, extended sRGB. What it
+//! stores is the canvas contract of `egui_display::backdrop`: encoded ASSOCIATED light,
+//! `rgb = oetf(display(raw.rgb))` of the premultiplied EXR texel, `a = raw.a`, never
+//! divided by alpha (a flare texel with light and no coverage is legal and stays). That
+//! differs from egui's UI (`encode(straight) * alpha`) exactly where the present pass's
+//! backdrop composite needs it to: `eotf(rgb) + backdrop * (1 - a)` is OVER in linear
+//! light. The blend onto the canvas is egui-wgpu's premultiplied one; dithering and the
+//! surface's own encoding are the present pass's (`present.rs`), so this shader does not
+//! know the monitor.
 //!
 //! With an OCIO display transform ([`crate::ocio::Transform`]) the colour image goes
 //! through its `ocio_transform` instead of the tone operator: the shader is
@@ -340,8 +345,8 @@ fn build_pipeline(
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: crate::present::CANVAS_FORMAT,
-                // egui-wgpu 0.36's own blend (premultiplied alpha), so the
-                // image composites over the checker exactly as before.
+                // egui-wgpu 0.36's own blend (premultiplied alpha): it keeps the
+                // canvas as associated light under any overlap with other draws.
                 blend: Some(wgpu::BlendState {
                     color: wgpu::BlendComponent {
                         src_factor: wgpu::BlendFactor::One,
