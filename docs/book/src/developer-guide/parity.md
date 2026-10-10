@@ -14,24 +14,24 @@ python bootstrap.py t exr python
 ```
 
 Plain Cargo tests leave `test-data` feature-gated fixtures and ignored hardware
-tests unexecuted. The bootstrap full gate enables private fixtures and runs five
-stages: Cargo workspace tests, Imath parity, libdeflate parity, OpenEXR parity and
-the maturin/pytest Python gate. A bare `t` runs that gate; it does not print help.
+tests unexecuted. The bootstrap full gate enables private fixtures and runs six
+stages: Cargo workspace tests (`cargo`), clippy on the workspace and `openexr-py`
+(`clippy`), Imath parity (`parity`), libdeflate parity (`deflate`), OpenEXR parity
+(`exr`) and the maturin/pytest Python gate (`python`). A bare `t` runs that gate; it does not print help.
 Use `python bootstrap.py help` for the wrapper's command reference.
 
-Tests that require enabled fixtures or an oracle must not silently pass without
-them. Some reference tests support the explicit `EXR_ALLOW_SKIP=1` opt-out;
-record it and every ignored/skipped case. Skips do not establish acceptance.
+Tests that require enabled fixtures or an oracle fail without them; the explicit
+`EXR_ALLOW_SKIP=1` opt-out turns those failures into skips.
 
 ## Native oracles
 
 | Command | Reference | Purpose |
 |---|---|---|
-| `cargo xtask parity` | Imath 3.2.2 | Bit/ULP golden checks for the Imath 3.2.0 port |
-| `cargo xtask parity-deflate` | libdeflate 1.26 | Byte identity across compression levels |
-| `cargo xtask parity-exr` | OpenEXR 3.4.15 | C++→Rust and Rust→C++ read/write comparisons |
-| `cargo xtask parity-header` | C++ exrheader | Header formatter comparisons |
-| `cargo xtask parity-tools` | C++ image tools | CLI/tool behaviour comparisons |
+| `cargo run -p xtask -- parity` | Imath 3.2.2 | Bit/ULP golden checks for the Imath 3.2.0 port |
+| `cargo run -p xtask -- parity-deflate` | libdeflate 1.26 | Byte identity across compression levels |
+| `cargo run -p xtask -- parity-exr` | OpenEXR 3.4.15 (108 tests) | C++→Rust and Rust→C++ read/write comparisons |
+| `cargo run -p xtask -- parity-header` | C++ exrheader | Header formatter comparisons |
+| `cargo run -p xtask -- parity-tools` | C++ image tools | CLI/tool behaviour comparisons |
 
 The native build path uses Windows/MSVC and vcpkg. On other platforms xtask reports
 a skip and returns without building the native oracle; that is not a native pass.
@@ -65,8 +65,7 @@ No gate reads upstream source trees. The oracles link the vcpkg libraries pinned
 in `xtask/vcpkg.json`; `parity-header` and `parity-tools`, which compile
 OpenEXR's own tools, fetch the pinned v3.4.15 sources into
 `target/ref/openexr-v3.4.15` themselves (see the root README's "Reference
-sources"). Fixtures come only from the test-data crate. Avoid documenting
-machine-specific corpus counts as a permanent property of the gate.
+sources"). Fixtures come only from the test-data crate.
 
 ## GPU and viewer checks
 
@@ -76,24 +75,13 @@ Ignored GPU tests must be run on an actual device:
 cargo test -p exr-gpu -- --ignored
 ```
 
-Viewer checks additionally cover geometry, readiness, cancellation, accepted-frame
-retention, budgets and actual GPU/fixture cases. A successful `cargo check`
-compiles targets; it does not execute those tests. Shader validation and readback
-checks are separate from visually inspecting the native application.
+Viewer tests additionally cover geometry, readiness, cancellation, frame retention
+during playback, budgets, and GPU and fixture cases. Shader validation and readback
+checks do not replace looking at the running application.
 
-## Exact evidence
+## Fast paths and measurements
 
-Run gates against a clean source checkout of the commit being judged, with its
-own build directory. Source checkouts belong outside disposable `target/`.
-Mutations also run in isolated checkouts; restore exact bytes and rerun positives.
-
-Record the source revision, features, toolchain, fixtures/oracle, actual exits and
-executed/ignored counts. Optimization acceptance needs evidence that the intended
-path engaged; output equality alone can pass on a fallback. Controlled A/B timings
-need identical inputs and thread counts on a quiet machine.
-
-```sh
-cargo clippy --workspace --all-targets -- -D warnings
-```
-
-This is a validation command, not a promise that every later working tree passes.
+Every parallel, SIMD or reuse fast path has an engagement test (`exr_core::probe`):
+output equality alone also passes on a silent fallback. Run gates on a clean checkout
+of the commit being tested; compare timings only with identical inputs and thread
+counts on a quiet machine.

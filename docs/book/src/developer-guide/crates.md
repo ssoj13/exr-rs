@@ -9,19 +9,14 @@ Workspace members (plus the root `exr-rs` CLI package):
 | `exr-core` | OpenEXR/IlmImf v3.3.11 layout (+ HTJ2K from 3.4); behaviour = C++ 3.4.15 | the container, all 12 codecs, scanline/tiled/deep/multipart readers and writers, deep compositing, the `api/` facade, `rgba/` (RGBA / tiled RGBA / ACES in+out, luminance-chroma, LUTs), `chunk/` (raw passthrough). The heart of the project. |
 | `cryptomatte` | Cryptomatte 1.2 spec, on `exr-core` + murmur3 | decode (metadata, manifests, ranked matte extract) and encode (named mattes, inject over/under). |
 | `exr-gpu` | `exr-core` + wgpu 30 | upload decoded channel layers into VRAM (textures or a planar storage buffer); readback. |
-| `exr-view` | `exr-core` + winit / egui 0.36 / egui_dock 0.21 / wgpu 30 | the GPU viewer: colour pass, scopes, layer selection, Cryptomatte overlay, sequence playback. |
-| `exr-util` | OpenEXR whole-image tools | checker, tiled/preview/attribute/multipart/multiview/environment/metrics/ACES helpers. |
+| `exr-view` | `exr-core` + winit / egui 0.36 / egui_dock 0.21 / wgpu 30 | the GPU viewer behind `exr-rs view`: resident and tiled display, OCIO, HDR output, scopes, layer selection, Cryptomatte overlay, sequence playback, OpenFX effects. |
+| `exr-util` | OpenEXRUtil | in-memory flat and deep images, whole-file image I/O and `CheckFile`, used by the whole-image CLI tools. |
+| `exr-image` | `exr-core` + the `image` crate | EXR decoding for `image` through exr-core (`register()` installs the hooks). |
 | `exr-test-data` | test infrastructure | resolves opt-in private fixtures via `EXR_TEST_DATA`. |
 
-Reusable viewer widgets (git dependencies, not workspace members):
-
-| Crate | Built on | Role |
-|---|---|---|
-| `egui-timeline` | egui 0.36 | reusable time-track / scrubber widget with per-slot tint (cache state). |
-| `egui-statusbar` | egui 0.36 | reusable sectioned, resizable status bar. |
-
-`xtask` is also a workspace member. `cargo xtask {setup, parity, parity-exr,
-parity-deflate}` builds the native oracles through one vcpkg resolver.
+`xtask` is also a workspace member. `cargo run -p xtask -- <command>` with `setup`,
+`parity`, `parity-deflate`, `parity-exr`, `parity-header` or `parity-tools` builds the
+native oracles through one vcpkg resolver.
 
 Outside the workspace:
 
@@ -34,9 +29,10 @@ Outside the workspace:
 | `gpu-info-rs` (git, imported as `wgpu-info`) | adapter / limit / VRAM query and a max-limits device request. |
 | `vcv-rs` (git) | detects the MSVC / Windows SDK / UCRT environment so the oracles build without manual `vcvars`. |
 | `codec-simd` (git) | shared safe SIMD codec primitives with scalar references. |
-| `oiio-rs` (git) | Rust OCIO/colour-math components used by viewer transforms. |
+| `oiio-rs` (git, package `vfx-ocio`) | Rust OCIO/colour-math components used by viewer transforms. |
 | `ofx-rs` (git, optional `ofx`) | runtime, host UI and native/built-in OpenFX effect integration. |
-| `murmur3` (git) | MurmurHash3 x86_32 for Cryptomatte IDs. |
+| `egui-widgets-rs` (git) | the shared egui widgets of the viewer: timeline, status bar, outliner, attribute grid, HUD, preferences, display/present helpers. |
+| `murmur3` (git) | MurmurHash3 x86_32 and x64_128: Cryptomatte IDs and the ID manifest hash schemes in `exr-core`. |
 
 The root `src/` is the [exr-rs CLI](../user-guide/cli.md), including the whole-image tools.
 

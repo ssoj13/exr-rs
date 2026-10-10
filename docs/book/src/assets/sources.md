@@ -1,9 +1,7 @@
 # Screenshot provenance
 
-These are actual Windows native-window/region captures made with filesystem-mcp-rs
-from a pre-release exr-rs source tree.
-The CLI/viewer was built from a clean isolated checkout with the checked-in lockfile.
-No image generation or pixel editing was used.
+These are native window captures of the exr-rs viewer on Windows, taken before the
+first release. No image generation or pixel editing was used.
 
 - `viewer-pq.png`: Desk.exr, viewport checker, metadata, scopes and display settings.
 - `display-pq.png`: Settings → Display, HDR10 PQ with a saved 480-nit white override.

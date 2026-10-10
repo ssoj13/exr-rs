@@ -6,13 +6,13 @@ codec dispatch, deep addressing, viewer pipeline and parity harness.
 ## Layering
 
 ```
-imath-rs      deflate-rs      jph-rs (git dep)         foundation ports
+imath-rs      deflate-rs      jph-rs, codec-simd (git deps)   foundation ports
      \            |            /
       +------ exr-core -------+                         OpenEXR port + api/ facade + rgba/ + chunk/
-             /    |     \
-      exr-gpu  cryptomatte  exr-view -- scanseq, scancache, wgpu-info (git deps)
-                              |        egui-timeline, egui-statusbar
-                        exr-rs CLI     openexr-py (maturin, outside the workspace)
+         /      |       |      \
+  exr-util  exr-gpu  cryptomatte  exr-view -- scanseq, scancache, wgpu-info, egui-widgets-rs,
+     |                    |          |        vfx-ocio, ofx-rs (git deps)
+     +----------- exr-rs CLI --------+        openexr-py (maturin, outside the workspace)
 ```
 
 Lower crates know nothing of higher ones. `exr-core` is `wgpu`-free; the GPU lives
@@ -78,23 +78,23 @@ PIZ, PXR24, B44, DWA, and HTJ2K override to use the tile's own rectangle.
 
 ## The facade vs the low-level readers
 
-`exr_core::api::Image` is a deliberately flat model: one data window, one sample per
-pixel per channel, every channel full-resolution. It cannot represent:
+`exr_core::api::Image` is a deliberately flat model: one data window and one sample
+per pixel per channel (subsampled channels, kept by `Image::read_all`, are smaller
+grids of their own). It cannot represent:
 
 - **multipart** — N independent parts, each with its own header and channels;
-- **deep** — a variable number of samples per pixel;
-- **subsampled** — channels stored at different resolutions (luminance-chroma).
+- **deep** — a variable number of samples per pixel.
 
-So the facade rejects those with `ExrError::Unsupported(kind)`, whose message points
-at the low-level reader (`MultiPartInputFile`, `Deep*InputFile`, `RgbaInputFile`, or
-the raw `FrameBuffer` path). Consumers branch on the structured kind, never on the
+So the facade rejects those with `ExrError::Unsupported(kind)` (as `read` also does for
+subsampled files), whose message points at the low-level reader (`MultiPartInputFile`,
+`Deep*InputFile`, `Image::read_all` / `RgbaInputFile`). Consumers branch on the structured kind, never on the
 message text. The low-level readers expose these file shapes; the parity harness checks
 covered read/write cases against C++.
 
 ## Input hardening
 
-Untrusted sizes flow through single checked boundaries: `api::window_pixel_count`
-(window geometry), `Slice::validate_layout` (re-checked at every frame-buffer insert),
+Untrusted sizes flow through single checked boundaries: `sample_dims` in `api/store.rs`
+(facade window and plane geometry), `Slice::validate_layout` (re-checked at every frame-buffer insert),
 `container::xdr::read_bounded_bytes` (attribute sizes vs the stream length),
 `deep::sample_table` (cumulative counts, count addresses, chunk sizes before
 allocation), and the checked tiled geometry in `tiled/misc.rs`. New code must reuse
@@ -137,29 +137,24 @@ bit-for-bit. `exr-gpu` therefore uploads CPU-decoded planes; frame-level paralle
 playback. Codec optimization decisions require current profiles and controlled
 measurements; historical timings are not a portable throughput guarantee.
 
-## Viewer ownership
+## Viewer data flow
 
 The [viewer guide](../user-guide/viewer.md) describes one resident-or-tiled display
-pipeline and its shared colour/present path. Immutable decoded frames are cache
-owners; viewport state and GPU textures belong to display state. Pending sequence
-work keeps the accepted image visible until replacement upload succeeds.
+pipeline and its shared colour/present path. Decoded frames are immutable and owned by
+the frame cache (`scancache`); viewport state and GPU textures belong to the display.
+During sequence playback the current image stays visible until its replacement upload
+succeeds.
 
-Lazy OpenFX uses checked original-f32 ROI providers and owner-attached CPU admission.
-Each physical host allocation retains its lease; copied storage requires new admission.
-The viewer prepares an immutable snapshot of geometry, time, primary-source lineage
-and deduplicated physical work owners before GPU mutations, then commits it alongside
-the accepted drawable GPU overview. Scopes, viewport readout, App metadata, Pixel Info
-and export consume that committed snapshot;
-external aliases keep its pixel owners alive during delayed export. Charged row
-scratch and the shared mixed-LOD area reducer support streaming PNG/EXR without
-a full f32 mosaic or display-texture readback.
+OpenFX effects read source pixels lazily through checked f32 region providers; every
+host allocation is charged to a bounded CPU memory budget for as long as it is held.
+Before changing GPU state, the viewer builds one immutable snapshot of the displayed
+result (geometry, time, source and the pixel buffers it holds) and commits it with the
+drawn image. Scopes, viewport readout, Metadata, Pixel Info and Save view all read that
+snapshot, which keeps its pixels alive while a delayed export runs. Save view streams
+PNG/EXR rows through the same area reducer as the scopes, without assembling a full
+f32 image or reading the display texture back.
 
-Consumers attach to that snapshot, and preparation has a bounded budget fallback.
-The host's shared request witness records refusal and
-monotonic native lifecycle entry in one allocation, inherited by strip and callback
-workers. Only a typed intrinsic Budget before BeginSequenceRender/Render and clean
-rollback permits a coarser whole level; surviving owners, including zero-byte owners,
-retain the original refusal. Pending preserves scale and completed work; successful
-identity delivery closes fallback. This does not predict arbitrary in-Render allocation
-or guarantee immediate upload. Actual Gaussian/provider, temporal and GPU/native
-consumer contracts are covered by host regression tests.
+If preparing a non-tiled effect exceeds the budget before the plug-in starts rendering,
+and the partial work is released cleanly, the effect may render from a coarser
+whole-image level; a refusal once rendering has begun keeps the error. Host regression
+tests cover the effect, provider, temporal and GPU paths.

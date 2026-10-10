@@ -22,25 +22,14 @@ Do not spread unsafe codec kernels into `exr-core`.
 - Keep one implementation and owner for each invariant; avoid parallel caches,
   schedulers or duplicated conversion paths.
 - Writers receive pixel bytes per write call and return fallible completion.
-- Retained pixel owners keep their allocation charge; copies need new admission.
 - Validate untrusted indexing and propagate structured errors. Classify by error
   kind rather than display text; handle or log fallible results.
 - Keep optimized paths tied to scalar/reference semantics and prove engagement.
 - Explain ownership, bounds and non-obvious invariants in Rustdoc/comments.
 
-## Git and source trees
+## Commits and review
 
-Use scoped commits and normal pushes to `main`. Preserve other sessions' edits;
-do not reset, revert, restore or stash their work. Use meaningful commit messages
-without co-author trailers.
-
-Source worktrees and durable checkpoints live outside disposable build output.
-Give independent gates and mutations their own source/build directories.
-Never rely on `target/` to retain uncommitted source or irreplaceable evidence.
-
-## Review
-
-Authoring and verification are separate passes: a change is accepted after an
-independent check against the C++ oracle or a mutation-checked test, not because it
-was committed. Keep stable user documentation in this book. Do not enable LTO in
-debug builds or claim speed gains from loaded-machine measurements.
+Keep commits scoped, with messages that say what changed and why. A change to ported
+behaviour is verified against the C++ oracle or by a test that fails on a broken
+build. Keep user documentation in this book. Do not enable LTO in debug builds or
+claim speed gains from measurements on a loaded machine.

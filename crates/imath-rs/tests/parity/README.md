@@ -17,7 +17,7 @@ are involved.
 ## How to run / regenerate
 
 ```text
-cargo xtask parity        # or: python bootstrap.py parity
+cargo run -p xtask -- parity        # or: python bootstrap.py parity
 ```
 
 On **Windows** this:
@@ -30,10 +30,8 @@ On **Windows** this:
 On **non-Windows** the command is a no-op (the oracle needs MSVC + a vcpkg Imath
 install) and exits 0. The committed `golden.txt` still lets the Rust test run.
 
-The vcpkg tree is picked by the shared resolver in `xtask/src/vcpkg.rs`: `VCPKG_INSTALLED`
-(a full `installed/<triplet>` path) wins, else the first `x64-windows*` triplet under
-`$VCPKG_ROOT/installed` (default `C:/vcpkg/installed`) that has the header. For a DLL triplet
-the oracle is compiled with `/DIMATH_DLL` (the shared Imath's exported
+The vcpkg tree is picked by the shared resolver in `xtask/src/vcpkg.rs` (see the guide's
+Parity and testing page). For a DLL triplet the oracle is compiled with `/DIMATH_DLL` (the shared Imath's exported
 `imath_half_to_float_table` must be seen as `__declspec(dllimport)`) and run with
 vcpkg's `bin/` on PATH so the Imath DLL resolves; a static triplet links the archive
 with the matching CRT and needs neither.
@@ -74,17 +72,8 @@ differ in the last bit(s):
 - Frustum `fovx`/`fovy` (`atan`). Frustum `projectionMatrix`/`planes` are built
   from literal edges (no fov/trig) and are therefore checked **bit-exact**.
 
-### Known flagged divergence — `color_algo::packed2rgb` (float branch)
+`color_algo::packed2rgb`'s float branch computes `T f = T(1)/T(255); out = byte * f`
+in `T`, as C++ does, and is checked bit-exact.
 
-C++ computes the float branch as `T f = T(1)/T(255); out = byte * f` entirely in
-`T` (= `f32` for `V3f`). The `imath-rs` port computes `1.0_f64/255.0` and
-`(byte as f64) * f` in **f64**, then narrows once via `from_f64`. Doing the
-divide+multiply in f64 vs f32 can differ by **1 ULP** after the final round
-(e.g. byte `0x3F`: C++ `0x3e7cfcfe` vs Rust `0x3e7cfcfd`). This is a genuine
-1:1-fidelity bug in the port (not libm, not a 3.2.0↔3.2.2 difference). The test
-flags it with a `WARN` and asserts ≤ 1 ULP rather than masking it; it should be
-restored to a bit-exact check once the port computes that branch in `T`.
-
-## Coverage snapshot
-413 golden records → 284 bit-exact + 129 tight-ULP checks (the two flagged
-`packed2rgb` keys are counted in the ULP group while the bug stands).
+## Coverage
+624 golden records → 495 bit-exact + 126 tight-ULP checks (the test prints the tally).

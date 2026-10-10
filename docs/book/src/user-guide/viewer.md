@@ -1,7 +1,7 @@
 # Viewer
 
-`exr-view` is the winit/egui/wgpu image and sequence viewer. The CLI opens the
-same application:
+The viewer is the `exr-rs view` (`v`) subcommand, an image and sequence player on
+winit, egui and wgpu; its code is the `exr-view` library crate.
 
 ```sh
 exr-rs v                         # start the viewer (also: exr-rs view)
@@ -10,11 +10,11 @@ exr-rs view beauty.exr
 exr-rs view --auto beauty.0001.exr
 ```
 
-Bare `v` or `view` starts the viewer without requiring a path, preserving
-persisted-session restoration. `--empty`/`-e` remains an optional legacy
-compatibility flag. `--help`/`-h` shows help. An explicit file opens alone unless `--auto` is supplied. Drag-and-drop detects
-sequences; the Open dialog and recents use the saved auto-detect preference.
-Missing frame numbers remain gaps in the detected sequence.
+Bare `v` or `view` starts the viewer without a path and restores the saved
+session; `--empty`/`-e` does the same explicitly. `--help`/`-h` shows help. An
+explicit file opens alone unless `--auto` is given (`--no-auto` states the default).
+Drag-and-drop detects sequences; the Open dialog and recents use the saved
+auto-detect preference. Missing frame numbers remain gaps in the detected sequence.
 
 ## Workspace
 
@@ -34,20 +34,19 @@ channel to view it alone. The current layer opens by default; manual folds persi
 across redraws, and switching layers reveals the selected layer once. Expand all
 and Collapse all sit to the right of Channels.
 
-For an accepted processed result, Metadata also identifies its frame, time,
-revision, primary data/display windows and pixel aspect ratio. Its original header
-is shown separately only when the loaded source matches that accepted primary.
-Pixel Info shows processed scene-linear RGBA, canvas coordinates and the actual
-sample pyramid level. Original primary-source values for all channels appear
-separately when that source point is available. Histogram, waveform, vectorscope
-and viewport readout use the accepted processed result while replacement work is
-pending.
+Metadata also shows the displayed (processed) result's frame, time, data/display
+windows and pixel aspect ratio; the original header appears separately when it belongs
+to that result's source. Pixel Info shows processed scene-linear RGBA, canvas
+coordinates and the sampled pyramid level, plus the original source values of all
+channels when that source point is available. Histogram, waveform, vectorscope and
+viewport readout keep showing the last completed result while new work is pending.
 
 Under the image's alpha the viewport shows a backdrop picked from the toolbar:
 Checker (default), Black, 50% Gray or a custom colour; the choice persists. It is
 composited in the present pass in linear light relative to SDR white, so it has
-the right brightness on SDR, HDR10 PQ, HLG and scRGB outputs, and the checker
-follows the image as it pans and zooms. Exports (Save view) carry no backdrop.
+the right brightness on SDR, HDR10 PQ, HLG and scRGB outputs. The default checker
+has 16-pixel cells fixed to the viewport; the picker sets the cell size and can pin
+the cells to the image so they pan and zoom with it. Exports (Save view) carry no backdrop.
 
 ## Navigation and playback
 
@@ -60,7 +59,7 @@ follows the image as it pans and zooms. Exports (Save view) carry no backdrop.
 | `H` or `0` | Show at 1:1 |
 | `Ctrl +` / `Ctrl -` | Step zoom |
 | `R` / `G` / `B` / `A` | Isolate a channel |
-| `Space` | Play/pause a sequence |
+| `Space` / `Shift+Space` | Play/pause a sequence / play backwards |
 | Left/right arrows | Step frames |
 | Left-button drag on a sequence | Scrub |
 | Left-button click on a still | Pin pixel readout |
@@ -68,8 +67,8 @@ follows the image as it pans and zooms. Exports (Save view) carry no backdrop.
 
 Fit uses the EXR display window; the data window is positioned inside it.
 The View menu selects the preload strategy. Worker-thread decoding and the
-shared frame cache stay within the configured RAM allowance. Playback keeps the
-accepted GPU image until replacement pixels are drawable.
+shared frame cache stay within the configured RAM allowance. During playback the
+current image stays on screen until its replacement is ready to draw.
 
 ## Display and colour
 
@@ -83,14 +82,20 @@ encodes the selected output surface.
 Settings → Display selects SDR 8/10-bit, HDR10 PQ, HLG or scRGB when the actual
 surface supports that format/colour-space pair. SDR white and display peak can use
 OS values or explicit overrides. The screenshot shows a saved 480-nit override;
-it is not the application default or a calibration recommendation. Manual SDR
-reference white supports 80–1000 nits; this is independent of the HDR rendering
-peak. The display-peak override shapes HLG output only.
+it is not the application default or a calibration recommendation. Reference white sets the brightness of the UI and of relative-white image values on an
+HDR output; its manual range is 80–1000 nits, independent of the OCIO rendering peak.
+The display-peak override shapes HLG output only.
 
 Settings → Colour exposes the same OCIO controls as the Colour dock tab. Quick
 monitor presets appear before the detailed input/display/view/look choices,
-including HDR 1000 nits when an HDR output and the loaded config support it.
-Display and Colour link directly to each other.
+including HDR 1000 nits when an HDR output and the loaded config support it (it
+selects an ACES HDR rendering, not a 1000-nit UI white). Display and Colour link
+directly to each other.
+
+Open Settings with `Ctrl+,` or from the Window menu; its categories are Memory,
+Display, UI (sequence auto-detection, fonts, interface sizes) and Colour, and Reset
+affects the category shown. Settings persist in the platform's exr-view
+configuration directory.
 
 Settings → Memory controls RAM/VRAM shares and per-frame upload allowance.
 Eligible images up to 8192 pixels per dimension use a reused resident GPU source,
@@ -100,18 +105,16 @@ reads bounded bands. Small images are not forced through tile loading.
 
 ## Save a view
 
-File → Save view exports the selected display look. SDR PNG, HDR10 PQ PNG and
-linear display-light EXR are implemented; HLG PNG and scRGB file export remain
-open. Display-light EXR uses linear Rec.709; its `whiteLuminance` records the
-current display reference white. A display export does not preserve every original
+File → Save view exports the selected display look as SDR PNG, HDR10 PQ PNG, HLG PNG
+or linear display-light EXR; there is no scRGB file export. Display-light EXR uses
+linear Rec.709; its `whiteLuminance` records the current display reference white. A display export does not preserve every original
 channel or source metadata.
 
-When a processed result is accepted, Save view retains that result's pixels,
-geometry and time for the export. The requested maximum dimension selects a
-pyramid level; mixed fine/coarse coverage uses the same area reducer as scopes.
+Save view exports the displayed result's pixels, geometry and time. The requested
+maximum dimension selects a pyramid level; mixed fine/coarse coverage uses the same area reducer as scopes.
 PNG and EXR writers stream rows without assembling a full f32 image. The success
-message reports dimensions and any nonzero pyramid level. Loading or busy pixel
-admission produces a retry message; budget and writer errors are reported instead
+message reports dimensions and any nonzero pyramid level. While the pixels are still
+loading or busy, Save view asks to retry; budget and writer errors are reported instead
 of silently exporting the original input.
 
 The CLI's `--screenshot` is a neutral image export without a window, rather than
@@ -121,16 +124,15 @@ See [CLI examples](cli.md). Use `convert` or the
 
 ## OpenFX and current limits
 
-The Effects dock hosts built-in/native effects, parameters, overlays and scan
-diagnostics. Lazy tiled OpenFX uses checked original-f32 ROI providers and bounded
-CPU admission. Accepted processed pixels are connected to scopes, viewport
-readout, Metadata, Pixel Info and Save view. If host preparation exceeds the budget
-before native rendering begins and its temporary owners have retired, non-tile effects
-may use a coarser whole-image level. Pending work keeps its selected level; a refusal
-after native rendering begins does not trigger this fallback. The bounded fallback
-and the bounded geometry/time/consumer contracts are accepted, completing the
-approved tile/OpenFX phase after independent host verification. HLG hardware,
-log-input exposure and HLG/scRGB export remain separate work.
+The Effects dock hosts the built-in effects and installed OpenFX plug-ins (from
+`OFX_PLUGIN_PATH` and the OS plug-in directories), with parameters, overlays and
+plug-in scan diagnostics. Effects read source pixels lazily through checked f32
+region providers within a bounded CPU memory budget; their output feeds the scopes,
+viewport readout, Metadata, Pixel Info and Save view. If preparing a non-tiled effect
+exceeds the budget before rendering begins, the viewer may render it from a coarser
+whole-image level; a refusal once rendering has begun does not fall back. Not yet
+done: HLG verification on HLG hardware, exposure for log-encoded input, and scRGB
+file export.
 
 Deep and multipart files report an unsupported-input error; use the corresponding
 low-level readers for those file shapes. Subsampled channels are decoded whole and

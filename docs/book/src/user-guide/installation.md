@@ -16,9 +16,10 @@ pip install openexr-0.1.0-cp38-abi3-<platform>.whl
 
 - A current stable Rust toolchain (edition 2024; declared MSRV 1.96). Install via
   [rustup](https://rustup.rs/).
-- SSH access to GitHub: several dependencies (`jph-rs`, `scanseq`, `scancache`,
-  `gpu-info-rs`, `codec-simd`, `oiio-rs`, `ofx-rs`, `vcv-rs`, `murmur3`) are fetched as git dependencies from
-  `ssh://git@github.com/ssoj13/...`.
+- SSH access to GitHub: several dependencies (from the `box-rs`, `codec-simd-rs`, `curves-rs`,
+  `egui-phosphor`, `egui-widgets-rs`, `gpu-info-rs`, `jph-rs`, `lcms-rs`, `murmur3`, `ofx-rs`,
+  `oiio-rs`, `render-rs`, `scancache-rs`, `scanseq-rs`, `slate-rs` and `vcv-rs` repositories) are
+  fetched as git dependencies from `ssh://git@github.com/ssoj13/...`.
 - For the viewer / GPU upload: a GPU with a working Vulkan, D3D12, or Metal backend
   (wgpu 30 picks one automatically).
 
@@ -43,8 +44,9 @@ The thin `bootstrap.py` wrapper provides shorthands:
 ```sh
 python bootstrap.py b      # cargo build --release of the exr-rs binary (-d for debug)
 python bootstrap.py b p    # build the OpenEXR Python wheel via maturin
-python bootstrap.py t      # full Cargo/native/Python gate; see Parity & testing
-python bootstrap.py c      # cargo clippy -p <in-scope crates> --all-targets -- -D warnings
+python bootstrap.py i      # cargo install exr-rs onto PATH (i p: pip install the wheel)
+python bootstrap.py t      # the full gate; see Parity and testing
+python bootstrap.py c      # clippy -D warnings on the workspace crates and openexr-py
 python bootstrap.py v <f>  # run the viewer on a file
 ```
 

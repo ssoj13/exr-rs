@@ -25,7 +25,7 @@ Not part of OpenEXR IlmImf parity. Python: `OpenEXR.cryptomatte` (exr-rs extensi
 ## Usage
 
 ```rust
-use cryptomatte::{CryptomatteFile, EncodeOptions, NamedMatte, from_named_mattes};
+use cryptomatte::{CryptomatteFile, EncodeOptions, NamedMatte, Windows, from_named_mattes};
 use exr_core::Compression;
 
 // Decode
@@ -35,8 +35,8 @@ let matte = file.extract_names(layer, &["bunny"])?;
 
 // Encode
 let opts = EncodeOptions::new("CryptoObject");
-let enc = from_named_mattes(w, h, &[NamedMatte::new("bunny", &coverage)], &opts)?;
-enc.write("out.exr", Compression::Zip)?;
+let enc = from_named_mattes(Windows::origin(w, h)?, &[NamedMatte::new("bunny", &coverage)], &opts)?;
+enc.write("out.exr", Some(Compression::Zip))?;  // None: keep the encoded image's compression
 ```
 
 ### Python (`OpenEXR.cryptomatte`)

@@ -57,9 +57,8 @@ On **non-Windows** the command is a no-op (the oracle needs MSVC + a vcpkg
 libdeflate install) and exits 0. The committed `golden.txt` still lets the Rust
 test run.
 
-The vcpkg tree is picked by the shared resolver in `xtask/src/vcpkg.rs`: `VCPKG_INSTALLED`
-(a full `installed/<triplet>` path) wins, else the first `x64-windows*` triplet under
-`$VCPKG_ROOT/installed` (default `C:/vcpkg/installed`) that has the header. A DLL triplet links
+The vcpkg tree is picked by the shared resolver in `xtask/src/vcpkg.rs` (see the guide's
+Parity and testing page). A DLL triplet links
 the import library `deflate.lib` and puts vcpkg `bin/` (for `deflate.dll`) on PATH at
 runtime; a static triplet links `deflatestatic.lib`.
 
@@ -81,8 +80,7 @@ of our inflater, not a byte-comparison.
 ## libdeflate version
 
 vcpkg currently ships libdeflate **1.26** (`LIBDEFLATE_VERSION_STRING`), which is
-the version `deflate-rs` is ported from (bumped 2026-09-22 from 1.25 — the only
-behavioural delta was `compression_level == -1` aliasing to level 6). If vcpkg upgrades to a newer
+the version `deflate-rs` is ported from; xtask checks it and fails on any other version. If vcpkg upgrades to a newer
 libdeflate whose compressor heuristics changed, regenerating `golden.txt` will
 surface the delta as parity failures — that is a signal to re-converge the port
 to the new upstream, not to relax the gate.

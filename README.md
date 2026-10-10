@@ -106,6 +106,7 @@ flowchart TB
         imath["imath-rs<br/>Imath 3.2.0: Half, vectors, matrices"]
         deflate["deflate-rs<br/>libdeflate 1.26 + x86 SIMD"]
         core["exr-core<br/>OpenEXR 3.4.15: container, 12 codecs,<br/>deep, multipart, api/, rgba/"]
+        util["exr-util<br/>OpenEXRUtil"]
     end
 
     subgraph ext["git dependencies"]
@@ -141,6 +142,8 @@ flowchart TB
     core --> py
     crypto --> py
     core --> cli
+    core --> util
+    util --> cli
     crypto --> cli
     view --> cli
 ```
@@ -152,9 +155,11 @@ flowchart TB
 | [`exr-core`](crates/exr-core) | OpenEXR: container, attributes, all 12 codecs, scanline/tiled/deep/multipart, raw-chunk passthrough, the idiomatic `api` facade, and `rgba` (RGBA, ACES, luminance-chroma). |
 | [`cryptomatte`](crates/cryptomatte) | Cryptomatte 1.2: ids, ranks, metadata, manifests, matte extraction, **encoding** and injection. |
 | [`exr-gpu`](crates/exr-gpu) | Decoded layers into `wgpu` textures or storage buffers, with checked sizing and readback. |
-| [`exr-view`](crates/exr-view) | The GPU viewer (winit, egui, wgpu). |
+| [`exr-util`](crates/exr-util) | OpenEXRUtil: in-memory flat and deep images, whole-file image I/O and `CheckFile`, behind the whole-image CLI tools. |
+| [`exr-image`](crates/exr-image) | EXR decoding for the `image` crate through exr-core (`exr_image::register()`). |
+| [`exr-view`](crates/exr-view) | The GPU viewer library (winit, egui, wgpu) behind `exr-rs view`. |
 | [`openexr-py`](crates/openexr-py) | The `OpenEXR` Python module on PyO3 + numpy (built by maturin, outside the cargo workspace). |
-| `exr-rs` (root) | The command-line tool. |
+| `exr-rs` (root) | The one binary: the command-line tools and the viewer. |
 
 ### Read and write pipeline
 
@@ -179,7 +184,7 @@ order. Writers take the pixel bytes on each call, so one strip buffer can stream
 
 ## Status report: exr-rs vs OpenEXR
 
-*As of 2026-10-01. The behavioural target is C++ OpenEXR **3.4.15**.*
+*The behavioural target is C++ OpenEXR **3.4.15**.*
 
 | Area | OpenEXR (C++) | exr-rs | State |
 |---|---|---|---|
@@ -194,9 +199,9 @@ order. Writers take the pixel bytes on each call, so one strip buffer can stream
 | Error classes (Iex, checked arithmetic) | ✅ | 1:1 taxonomy | ✅ one documented addition: `Unsupported` for the facade |
 | Threading | IlmThread pool | rayon on all 8 read/write × storage paths | ✅ output identical at every thread count |
 | Python `OpenEXR` module | pybind11 | PyO3 drop-in, plus `OpenEXR.cryptomatte` | ✅ official OpenEXR Python tests pass |
-| `exrheader` | ✅ | `exr-rs info` | ✅ output byte-identical (`cargo xtask parity-header`) |
-| Ten ported command-line tools (`exrcheck`, `exrmaketiled`, `exrmakepreview`, `exrenvmap`, `exrmultipart`, `exrmultiview`, `exrstdattr`, `exrmetrics`, `exrmanifest`, `exr2aces`) | ✅ | `check`, `tile`, `preview`, `envmap`, `multipart`, `multiview`, `attr`, `metrics`, `manifest`, `aces` | ✅ final ten tool groups: 105 tests, zero failed/ignored; checker 5840 comparisons, zero mismatches |
-| OpenEXRUtil (`ImfImage`, `ImfFlatImage`, `ImfDeepImage`, `ImfCheckFile`) | ✅ | `exr-util` | ✅ independent component/C++ integration and real fixture gates pass |
+| `exrheader` | ✅ | `exr-rs info` | ✅ output byte-identical (`cargo run -p xtask -- parity-header`) |
+| Ten ported command-line tools (`exrcheck`, `exrmaketiled`, `exrmakepreview`, `exrenvmap`, `exrmultipart`, `exrmultiview`, `exrstdattr`, `exrmetrics`, `exrmanifest`, `exr2aces`) | ✅ | `check`, `tile`, `preview`, `envmap`, `multipart`, `multiview`, `attr`, `metrics`, `manifest`, `aces` | ✅ compared with the C++ tools (`cargo run -p xtask -- parity-tools`) |
+| OpenEXRUtil (`ImfImage`, `ImfFlatImage`, `ImfDeepImage`, `ImfCheckFile`) | ✅ | `exr-util` | ✅ |
 | Native code | C / C++ | Rust; `unsafe` only in `deflate-rs` SIMD and `codec-simd`, none in `exr-core` | ✅ no FFI |
 | GPU upload, GPU viewer, Cryptomatte encode | — | `exr-gpu`, `exr-view`, `cryptomatte` | ➕ beyond OpenEXR |
 
@@ -251,15 +256,16 @@ flowchart LR
 
 | Gate | Result |
 |---|---|
-| `cargo xtask parity-exr`: 108 tests against real C++ OpenEXR 3.4.15, both directions | ✅ 108/108 |
-| `cargo xtask parity`: Imath goldens | ✅ bit-exact / within ULP |
-| `cargo xtask parity-deflate`: libdeflate | ✅ byte-identical |
-| `cargo xtask parity-header`: `exr-rs info` vs `exrheader` | ✅ byte-identical |
+| `cargo run -p xtask -- parity-exr`: 108 tests against real C++ OpenEXR 3.4.15, both directions | ✅ 108/108 |
+| `cargo run -p xtask -- parity`: Imath goldens | ✅ bit-exact / within ULP |
+| `cargo run -p xtask -- parity-deflate`: libdeflate | ✅ byte-identical |
+| `cargo run -p xtask -- parity-header`: `exr-rs info` vs `exrheader` | ✅ byte-identical |
 | Corpus runner over OpenEXR's own test images | ✅ no panics; lossless files round-trip bit-exact |
 | Official OpenEXR Python tests (vendored) against `openexr-py` | ✅ |
-| `exr-view` tests, including GPU render and present-pass tests | ✅ 129 |
+| `exr-view` tests, including GPU render and present-pass tests | ✅ |
 
-`python bootstrap.py t` runs all of it: cargo tests, the three oracle gates and pytest. The
+`python bootstrap.py t` runs cargo tests, clippy, the `parity`, `parity-deflate` and `parity-exr`
+oracle gates and pytest; `parity-header` and `parity-tools` run on their own. The
 tests on real images (the corpus, OpenEXR's and openexr-images' files, the Cryptomatte samples)
 read a separate image set and are off by default: a plain `cargo test` lists them as ignored,
 `--features test-data` (which the gate turns on) runs them. A missing C++ oracle fails the gate;
@@ -289,14 +295,13 @@ flowchart LR
     present --> scrgb["scRGB"]
 ```
 
-- **Resident and file-backed display.** Images up to 8192 pixels per dimension can use a
-  reused resident GPU source and selected-level area mean, subject to device limits,
-  actual VRAM/canvas/scope/transition budgets and supported source profiles. Exceptional
-  f32 data falls back to CPU f64 tiles. Other images retain the bounded 512-pixel pyramid;
+- **Resident and file-backed display.** Images up to 8192 pixels per dimension can stay
+  resident on the GPU and be reduced there, within device limits, memory budgets and the
+  supported source formats; exceptional f32 data falls back to CPU f64 tiles. Other images retain the bounded 512-pixel pyramid;
   files larger than RAM are read band by band, and matching file mip levels are reused.
 - **Sequences.** `name.####.exr` detection, playback with a playhead-ranked frame cache, scrubbing,
-  reverse play, and reload when frames change on disk. The accepted GPU frame stays
-  visible until its replacement pixels are drawable, preventing blank playback transitions.
+  reverse play, and reload when frames change on disk. The current frame stays visible until
+  its replacement is ready to draw, so playback never flashes blank.
 - **Colour.** Built-in exposure, gamma, channel isolation and tone operators (Reinhard, AgX), or
   a full **OCIO** display/view/look transform (the ACES 2.0 configs built in, or any `.ocio`). The
   GPU result matches a CPU twin within one 8-bit code.
@@ -321,7 +326,7 @@ exr-rs view [--auto] <file|dir|frame>         # the GPU viewer (--auto: detect s
 exr-rs v                                    # start the viewer without a path (also: exr-rs view)
 exr-rs view --help                           # show viewer options (--empty/-e remains optional)
 exr-rs view <file> --screenshot <out.png>     # save the image as the viewer shows it
-exr-rs cryptomatte info|extract|encode ...    # Cryptomatte tools
+exr-rs cryptomatte info|extract|encode|inject  # Cryptomatte tools
 ```
 
 Commands without arguments show help and common examples. Every tool has a visible
@@ -348,17 +353,11 @@ for (name, data) in img.channels() {
 img.write("out.exr", exr_core::attr::Compression::Zip)?;
 ```
 
-Deep, multipart and subsampled files use the low-level readers (`MultiPartInputFile`,
-`DeepScanLineInputFile`, `RgbaInputFile`, ...); the `Image` facade returns a structured
-`Unsupported` error that names the right one.
-
-For low-level deep reads, the sample heap starts at the first **requested** scanline or
-tile rectangle. Counts follow the configured count slice, but samples do not reserve a
-prefix for unrequested rows or tiles. If successive requests populate one larger heap,
-update each channel slice's `base_offset` to its intended destination before each read.
-For tiled reads, channel tile-coordinate flags restart the heap within that tile along
-the selected axis; count-slice flags select count storage independently. These rules
-also apply to nonzero data windows and multipart readers; writer domains are unchanged.
+Deep and multipart files use the low-level readers (`MultiPartInputFile`,
+`DeepScanLineInputFile`, ...); the `Image` facade returns a structured `Unsupported` error
+that names the right one. `Image::read_all` keeps tiling, every MIP/RIP level and subsampled
+channels as stored; `RgbaInputFile` reconstructs luminance-chroma files as RGBA. See the
+[library guide](https://ssoj13.github.io/exr-rs/user-guide/library.html).
 
 Into GPU memory:
 
@@ -396,18 +395,18 @@ the legacy `InputFile` / `OutputFile` API, the companion `Imath` module, and
 Stable Rust **1.96+**, edition 2024 (the viewer's OCIO sets the MSRV).
 
 ```sh
-cargo build --release          # everything, no system libraries
+cargo build --release          # the exr-rs binary (CLI + viewer), no system libraries
 python bootstrap.py b          # the exr-rs binary (release; -d for debug)
 python bootstrap.py b p        # the OpenEXR Python wheel via maturin
-python bootstrap.py t          # the full gate: tests, oracles, pytest
+python bootstrap.py t          # the full gate: tests, clippy, oracles, pytest
 python bootstrap.py c          # clippy -D warnings
 ```
 
-The C/C++ oracle gates (`cargo xtask parity-exr`, `parity`, `parity-deflate`) build the
-reference libraries from vcpkg, with the MSVC environment detected by `vcv-rs`. Set
-`VCPKG_INSTALLED` to an `installed/<triplet>` directory, or let them pick the first
-`x64-windows*` triplet under `$VCPKG_ROOT/installed`. They run on Windows; elsewhere the committed
-goldens still run under `cargo test`.
+The C/C++ oracle gates (`cargo run -p xtask -- parity-exr`, `parity`, `parity-deflate`) compile
+small oracles against the vcpkg-installed reference libraries, with the MSVC environment detected
+by `vcv-rs`. They run on Windows; elsewhere the committed goldens still run under `cargo test`.
+Setup (`VCPKG_INSTALLED`, triplets) is in the guide's
+[Parity and testing](https://ssoj13.github.io/exr-rs/developer-guide/parity.html) page.
 
 The user and developer guide is an [mdBook](https://rust-lang.github.io/mdBook/), online at
 <https://ssoj13.github.io/exr-rs/> (locally: `mdbook serve docs/book`). See also [`CHANGELOG.md`](CHANGELOG.md)
@@ -417,7 +416,6 @@ and [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md).
 
 ## Roadmap
 
-- Viewer: out-of-core tiled display for 16k-65k images.
 - Performance: quiet-machine CPU measurements against C++ 3.4.15, further SIMD where profiling
   shows a dominant kernel (`apply_lut`), the remaining OpenJPH allocation work.
 - HDR / OCIO follow-ups in the viewer.

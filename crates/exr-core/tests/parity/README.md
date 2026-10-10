@@ -7,12 +7,9 @@ consume the exact same bytes/pixels/samples as a real C++ OpenEXR (the vcpkg
 
 ## Status
 
-`parity_exr.rs` has **102 tests; all pass** against OpenEXR 3.4.15 (vcpkg
+`parity_exr.rs` has **108 tests; all pass** against OpenEXR 3.4.15 (vcpkg
 `x64-windows-static-release`, which links OpenJPH 0.31.0 and libdeflate 1.26).
-
-Enlarging the KNOWN image (67x43, tiled 68x44) turned eight tests red: DWAA/DWAB
-encode and tiled decode, and HTJ2K256/32 encode. None of them were regressions. The old 7x5
-image stored those codecs' chunks raw, so the codecs had never run. All eight are closed:
+Two codecs need a matching C++ build for byte identity:
 
 - **DWA**: the MSVC-x64 oracle compiles OpenEXR's **SSE2** DCT bodies and runs them (AVX is
   never detected without GCC inline asm). They sum floats in a different order than the scalar
@@ -42,7 +39,7 @@ This (Windows + vcpkg only):
 2. Compiles `oracle.cpp` with `cl` (`/EHsc /std:c++17`, CRT `/MD` or `/MT` per
    triplet), linking the OpenEXR / Iex / IlmThread / Imath libraries found in the
    triplet's `lib/` (static triplets add OpenEXRCore, openjph, and libdeflate).
-3. Runs `oracle.exe write golden.exr` to regenerate the golden file.
+3. Runs the oracle to regenerate every committed golden and decode dump.
 4. Runs `cargo test -p exr-core --test parity_exr` with `EXR_ORACLE_EXE` pointing
    at the oracle (and, for a DLL triplet, the vcpkg `bin/` on `PATH`).
 
@@ -57,8 +54,7 @@ The vcpkg tree is picked by the shared resolver in `xtask/src/vcpkg.rs`: `VCPKG_
   `xtask parity-exr` built it (`EXR_ORACLE_EXE` still wins). It links vcpkg
   statically on this project's triplet, so it needs no extra `PATH`;
 * if neither is available, those tests **FAIL** rather than printing SKIP and
-  reporting PASSED. 36 of the 84 tests used to be no-ops in a plain
-  `cargo test`. Set `EXR_ALLOW_SKIP=1` to opt out
+  reporting PASSED. Set `EXR_ALLOW_SKIP=1` to opt out
   deliberately — the same variable `imath-rs` and `deflate-rs` use.
 
 ## exrheader gate (`cargo run -p xtask -- parity-header`)
@@ -72,9 +68,8 @@ exrheader has no formatter for are compared as the bare `name (type t)` line).
 ## Committed C++ decode dumps (`golden_*.exr.dump`)
 
 A lossy codec has no source formula to check a decode against, so the only exact
-reference is what a real C++ OpenEXR reader produced from the same bytes. That
-used to require the oracle binary at run time, and 11 tests silently degraded to
-a pixel **count** without it.
+reference is what a real C++ OpenEXR reader produced from the same bytes. Committing
+those decodes lets the lossy checks run without the oracle binary.
 
 `oracle.exe dump <golden> <out>` / `dump-tiled <golden> <out>` therefore write
 C++'s decode as raw planar bytes, and xtask commits one next to each lossy
@@ -126,22 +121,13 @@ directions.
     the 16-bit patterns match on both sides.
 * Header extras: `owner` (string) = `"exr-rs"`, `parityTag` (int) = `31337`.
 
-### Why it is not 7×5 any more
+### Why this size
 
-The original image was 7×5 with no UINT channel and no flat region. That is a
-**single chunk** for every codec and so small that PIZ, DWAA, DWAB and both
-HTJ2K variants could not shrink it, so C++ stored their chunks **raw** — 490 of
-490 bytes. Every test named `ours_<codec>_bytes_byte_identical_to_cpp_golden` or
-`cpp_<codec>_golden_decode_matches_ours` for those five codecs therefore passed
-while exercising only the header and the raw-store rule; the codecs themselves
-had never once been compared with C++. B44 and
-B44A differed by exactly one byte — the compression attribute — so B44A's
-flat-block path never ran either, and there was no UINT pixel data anywhere in
-the gate.
-
-67×43 is multi-chunk for ZIP (16 lines), B44 (4), DWA (32) and PIZ, is not a
+A tiny image is a single chunk that most codecs cannot shrink, so C++ stores it
+**raw** and a byte-identity test would exercise only the header and the raw-store
+rule. 67×43 is multi-chunk for ZIP (16 lines), B44 (4), DWA (32) and PIZ, is not a
 multiple of 4/8/16/32, and compresses. `A` and `Z` are deliberately
-**low-entropy**: with the old `A = idx*0.013` / `Z = idx*100.0` the FLOAT
+**low-entropy**: with a plain `A = idx*0.013` / `Z = idx*100.0` the FLOAT
 channels' low mantissa bytes were effectively random, PIZ (which wavelets
 16-bit words) could not beat its own Huffman table, and the tail chunk was
 still stored raw. Real EXR float channels are smooth, so this is more
@@ -175,9 +161,7 @@ The oracle also speaks `Imf::TiledOutputFile` / `Imf::TiledInputFile`:
 ### The KNOWN tiled image (defined identically in `oracle.cpp` and `parity_exr.rs`)
 
 * **68×44, tile 32×32** → 3×2 tiles at level 0 (partial right + bottom tiles).
-  It was 20×15 with 8×8 tiles, which is too little data per tile for PIZ or DWAB
-  to shrink one — `golden_tiled_piz_one.exr` was byte-for-byte the size of the
-  uncompressed golden because every tile was stored raw.
+  Smaller tiles carry too little data for PIZ or DWAB to shrink, and would be stored raw.
 * channels (alphabetical): `A,B,G,R,U,Z`; `R,G,B` = HALF, `A,Z` = FLOAT,
   `U` = UINT.
 * `INCREASING_Y`, `ROUND_DOWN`; `owner`/`parityTag` extras as for scanline.
@@ -198,9 +182,8 @@ NONE/RLE/ZIP/ZIPS/PIZ + B44/B44A/PXR24/DWAA/DWAB at `one`; NONE/ZIP/PIZ at
 `mipmap` (all levels); plus `none_one_offset` (off-origin data window),
 `zip_mipmap_roundup` (**ROUND_UP** level rounding), `zip_one_randomy`
 (**RANDOM_Y** tile order) and `zip_one_decreasing` (**DECREASING_Y**). The last
-three closed gaps where only the attribute BYTE had ever been checked — nothing
-proved our reader derives the right level sizes under ROUND_UP or reads a file
-whose tiles are not stored in increasing-Y order. The KNOWN formula is keyed by
+three check that our reader derives the right level sizes under ROUND_UP and reads
+files whose tiles are not stored in increasing-Y order. The KNOWN formula is keyed by
 pixel position, so it is a valid oracle for a RANDOM_Y file by construction.
 
 `oracle.exe write-tiled <path> <codec> <levelmode> [minX minY] [round=up]
@@ -221,27 +204,6 @@ Like the scanline goldens they are committed so
 * **(b) ours → C++:** our `TiledOutputFile` writes the KNOWN image; the oracle
   `read-tiled` reads it back and we assert tile/level metadata + every pixel —
   bit-exact (lossless) / C++-decode-of-ours == C++-decode-of-golden (lossy).
-
-### Bugs this gate surfaced (real port bugs, fixed/tracked — never masked)
-
-* **ZIPS tiled decompress (FIXED):** `new_tile_compressor` passed the
-  scanline-path `numScanLines` (1 for ZIPS, 16 for ZIP) instead of the tile
-  height. C++ `newTileCompressor` (ImfCompressor.cpp:375-378) passes
-  `numTileLines` for BOTH. ZIP coincidentally worked (16 ≥ tile height 8); ZIPS
-  under-sized the chunk buffer to one line → `InsufficientSpace`. Now both pass
-  `num_tile_lines`.
-* **Tiled-DWAA encode (FIXED, not ignored):** tiled DWAA is the only path using
-  the **DEFLATE** AC-compression strategy (scanline DWAA + all DWAB use
-  STATIC_HUFFMAN — internal_dwa.c:139-142). Two real bugs were found and fixed:
-  (1) the channel-rules wire codes were emitted in the wrong enum order, so C++
-  3.4 mis-classified R/G/B as UNKNOWN and rejected the chunk
-  (`EXR_ERR_CORRUPT_CHUNK`) — fixed in `dwa/channel_rules.rs::scheme_to_u8`,
-  chunk bytes now byte-identical to the C++ golden; (2) `new_tile_compressor`
-  passed a hardcoded 32-line scanline count instead of the tile height, so a
-  tile taller than the 32-row DWA block decoded only 32 rows — fixed to pass
-  `num_tile_lines`. Both directions now pass: `ours_write_tiled_dwaa_one_read_by_cpp`
-  (ours→C++ pixel-exact, part of the 84) and the end-to-end
-  `tiled::input::tests::dwaa_tile_taller_than_dwa_block` (tile 64 > block 32).
 
 ## DEEP gate
 
@@ -288,8 +250,7 @@ goldens so direction (a) runs standalone.
   **ONE_LEVEL and MIPMAP (all levels)**.
 * **(b) ours → C++:** our writers write the KNOWN image; the oracle
   `read-deep-*` reads it back; assert C++ sees every count + sample + metadata
-  exactly — **ONE_LEVEL and MIPMAP (every level)**. Gated on `EXR_ORACLE_EXE`
-  (skip-with-note standalone).
+  exactly — **ONE_LEVEL and MIPMAP (every level)**. Needs the oracle (see "How to run").
 
 ### Deep tiled MIPMAP — how the whole-window flat-heap is cross-checked per level
 
@@ -311,13 +272,6 @@ every level's counts + samples bit-exact (DW=8,DH=6,tile 4 ⇒ levels 8×6, 4×3
 2×1, 1×1). Deep MIPMAP read/write is ALSO covered (count+sample-exact, ALL
 levels) by the **in-crate round-trip tests**; the tiling level math is
 additionally C++-verified by the NON-deep tiled MIPMAP gate.
-
-### Bugs this gate surfaced
-
-None — the deep scanline + deep tiled read/write paths were
-already count+sample-exact against real C++ OpenEXR 3.4 in BOTH directions for
-NONE/RLE/ZIPS, **ONE_LEVEL and MIPMAP (all levels)**, on the first run of this
-gate. Extending the deep-tiled cross-read from ONE_LEVEL to MIPMAP surfaced no port bug: every level round-trips bit-exact vs real C++.
 
 ## MULTIPART gate
 
@@ -374,15 +328,6 @@ committed so direction (a) runs standalone.
   bit-exact vs the KNOWN formula.
 * **(b) ours → C++:** our `MultiPartOutputFile` + the `*OutputPart` wrappers
   write the KNOWN file; the oracle `read-multipart` reads it; assert C++ sees
-  `numParts` + every part's metadata + pixels/counts/samples exactly. Gated on
-  `EXR_ORACLE_EXE` (skip-with-note standalone).
+  `numParts` + every part's metadata + pixels/counts/samples exactly. Needs the
+  oracle (see "How to run").
 * **ours → ours** in-memory multipart round trip (no C++ needed) as a baseline.
-
-### Bugs this gate surfaced
-
-None — the multipart container, the `partNumber`-prefixed chunk seam, the
-typed Part wrappers, and multiView were already byte-correct: the
-MULTI_PART version flag, the empty-header terminator, the per-part chunk offset
-tables, and the leading `partNumber (i32)` chunk prefix all interoperate exactly
-with real C++ OpenEXR 3.4 in BOTH directions on the first run of this gate.
-(`cargo run -p xtask -- parity-exr` → 84 passed; 0 failed.)

@@ -1,7 +1,7 @@
 # exr-rs diagrams
 
 Mermaid diagrams of the current architecture. Every node that names a module, type, or
-function exists in the code (verified 2026-09-22).
+function exists in the code.
 
 ## Crate dependency graph
 
@@ -12,7 +12,9 @@ flowchart TD
     CLI[exr-rs CLI] --> core[exr-core]
     CLI --> crypto[cryptomatte]
     CLI --> imath[imath-rs]
+    CLI --> util[exr-util]
     CLI -->|feature viewer| view[exr-view]
+    util --> core
     py[openexr-py<br/>maturin only] --> core
     py --> imath
     py --> crypto
@@ -26,11 +28,15 @@ flowchart TD
     view --> scanseq([scanseq])
     view --> scancache([scancache])
     view --> winfo([wgpu-info / gpu-info-rs])
+    view --> ocio([vfx-ocio / oiio-rs])
+    view -->|feature ofx| ofx([ofx-rs])
     view -->|UploadLayout sizing only| gpu
     gpu[exr-gpu] --> core
     core --> imath
     core --> deflate[deflate-rs]
     core --> jph([jph-rs])
+    core --> simd([codec-simd])
+    core --> murmur3
     xtask[xtask] --> vcv([vcv-rs])
 ```
 
@@ -42,18 +48,19 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    R["exr_core::read / Image::read_from"] --> H["Header read + Header::sanity_check"]
-    H -->|multipart / deep / subsampled| U["Err(ExrError::Unsupported(kind))"]
-    H --> P["ReadPlan::from_header<br/>window_pixel_count (checked)"]
+    R["exr_core::read / Image::read_from<br/>(Image::read_all keeps levels + sampling)"] --> K["peek_kind<br/>magic + version flags"]
+    K -->|multipart / deep| U["Err(ExrError::Unsupported(kind))"]
+    K --> H["InputFile / TiledInputFile::new<br/>header read + Header::sanity_check_at_open"]
+    H --> P["ReadPlan::new<br/>sample_dims (checked);<br/>subsampled -> Unsupported for read"]
     P --> FB["ReadPlan::frame_buffer<br/>one Slice per channel (native-endian)"]
     FB --> S{"scanline or tiled?"}
     S -->|scanline| SI["scanline::InputFile::read_pixels"]
-    S -->|tiled, level 0| TI["tiled::TiledInputFile::read_tiles"]
+    S -->|tiled| TI["tiled::TiledInputFile::read_tiles<br/>(level 0, or every level)"]
     SI --> D["Compressor::uncompress<br/>(raw when dataSize == unpacked)"]
     TI --> DT["Compressor::uncompress_tile(range)"]
     D --> C["misc::copy_into_frame_buffer<br/>XDR -> native"]
     DT --> C
-    C --> I["ReadPlan::into_image -> Image"]
+    C --> I["ReadPlan::into_planes -> Image"]
 ```
 
 ## Write path (facade)
@@ -61,8 +68,9 @@ flowchart TD
 ```mermaid
 flowchart TD
     W["Image::write / write_with_attrs / write_rgba_file"] --> BH["build_header"]
-    W --> BB["build_write_buffer<br/>encode_plane_native"]
+    W --> BB["Planes::write_buf<br/>native-endian planes + FrameBuffer"]
     BH --> O["scanline::OutputFile::new<br/>magic + version + header + zeroed offset table"]
+    BH -.->|tiling set| TO["TiledOutputFile: every level<br/>(same seam, write_tiles)"]
     BB --> SF["OutputFile::set_frame_buffer(&fb)<br/>stores the LAYOUT only"]
     O --> SF
     SF --> WP["OutputFile::write_pixels(pixels, n)<br/>bytes passed per call, bounds-checked"]
@@ -130,31 +138,29 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    OP["open_path / sequence detection"] --> SC["scancache: decode, playhead demand, held owners"]
+    OP["open_path / sequence detection"] --> SC["scancache: decode, playhead-ranked prefetch"]
     SC --> IB["ImageBackend / current source"]
     IB --> EL{"resident eligibility"}
-    EL -->|eligible ≤8192 + actual budgets| RS["reused RGBA32Float source"]
+    EL -->|eligible ≤8192, within budgets| RS["reused RGBA32Float source"]
     EL -->|fallback| TS["512-pixel pyramid / file bands"]
     RS --> SH["shared GPU display / OCIO transform"]
-    TS --> AT["f16 atlas + accepted draw plan"]
+    TS --> AT["f16 tile atlas + draw plan"]
     AT --> SH
     SH --> CA["extended-sRGB f16 canvas + egui"]
     CA --> PP["present: SDR / PQ / HLG / scRGB"]
-    TS --> RET["retain accepted GPU pixels until replacement drawable"]
+    TS --> RET["keep the current GPU image until its replacement can draw"]
     RS --> RET
     IB --> SP["ensure_linear / GPU scopes"]
 ```
 
-OpenFX-on-tiles has connected processed consumers. The
-published host admission API protects CPU physical owners. Scopes and the viewport
-HUD are registered as accepted-snapshot consumers; App metadata,
-Pixel Info and processed Save view share the accepted owner snapshot.
+The displayed result (with OpenFX effects applied) is one immutable snapshot that the
+scopes, viewport readout, Metadata, Pixel Info and Save view all read.
 
 ## Parity harness flow
 
 ```mermaid
 flowchart TD
-    X["cargo xtask parity-exr / parity / parity-deflate"] --> V["vcv-rs: MSVC env"]
+    X["cargo run -p xtask -- parity-exr / parity / parity-deflate"] --> V["vcv-rs: MSVC env"]
     X --> VP["vcpkg::Vcpkg::resolve(probe header)<br/>VCPKG_INSTALLED or first x64-windows* triplet"]
     VP --> L["static or DLL: CRT /MT or /MD,<br/>lib names, run_path"]
     V --> CL["cl oracle.cpp / oracle.c"]

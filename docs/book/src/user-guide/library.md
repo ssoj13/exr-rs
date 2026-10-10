@@ -5,8 +5,8 @@ the **low-level readers/writers** for everything else.
 
 ## The facade
 
-`exr_core::read` / `Image::write` handle single-part, full-resolution, flat-channel
-files — the common case.
+`exr_core::read` / `Image::read_all` / `Image::write` handle single-part flat
+(non-deep) files — the common case.
 
 ```rust
 use exr_core::{read, ChannelData};
@@ -29,7 +29,11 @@ img.write("out.exr", Compression::Zip)?;
 
 `Image` holds the data/display windows, the compression and line order, and an
 ordered map of channel name → typed pixel plane (row-major over the data window).
-Tiled files are read at level 0; the facade always writes scanline files.
+`read` returns level 0 of a tiled file as one flat raster and rejects subsampled
+channels. `Image::read_all` reads the file as stored: tile description, every
+MIP/RIP level, and subsampled channels at their native sampling. `Image::write`
+writes scanline, or tiled with every level when a tiling is set
+(`Image::set_tiling`), so `read_all` + `write` keeps the storage shape.
 
 Related helpers: `Image::write_with_attrs` (extra header attributes),
 `exr_core::write_rgba_file` (quick RGBA write), and the `chunk` module
@@ -52,9 +56,14 @@ borrowed/owned stream holder. Dropping a writer is not a successful finish signa
 The `new_owned` constructors retain owned streams through the same implementation.
 Multipart part views reuse persisted per-part state instead of rebuilding writers.
 
-Deep readers first expose sample counts. Size channel heaps for the requested
-row/tile rectangle before reading samples; when writing into a larger reusable
-heap, adjust the slice base offset for that requested region.
+Deep readers first expose sample counts; size the channel heaps from them before
+reading samples. The sample heap starts at the first **requested** scanline or tile
+rectangle: samples do not reserve a prefix for unrequested rows or tiles, while counts
+follow the configured count slice. If successive requests fill one larger heap, set
+each channel slice's `base_offset` to its destination before each read. For tiled
+reads, channel tile-coordinate flags restart the heap within that tile along the
+selected axis; count-slice flags select count storage independently. These rules also
+apply to nonzero data windows and multipart readers.
 
 ## Channel layers (Nuke-style)
 
@@ -63,8 +72,8 @@ ported `ChannelList` exposes `layers()` and `channels_in_layer()` to group them.
 
 ## Low-level readers
 
-The facade returns `ExrError::Unsupported(kind)` for files it does not model — deep,
-multipart, and subsampled. `kind` is the structured `exr_core::Unsupported`
+The facade returns `ExrError::Unsupported(kind)` for files it does not model — deep
+and multipart (and, for `read`, subsampled). `kind` is the structured `exr_core::Unsupported`
 (`Multipart` / `Deep` / `Subsampled`; `exr_core::classify_unsupported` extracts it), and
 the error message names the reader to use instead — branch on the kind, not the text:
 
@@ -73,10 +82,10 @@ the error message names the reader to use instead — branch on the kind, not th
 | Multipart | `MultiPartInputFile` (per-part `input_part` / `tiled_input_part` / `deep_*_input_part`) |
 | Deep scanline / tiled | `DeepScanLineInputFile` / `DeepTiledInputFile` |
 | Subsampled (luminance-chroma) | `rgba::RgbaInputFile` — reconstructs full-resolution RGBA |
-| Arbitrary subsampled planes | the low-level `FrameBuffer` + `scanline::InputFile` / `TiledInputFile` |
+| Arbitrary subsampled planes | `Image::read_all`, or the low-level `FrameBuffer` + `scanline::InputFile` / `TiledInputFile` |
 
-The flat `Image` model cannot represent N independent parts, variable per-pixel
-sample counts, or mixed-resolution channels — hence the split. The low-level readers
+The flat `Image` model cannot represent N independent parts or variable per-pixel
+sample counts — hence the split. The low-level readers
 expose these file shapes; covered cases are checked against the C++ oracle.
 
 ### Luminance-chroma example
