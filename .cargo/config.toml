@@ -1,0 +1,4 @@
+# The standard xtask alias: `cargo xtask <cmd>` runs the repo's `xtask` crate (the C/C++
+# oracle gates: parity, parity-exr, parity-deflate, parity-header, parity-tools, setup).
+[alias]
+xtask = "run --package xtask --"
