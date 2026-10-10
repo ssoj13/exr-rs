@@ -22,7 +22,7 @@ rayon = "1"
 smallvec = "1"
 # Logging facade (libraries) + env_logger backend (binaries only). The `log`
 # crate is a zero-cost facade: members emit `log::{info,debug,trace,warn,error}`
-# and pick NO backend; only the two binaries (`exr-rs` CLI + `exr-view`) init
+# and pick NO backend; only the one binary (`exr-rs`, whose `view` runs the viewer) inits
 # `env_logger`. This keeps the libraries (exr-core, scanseq) lean.
 log = "0.4"
 env_logger = "0.11"
