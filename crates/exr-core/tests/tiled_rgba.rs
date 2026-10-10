@@ -1,5 +1,5 @@
 //! Integration tests for the tiled RGBA path (`TiledRgbaInputFile`/
-//! `TiledRgbaOutputFile`, W3.6(b)).
+//! `TiledRgbaOutputFile`).
 //!
 //! `golden_tiled_rgba.exr` / `golden_tiled_rgba_grey.exr` are written by the
 //! real C++ `TiledRgbaOutputFile` (`oracle.cpp`'s `write-tiled-rgba` mode),

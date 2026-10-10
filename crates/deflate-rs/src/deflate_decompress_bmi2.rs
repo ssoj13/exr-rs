@@ -1,4 +1,4 @@
-//! BMI2 runtime-dispatch instantiation of the DEFLATE decompressor (F3, plan4).
+//! BMI2 runtime-dispatch instantiation of the DEFLATE decompressor.
 //! <https://github.com/ebiggers/libdeflate/blob/v1.26/lib/x86/decompress_impl.h>
 //!
 //! # What C does
@@ -39,7 +39,7 @@
 //! module recompiles it, it does not reimplement it.
 //!
 //! # Unsafe surface
-//! The `unsafe fn` here is the ENTIRE unsafe surface of F3: its only
+//! The `unsafe fn` here is the ENTIRE unsafe surface of the BMI2 dispatch: its only
 //! obligation, per `#[target_feature]`'s safety contract, is that the CPU
 //! actually supports BMI2 wherever this function runs. That is verified by
 //! the caller (`deflate_decompress_dispatch` in `deflate_decompress.rs`) via

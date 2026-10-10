@@ -215,7 +215,7 @@ impl AttrValue for PreviewImage {
                 "Mismatch between Preview Image Attribute size and dimensions".into(),
             ));
         }
-        // C-22: C++ 3.4 core `extract_attr_preview` additionally rejects a
+        // C++ 3.4 core `extract_attr_preview` additionally rejects a
         // 0x0 (zero-byte) preview outright (`bytes == 0` ->
         // `EXR_ERR_ATTR_SIZE_MISMATCH`), which the non-strict header reader
         // then drops. 3.3.11 `PreviewImageAttribute::readValueFrom` accepted
@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(PreviewImage::static_type_name(), "preview");
     }
 
-    /// C-18 (team-lead follow-up): `PreviewImage::new`'s dimension check must
+    /// `PreviewImage::new`'s dimension check must
     /// route through `checked_arithmetic` (`uiMult`/`checkArraySize`,
     /// `ImfPreviewImage.cpp`), giving `ExrError::Overflow`, not `Arg`.
     #[test]
@@ -321,7 +321,7 @@ mod tests {
         }
     }
 
-    /// C-22 — a 0x0 preview is rejected outright, matching C++ 3.4 core
+    /// A 0x0 preview is rejected outright, matching C++ 3.4 core
     /// `extract_attr_preview` (`bytes == 0` -> `EXR_ERR_ATTR_SIZE_MISMATCH`).
     #[test]
     fn read_value_rejects_zero_by_zero_preview() {
@@ -395,7 +395,7 @@ mod tests {
         assert!(PreviewImage::read_value(&mut i, size, 0).is_err());
     }
 
-    // CORE-IO-02: a header declaring a ~2 GiB preview (dimensions consistent with
+    // A header declaring a ~2 GiB preview (dimensions consistent with
     // `size`, but no pixel bytes present) must error via the remaining-bytes /
     // fallible-reservation guard rather than reserve 500M pixels and abort.
     #[test]

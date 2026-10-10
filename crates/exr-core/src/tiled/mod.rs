@@ -13,8 +13,8 @@
 //!   `u64` file offsets, with read/write/reconstruct and bounds-checked accessors.
 //!
 //! The tiled **writer** ([`output::TiledOutputFile`], `ImfTiledOutputFile`) is
-//! implemented (W6-2) and the tiled **reader**
-//! ([`input::TiledInputFile`], `ImfTiledInputFile`) is implemented (W6-3); the
+//! implemented and the tiled **reader**
+//! ([`input::TiledInputFile`], `ImfTiledInputFile`) is implemented; the
 //! reader round-trips the writer pixel-exact.
 //!
 //! Port target (pinned tag v3.3.11):

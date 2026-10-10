@@ -2,9 +2,8 @@
 //!
 //! Foundation crate for `exr-core`. Port target (pinned at Imath `v3.2.0`):
 //! <https://github.com/AcademySoftwareFoundation/Imath/tree/v3.2.0/src/Imath>.
-//! See this crate's `CLAUDE.md` (history: `docs/history/plans/`).
 //!
-//! # Module ⟷ header mapping (Wave 1a — foundation)
+//! # Module ⟷ header mapping (foundation)
 //! Each module is a 1:1 port of one C++ header:
 //! - [`platform`] ← `ImathPlatform.h`
 //! - [`traits`]   ← `ImathTypeTraits.h`
@@ -12,24 +11,24 @@
 //! - [`fun`]      ← `ImathFun.h` + `ImathFun.cpp`
 //! - [`roots`]    ← `ImathRoots.h`
 //!
-//! # Module ⟷ header mapping (Wave 1b — half)
+//! # Module ⟷ header mapping (half)
 //! - [`half`] ← `half.h` + `half.cpp` (the `Half` type), with submodules
 //!   `half::limits` ← `halfLimits.h`, `half::function` ← `halfFunction.h`, and
 //!   `half::to_float` ← `toFloat.h` / `toFloat.cpp` (the half↔f32 implementation).
 //!
-//! # Module ⟷ header mapping (Wave 2 — vectors)
+//! # Module ⟷ header mapping (vectors)
 //! - [`vec`]      ← `ImathVec.h` (the `Vec2`/`Vec3`/`Vec4` types + typedefs), split
 //!   into `vec::vec2`, `vec::vec3`, `vec::vec4`.
 //! - [`vec_algo`] ← `ImathVecAlgo.h` (`project`, `orthogonal`, `reflect`,
 //!   `closest_vertex`).
 //!
-//! # Module ⟷ header mapping (Wave 3b — matrices)
+//! # Module ⟷ header mapping (matrices)
 //! - [`matrix`] ← `ImathMatrix.h` (the `Matrix22`/`Matrix33`/`Matrix44` types +
 //!   typedefs), split into `matrix::matrix22`, `matrix::matrix33`,
 //!   `matrix::matrix44`.
 //!
-//! Later waves add `box`, `color`, etc. — not declared here so the
-//! build stays green until they land.
+//! The remaining modules (`box_`, `color`, `random`, `frustum`, …) are
+//! declared below with the C++ headers they port.
 //!
 //! # Headers with no portable logic (mapped to Rust language features, not skipped)
 //! These C++ headers carry only namespace/export/compatibility machinery; there is
@@ -49,32 +48,31 @@
 //!   No module is created.
 //!
 //! Two further headers (`ImathGL.h`, `ImathGLU.h`) are justified exclusions (pure
-//! OpenGL FFI wrappers, forbidden by the project no-FFI rule) — see this directory's
-//! `CLAUDE.md`. They are out of scope for this wave regardless.
+//! OpenGL FFI wrappers, forbidden by the project no-FFI rule).
 
 // imath-rs is pure math: no SIMD, no FFI, no raw pointers. The "zero unsafe"
-// invariant in CLAUDE.md is enforced by the compiler here rather than by review.
+// invariant is enforced by the compiler here rather than by review.
 #![forbid(unsafe_code)]
 
-// Wave 6 module (random — Rand32/Rand48/sphere)
+// random — Rand32/Rand48/sphere
 pub mod random;
 
-// Wave 5b modules (box/interval/line/frame) — added here
+// box/interval/line/frame
 // Note: `box` is a Rust keyword; the module is named `box_`.
 pub mod box_;
 pub mod frame;
 pub mod interval;
 pub mod line;
 
-// Wave 5c-a modules (plane/line_algo/sphere)
+// plane/line_algo/sphere
 pub mod line_algo;
 pub mod plane;
 pub mod sphere;
 
-// Wave 5c-b module (box_algo)
+// box_algo
 pub mod box_algo;
 
-// Wave 5d modules (frustum / frustum_test)
+// frustum / frustum_test
 pub mod frustum;
 pub mod frustum_test;
 

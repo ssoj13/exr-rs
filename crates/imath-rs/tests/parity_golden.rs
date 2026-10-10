@@ -1,4 +1,4 @@
-//! Wave 7 — C++ Imath golden-parity test for `imath-rs`.
+//! C++ Imath golden-parity test for `imath-rs`.
 //!
 //! Reads the committed `tests/parity/golden.txt` (produced by the C++ Imath
 //! oracle via `cargo xtask parity`), recomputes the SAME operations with

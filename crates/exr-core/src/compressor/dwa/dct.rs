@@ -17,8 +17,8 @@
 //! host apparently doesn't). SSE2 is mathematically equivalent to the "scalar"
 //! formulation this file used to port (same DCT, same coefficients) but
 //! groups the additions differently — since float addition is not
-//! associative, that changes the last bit of some results (`W2b.1`/`W2b.2`,
-//! found by `audit-dwa-htj2k`, confirmed against the source below). Every
+//! associative, that changes the last bit of some results (confirmed against
+//! the source below). Every
 //! grouping and pass order here matches the SSE2 body exactly, not the
 //! textbook/scalar butterfly a hand-derivation would produce.
 //!
@@ -57,8 +57,8 @@ pub const BLOCK_ELEMENTS: usize = BLOCK_SIZE * BLOCK_SIZE;
 // `dctForward8x8` (`internal_dwa_simd.h`): `c4 = cos(pi*4/16)` and the
 // pre-multiplied half-cosines `cN/2`.  They MUST be byte-for-byte these values —
 // recomputing `0.5 * cos(...)` at run time rounds differently and diverges from
-// C++ by 1 ULP in some quantized coefficients (W6-4b: the tiled-DWAA pixel-parity
-// miss at the block boundary).
+// C++ by 1 ULP in some quantized coefficients (observed as a tiled-DWAA
+// pixel-parity miss at the block boundary).
 //
 // These literals carry more digits than an `f32` can represent, but they are the
 // EXACT bytes from the C++ source; `excessive_precision`/`approx_constant` are

@@ -50,11 +50,11 @@ use crate::io::MemOStream;
 /// Attribute*>`), so applying these to a header reproduces the source file's
 /// attribute order on the wire.
 ///
-/// C-08 (closed): keyed by [`Name`] (raw bytes), not `String` — a non-UTF-8
+/// Keyed by [`Name`] (raw bytes), not `String` — a non-UTF-8
 /// attribute name (however unlikely on a real *attribute*, as opposed to
 /// *channel*, identifier) is carried byte-exact through `Image::read` →
 /// `Image::write` instead of being silently dropped, matching this crate's
-/// own no-silent-fallback rule (root `CLAUDE.md`) rather than a C++ citation
+/// own no-silent-fallback rule rather than a C++ citation
 /// — `ImageAttributes` itself has no C++ counterpart to cite.
 ///
 /// See the module docs for what is and is not carried.
@@ -93,7 +93,7 @@ impl ImageAttributes {
 
     /// Whether `name` is one of the [`Self::DERIVED`] names.
     ///
-    /// C-08: generic over `K: AsRef<[u8]>` so both a `&str` literal (every
+    /// Generic over `K: AsRef<[u8]>` so both a `&str` literal (every
     /// existing call site) and a raw [`Name`]/`&[u8]` work; every entry in
     /// [`Self::DERIVED`] is ASCII, so a non-UTF-8 `name` simply can never
     /// match one and is correctly "not derived".

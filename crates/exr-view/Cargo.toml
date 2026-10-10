@@ -7,11 +7,7 @@
 # tile-atlas layers — only the 2-D image window.
 #
 # wgpu is MANDATORY (always-on), NOT an optional feature — the viewer is
-# wgpu-only by operator mandate (max GPU processing, no CPU fallback path).
-#
-# VW-1 (this wave): de-risk the dependency stack + stand up an empty docked
-# window that COMPILES and runs. Later waves add the flat image viewport,
-# sequence playback, and scopes (see CLAUDE.md / PLAYER_plan.md).
+# wgpu-only by design (max GPU processing, no CPU fallback path).
 # =============================================================================
 
 [package]
@@ -27,7 +23,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# Workspace EXR codecs — the load seam dogfoods these (wired now, used by VW-2+).
+# Workspace EXR codecs — the load seam dogfoods these.
 exr-core = { path = "../exr-core" }
 # The GPU bridge. The viewer keeps its OWN persistent display textures (exr-gpu
 # creates a fresh texture per upload, which is exactly the VRAM churn `DisplayGpu`
@@ -39,7 +35,7 @@ imath-rs = { path = "../imath-rs" }
 rayon.workspace = true
 cryptomatte = { path = "../cryptomatte" }
 
-# Sequence detector — the operator's own scanseq-rs, consumed from github as
+# Sequence detector — scanseq-rs, consumed from github as
 # the single source of truth (no longer vendored under `crates/scanseq`).
 # Replaces the hand-rolled `sequence.rs`; fixes the unpadded
 # `heart.N.exr` -> `heart.006.exr` mis-detection. `default-features = false`

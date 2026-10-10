@@ -1,5 +1,5 @@
 //! Port of the structured `IDManifest`/`ChannelGroupManifest` model —
-//! `ImfIDManifest.h`'s class declarations (C-15).
+//! `ImfIDManifest.h`'s class declarations.
 //!
 //! # Rust idiom vs. C++ 1:1
 //! C++ exposes `ChannelGroupManifest::{Iterator,ConstIterator}` classes and

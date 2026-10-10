@@ -5,8 +5,8 @@
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.3.11/src/lib/OpenEXR/ImfDeepTiledOutputFile.cpp>
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.3.11/src/lib/OpenEXR/ImfDeepTiledOutputFile.h>
 //!
-//! This fuses Phase 6 tiling ([`crate::tiled`] `TileOffsets`/`TiledMisc`) with
-//! the W7-2 deep "count then data" chunk machinery
+//! This fuses tiling ([`crate::tiled`] `TileOffsets`/`TiledMisc`) with
+//! the deep "count then data" chunk machinery
 //! ([`crate::deep::scanline_output`]) over a tile rectangle.
 //!
 //! # The deep tiled chunk byte layout (confirmed from `writeTileData`)
@@ -81,20 +81,6 @@
 //! this port back-patches each tile's offset into the reserved table slot
 //! immediately after the chunk is written ([`TileOffsets::slot_index`] →
 //! seek-back `u64` LE → seek-forward), so the file is valid without `Drop`.
-//!
-//! # What this Wave (W7-4a) intentionally does NOT cover (tracked, not faked)
-//!
-//! * **Reading back** — `DeepTiledInputFile` is W7-4b.  This module is verified
-//!   structurally (re-parsing the bytes it writes).
-//! * **Multipart** output (`partNumber` chunk prefix), `copyPixels`,
-//!   `updatePreviewImage`, `breakTile`, threading
-//!   (`ThreadPool`/`TileBufferTask`).  The single-threaded gather here is
-//!   observationally identical for the bytes it produces.
-//! * The `INCREASING_Y`/`DECREASING_Y` `tileMap` buffering that reorders the
-//!   *physical* bytes of equivalent files — exactly as
-//!   [`crate::tiled::TiledOutputFile`] documents, the offset table makes every
-//!   tile seekable regardless, and `write_tiles` still walks the rectangle in
-//!   the file's line order so whole-level-in-order writes match C++.
 
 use crate::attr::tile_description::{LevelMode, LevelRoundingMode, TileDescription};
 use crate::attr::{LineOrder, PixelType};
@@ -166,19 +152,18 @@ struct TOutSliceInfo {
 
 /// A buffered (not-yet-written) deep tile's already-gathered-and-compressed
 /// chunk payload: `(packed_count_table, packed_data, unpacked_data_size)` —
-/// D-11's `tile_map` value type, factored out to keep the struct field type
+/// the `tile_map` value type, factored out to keep the struct field type
 /// simple (clippy `type_complexity`).
 type BufferedDeepTile = (Vec<u8>, Vec<u8>, u64);
 
 /// Source of raw (never decompressed) deep tile chunks for
 /// [`DeepTiledOutputFile::copy_pixels`] / [`DeepTiledOutputFileState::copy_pixels`]
-/// -- D-13, one impl per C++ `copyPixels` overload's source type
+/// -- one impl per C++ `copyPixels` overload's source type
 /// (`DeepTiledInputFile`, `DeepTiledInputPart`).
 ///
 /// Duck-typed (no lifetime parameter, no "hand back the owned concrete
-/// reader" method), mirroring `crate::tiled::output::TiledCopySource`'s OWN
-/// mid-round-4 redesign for the exact same reason: a borrowing S-16
-/// part-reader view (`DeepTiledInputPartReader`) never owns a concrete
+/// reader" method), like `crate::tiled::output::TiledCopySource`, for the
+/// same reason: a borrowing multipart part-reader view (`DeepTiledInputPartReader`) never owns a concrete
 /// `DeepTiledInputFile` to hand back. Implemented directly for
 /// [`DeepTiledInputFile`] here; `multipart::part::DeepTiledInputPart`
 /// implements it in `multipart/part.rs`.
@@ -227,32 +212,30 @@ pub struct DeepTiledOutputFile<'a> {
     /// Borrowed output stream (the C++ `_streamData->os`).
     stream: &'a mut dyn OStream,
 
-    /// Everything else this writer owns — the S-16 "ownership inversion"
-    /// design (round 4, `.bughunt/round4.md`, mirroring
+    /// Everything else this writer owns (mirroring
     /// `crate::tiled::output::TiledOutputFileState`): factored into its own,
     /// stream-free struct so [`crate::multipart::MultiPartOutputFile`] can
     /// persist it across separate [`crate::multipart::MultiPartOutputFile::
     /// deep_tiled_output_part`] calls instead of rebuilding (and silently
-    /// resetting D-11's `tile_map`/`next_tile_to_write`) a fresh writer every
-    /// call. See [`DeepTiledOutputFileState`].
+    /// resetting the `tile_map`/`next_tile_to_write` buffering) a fresh
+    /// writer every call. See [`DeepTiledOutputFileState`].
     state: DeepTiledOutputFileState,
 }
 
 /// Every field of C++ `DeepTiledOutputFile::Data` except the stream — the
-/// writer's **persisted** per-part state (S-16 mirror, round 4 continuation).
+/// writer's **persisted** per-part state.
 ///
-/// `MultiPartOutputFile::deep_tiled_output_part(n)` used to build a
-/// brand-new [`DeepTiledOutputFile`] from the header on EVERY call, silently
-/// resetting D-11's `tile_map`/`next_tile_to_write` out-of-order tile
-/// buffering — C++ instead caches ONE writer object per part
+/// Building a brand-new [`DeepTiledOutputFile`] from the header on every
+/// `MultiPartOutputFile::deep_tiled_output_part(n)` call would silently
+/// reset the `tile_map`/`next_tile_to_write` out-of-order tile buffering —
+/// C++ instead caches ONE writer object per part
 /// (`ImfMultiPartOutputFile.cpp:313-321`) so writes interleaved across parts
 /// resume correctly. Splitting the writer into this pure state struct plus
 /// the stream lets `MultiPartOutputFile` persist a
 /// `Vec<Option<DeepTiledOutputFileState>>` (one slot per deep tiled part,
 /// built on first access) and hand out a borrowing
 /// [`DeepTiledOutputPartWriter`] view instead. The standalone
-/// [`DeepTiledOutputFile`] is unaffected: it just owns one state for its
-/// whole life, same as before this split.
+/// [`DeepTiledOutputFile`] just owns one state for its whole life.
 pub(crate) struct DeepTiledOutputFileState {
     /// The image header (type forced to `deeptile`) — C++ `_data->header`.
     header: Header,
@@ -285,10 +268,10 @@ pub(crate) struct DeepTiledOutputFileState {
     /// `_data->tileOffsetsPosition`.
     tile_offsets_position: u64,
 
-    /// D-11: tiles held because they were written out of the file's line
+    /// Tiles held because they were written out of the file's line
     /// order — C++ `Data::tileMap` (`ImfDeepTiledOutputFile.cpp:280-330`
     /// mirrors the flat writer's `tileMap`/`nextTileToWrite`, see
-    /// `tiled::output`'s own T-13). Each entry is the already-gathered,
+    /// `tiled::output`). Each entry is the already-gathered,
     /// already-compressed `(packed_count, packed_data, unpacked_data_size)`
     /// for one tile, held until every tile before it in line order is on
     /// disk. `RANDOM_Y` never buffers (stays empty).
@@ -308,7 +291,7 @@ pub(crate) struct DeepTiledOutputFileState {
     slices: Vec<TOutSliceInfo>,
 
     /// Sample-count slice geometry — C++'s `sampleCountSliceBase`/`xStride`/
-    /// `yStride`. round4.md "pixel data is passed PER WRITE CALL": this file
+    /// `yStride`. Pixel data is passed per write call: this file
     /// stores only the LAYOUT; the actual count/sample BYTES are passed
     /// fresh to each [`write_tiles`][Self::write_tiles]/`write_tile` call,
     /// never stored.
@@ -325,13 +308,13 @@ pub(crate) struct DeepTiledOutputFileState {
     sample_count_x_tile_coords: bool,
     /// Sample-count slice `yTileCoords` — C++ `sampleCountYTileCoords`.
     sample_count_y_tile_coords: bool,
-    /// D-10 fix: a growable per-row sample-count prefix cache (reset in
+    /// A growable per-row sample-count prefix cache (reset in
     /// `set_frame_buffer`), so `gather_tile`'s per-pixel `samples_before_pixel`
     /// addressing sums each row at most once instead of from scratch on every
     /// pixel of every channel. Deliberately NOT a fixed whole-window eager
     /// build: `set_frame_buffer` allows a sample-count buffer that only
-    /// covers the rows the level currently being written needs (see
-    /// `deep/CLAUDE.md` "Per-level count buffers"), and this cache never
+    /// covers the rows the level currently being written needs (a file is
+    /// written one level at a time), and this cache never
     /// reads a row that isn't actually queried, so a legitimately short
     /// per-level buffer still works — an eager build to the file's global
     /// `max_y` would spuriously fail it.
@@ -364,13 +347,13 @@ pub(crate) struct DeepTiledOutputFileState {
     /// [`new_standalone`](Self::new_standalone) (the real value) or by
     /// [`from_part_with_preview`](Self::from_part_with_preview) (the real
     /// value `MultiPartOutputFile` captured from
-    /// `Header::write_attributes_to`, M-07, round-4 multipart audit); `0`
+    /// `Header::write_attributes_to`); `0`
     /// only via the plain [`from_part`](Self::from_part), used by the public
     /// `DeepTiledOutputFile::from_part` constructor, which does not itself
     /// write any header and so has no real value to supply.
     preview_position: u64,
 
-    /// W3.9 phase B: this file's captured thread count — see
+    /// This file's captured thread count — see
     /// [`crate::threading::ThreadCount`] and the deep scanline writer's
     /// identical field.
     num_threads: crate::threading::ThreadCount,
@@ -399,7 +382,7 @@ impl<'a> DeepTiledOutputFile<'a> {
     }
 
     /// Same as [`Self::new`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::new`]).
+    /// override (`None` behaves exactly like [`Self::new`]).
     pub fn with_num_threads(
         stream: &'a mut dyn OStream,
         header: &Header,
@@ -431,8 +414,7 @@ impl<'a> DeepTiledOutputFile<'a> {
         Self::build(stream, header, part_number, Some(tile_offsets_position), None)
     }
 
-    /// Same as [`Self::from_part`], with an explicit `num_threads` override
-    /// (W3.9 phase B).
+    /// Same as [`Self::from_part`], with an explicit `num_threads` override.
     pub fn from_part_mt(
         stream: &'a mut dyn OStream,
         header: &Header,
@@ -446,7 +428,7 @@ impl<'a> DeepTiledOutputFile<'a> {
     /// Shared constructor body for [`new`](Self::new) (single-part) and
     /// [`from_part`](Self::from_part) (multipart part).
     ///
-    /// S-16: the actual state computation now lives in
+    /// The actual state computation lives in
     /// [`DeepTiledOutputFileState::new_standalone`] /
     /// [`DeepTiledOutputFileState::from_part`] so
     /// [`DeepTiledOutputPartWriter`] (which BORROWS a
@@ -654,7 +636,7 @@ impl<'a> DeepTiledOutputFile<'a> {
     }
 
     /// Quick pixel copy: transcode every tile of `input` straight into this
-    /// file, raw (no decompress/recompress). D-13, see
+    /// file, raw (no decompress/recompress). See
     /// [`DeepTiledOutputFileState::copy_pixels`] for the full doc.
     pub fn copy_pixels<T: DeepTiledCopySource>(&mut self, input: &mut T) -> Result<()> {
         self.state.copy_pixels(self.stream, input)
@@ -664,7 +646,7 @@ impl<'a> DeepTiledOutputFile<'a> {
 // ---------------------------------------------------------------------------
 // DeepTiledOutputFileState — the state-only construction + algorithm, shared
 // by the owning `DeepTiledOutputFile` and the borrowing
-// `DeepTiledOutputPartWriter` (S-16).
+// `DeepTiledOutputPartWriter`.
 // ---------------------------------------------------------------------------
 
 impl DeepTiledOutputFileState {
@@ -674,7 +656,7 @@ impl DeepTiledOutputFileState {
     /// everything C++ `DeepTiledOutputFile::initialize(header)` computes that
     /// does NOT depend on `tile_offsets_position`/`preview_position` (which
     /// the two callers fill in differently). Never touches the stream.
-    /// `num_threads` is the W3.9 phase B per-file override (`None` = capture
+    /// `num_threads` is the per-file override (`None` = capture
     /// the current process-wide default) — see [`crate::threading::ThreadCount`].
     fn compute_mt(
         header: &Header,
@@ -687,7 +669,7 @@ impl DeepTiledOutputFileState {
 
         // --- C++ DeepTiledOutputFile::initialize(header) -------------------
         let mut hdr = header.clone();
-        // D-14 / `ImfDeepTiledOutputFile.cpp:1147-1149`: a part header that
+        // `ImfDeepTiledOutputFile.cpp:1147-1149`: a part header that
         // already declares a different type cannot be forced into deeptile —
         // catch the type-mismatched-part misuse before silently overwriting
         // it below.
@@ -755,7 +737,7 @@ impl DeepTiledOutputFileState {
         // rebuilt per tile in `write_single_tile`.
         let count_compressor = new_compressor(compression, max_sample_count_table_size, &hdr)?;
 
-        // D-11 / T-13 mirror: "the first tile coordinate we will be writing
+        // Mirrors the flat tiled writer: "the first tile coordinate we will be writing
         // if the file is not RANDOM_Y" (`ImfDeepTiledOutputFile.cpp` shares
         // `Data::initialize` with the flat tiled writer's own logic).
         let next_tile_to_write = match line_order {
@@ -817,7 +799,7 @@ impl DeepTiledOutputFileState {
     /// `stream` — port of the C++ `DeepTiledOutputFile` constructor body,
     /// minus the pure state computation shared with
     /// [`from_part`](Self::from_part).
-    /// `num_threads` is the W3.9 phase B per-file override (`None` = capture
+    /// `num_threads` is the per-file override (`None` = capture
     /// the current process-wide default) — see [`crate::threading::ThreadCount`].
     fn new_standalone_mt(
         stream: &mut dyn OStream,
@@ -843,13 +825,13 @@ impl DeepTiledOutputFileState {
     /// only computes the pure per-part state and records where that table
     /// lives. Touches no stream at all — this is what lets
     /// `MultiPartOutputFile` build this state ONCE per part and persist it
-    /// across `deep_tiled_output_part(n)` calls (S-16), including D-11's
-    /// `tile_map`/`next_tile_to_write`. `preview_position` stays `0` (see the
+    /// across `deep_tiled_output_part(n)` calls, including the
+    /// `tile_map`/`next_tile_to_write` buffering. `preview_position` stays `0` (see the
     /// field doc): the public `DeepTiledOutputFile::from_part` constructor
     /// (this function's only OTHER caller besides `MultiPartOutputFile`) does
     /// not itself write any header, so it has no real value to supply.
-    /// `MultiPartOutputFile` calls `from_part_with_preview_mt` instead (M-07,
-    /// round-4 multipart audit). `num_threads` is the W3.9 phase B per-file
+    /// `MultiPartOutputFile` calls `from_part_with_preview_mt` instead.
+    /// `num_threads` is the per-file
     /// override (`None` = capture the current process-wide default).
     pub(crate) fn from_part_mt(
         header: &Header,
@@ -861,7 +843,7 @@ impl DeepTiledOutputFileState {
     }
 
     /// Like [`from_part_mt`](Self::from_part_mt), but additionally records
-    /// `preview_position` — M-07 (round-4 multipart audit): C++
+    /// `preview_position` — C++
     /// `ImfMultiPartOutputFile.cpp:474-477` captures
     /// `parts[i]->previewPosition = headers[i].writeTo(..)` for every part
     /// while writing the header list, so `update_preview_image` works on a
@@ -900,7 +882,7 @@ impl DeepTiledOutputFileState {
 
     /// Replace the header's preview-image pixels and rewrite them in place on
     /// disk — port of `void updatePreviewImage(const PreviewRgba newPixels[])`
-    /// (D-13, `ImfDeepTiledOutputFile.cpp:1730-1757`). Same shape as
+    /// (`ImfDeepTiledOutputFile.cpp:1730-1757`). Same shape as
     /// `tiled::output::TiledOutputFileState::update_preview_image`.
     ///
     /// # Errors
@@ -945,8 +927,8 @@ impl DeepTiledOutputFileState {
 
     /// Overwrite `length` bytes of an already-written tile's chunk, starting
     /// `offset` bytes into it, with the byte `c` — port of `void breakTile(int
-    /// dx, int dy, int lx, int ly, int offset, int length, char c)` (D-13,
-    /// `ImfDeepTiledOutputFile.cpp:1782-1805`; test-only helper for exercising
+    /// dx, int dy, int lx, int ly, int offset, int length, char c)`
+    /// (`ImfDeepTiledOutputFile.cpp:1782-1805`; test-only helper for exercising
     /// corrupt-chunk error paths). Same shape as
     /// `tiled::output::TiledOutputFileState::break_tile`.
     ///
@@ -1168,8 +1150,7 @@ impl DeepTiledOutputFileState {
     /// * [`ExrError::Arg`] when no sample-count slice was set (C++ "Invalid base
     ///   pointer, please set a proper sample count slice.").
     ///
-    /// round4.md "Design decision: writer pixel data is passed PER WRITE
-    /// CALL" (S-12/T-14/deep D-09, revised): this stores only the LAYOUT; it
+    /// Writer pixel data is passed PER WRITE CALL: this stores only the LAYOUT; it
     /// does **not** take or retain the sample-count / sample-data BYTES.
     /// Those are passed to each [`write_tiles`][Self::write_tiles] /
     /// `write_tile` call instead — no stored lifetime, no snapshot, and a
@@ -1204,7 +1185,7 @@ impl DeepTiledOutputFileState {
                 "Invalid base pointer, please set a proper sample count slice.".into(),
             ));
         }
-        // F3: the sample-count byte strides are narrowed usize->i32 for the
+        // The sample-count byte strides are narrowed usize->i32 for the
         // addressing math; a value above i32::MAX would wrap to a bogus/negative
         // stride and mis-address the buffer, so reject it up front.
         if sc_slice.x_stride > i32::MAX as usize || sc_slice.y_stride > i32::MAX as usize {
@@ -1218,7 +1199,7 @@ impl DeepTiledOutputFileState {
         self.sample_count_x_tile_coords = sc_slice.x_tile_coords;
         self.sample_count_y_tile_coords = sc_slice.y_tile_coords;
 
-        // F3: no whole-data-window extent check here (unlike the scanline writer).
+        // No whole-data-window extent check here (unlike the scanline writer).
         // A tiled file is written one LEVEL at a time, and each level may bind its
         // own count buffer that only covers that level's rows (mip level 1 of an
         // 8x6 window reads rows [0, 3), not [0, 6)); a data-window-sized bound would
@@ -1254,7 +1235,7 @@ impl DeepTiledOutputFileState {
             }
         }
 
-        // D-10: reset the per-row prefix cache — a fresh `set_frame_buffer`
+        // Reset the per-row prefix cache — a fresh `set_frame_buffer`
         // call means a (possibly different, possibly level-sized)
         // `sample_counts` buffer, so rows cached from a previous buffer must
         // not be reused.
@@ -1304,9 +1285,9 @@ impl DeepTiledOutputFileState {
                 "No frame buffer specified as pixel data source.".into(),
             ));
         }
-        // round4.md "pixel data is passed PER WRITE CALL": the null-base
-        // check that used to live in `set_frame_buffer` (no buffer bytes
-        // were available there anymore to check).
+        // Pixel data is passed per write call, so the null-base check lives
+        // here rather than in `set_frame_buffer` (which receives no buffer
+        // bytes to check).
         if sample_counts.is_empty() {
             return Err(ExrError::Arg(
                 "Invalid base pointer, please set a proper sample count slice.".into(),
@@ -1347,7 +1328,7 @@ impl DeepTiledOutputFileState {
             dy += dy_step;
         }
 
-        // W3.9 phase B gate: parallel only when there is more than one tile
+        // Parallel only when there is more than one tile
         // AND the captured thread count is `> 1`, mirroring the flat tiled
         // writer and the deep tiled reader's identical gate.
         if coords.len() > 1
@@ -1417,7 +1398,7 @@ impl DeepTiledOutputFileState {
     }
 
     /// Quick pixel copy: transcode every tile of `input` straight into this
-    /// file, RAW (no decompress/recompress) -- D-13, port of the 2 C++
+    /// file, RAW (no decompress/recompress) -- port of the 2 C++
     /// `DeepTiledOutputFile::copyPixels` overloads
     /// (`ImfDeepTiledOutputFile.cpp:1694-1864`).
     ///
@@ -1476,7 +1457,7 @@ impl DeepTiledOutputFileState {
         // C++: size_t numAllTiles = in.totalTiles();
         let num_all_tiles = input.total_tiles()?;
 
-        // `copy_pixels` bypasses D-11's `tile_map` buffering entirely (calls
+        // `copy_pixels` bypasses the `tile_map` buffering entirely (calls
         // `write_tile_chunk_now` directly), exactly like C++'s `copyPixels`
         // calling the low-level `writeTileData` rather than
         // `bufferedTileWrite` -- it already computes tiles strictly in file
@@ -1557,8 +1538,8 @@ impl DeepTiledOutputFileState {
     // record).  Single-threaded; written immediately at the current stream
     // position, so the on-disk order is the call order (RANDOM_Y semantics).
     // -----------------------------------------------------------------------
-    /// The successor of tile coordinate `a` in the file's line order — D-11,
-    /// port of C++ `DeepTiledOutputFile::Data::nextTileCoord`; the walk is the
+    /// The successor of tile coordinate `a` in the file's line order — port
+    /// of C++ `DeepTiledOutputFile::Data::nextTileCoord`; the walk is the
     /// flat writer's, shared as [`TileGeom::next`].
     fn next_tile_coord(&self, a: (i32, i32, i32, i32)) -> Result<(i32, i32, i32, i32)> {
         self.geom().next(a)
@@ -1600,9 +1581,9 @@ impl DeepTiledOutputFileState {
     }
 
     /// Write one already-gathered-and-compressed deep tile chunk to the
-    /// stream NOW and back-patch its offset-table slot — D-11, split out of
+    /// stream NOW and back-patch its offset-table slot — split out of
     /// [`Self::write_single_tile`] (mirrors the flat writer's
-    /// `write_tile_chunk_now`, T-13) so it can be called either immediately
+    /// `write_tile_chunk_now`) so it can be called either immediately
     /// or later, when a buffered tile's turn comes up. Takes the exact
     /// fields it touches rather than `&mut self` so a caller can hold
     /// `packed_count`/`packed_data` borrowed from another field of `self`
@@ -1709,7 +1690,7 @@ impl DeepTiledOutputFileState {
         let table_data_size = tile_w * tile_h * SIZE_INT;
         let mut count_table = Vec::with_capacity(table_data_size);
         for i in tile_range.min.y..=tile_range.max.y {
-            // Collect the row first so `sample_count`'s Result (F3) propagates
+            // Collect the row first so `sample_count`'s Result propagates
             // before it is handed to the count-encoder.
             let row: Vec<u32> = (tile_range.min.x..=tile_range.max.x)
                 .map(|j| self.sample_count(sample_counts, j - x_off_sc, i - y_off_sc))
@@ -1781,14 +1762,14 @@ impl DeepTiledOutputFileState {
         };
         debug_assert!(packed_data.len() as u64 <= unpacked_data_size);
 
-        // --- D-11: bufferedTileWrite — write now, or hold for later --------
+        // --- bufferedTileWrite — write now, or hold for later --------
         self.feed_tile(stream, (dx, dy, lx, ly), packed_count, packed_data, unpacked_data_size)
     }
 
-    /// D-11: write one already-gathered-and-compressed tile chunk now, or
+    /// Write one already-gathered-and-compressed tile chunk now, or
     /// hold it for later if it arrives out of the file's line order — port of
     /// C++ `bufferedTileWrite` (`ImfDeepTiledOutputFile.cpp`, shares the flat
-    /// writer's shape; see `tiled::output`'s own T-13), extracted out of
+    /// writer's shape; see `tiled::output`), extracted out of
     /// [`Self::write_single_tile`] so both the old serial path and
     /// [`Self::write_tiles_parallel`]'s gather+encode-in-parallel /
     /// emit-in-order path share the EXACT same buffering state machine —
@@ -1968,7 +1949,7 @@ impl DeepTiledOutputFileState {
                     let cnt = self.sample_count(sample_counts, x - x_off_sc, y - y_off_sc)?;
                     // Pixel start in the flat per-channel heap (raster order over
                     // the whole data window — see sample_table module docs).
-                    // D-10: O(1) amortized via the growable `RowPrefixCache`
+                    // O(1) amortized via the growable `RowPrefixCache`
                     // instead of re-summing from `(min_x, min_y)` on every
                     // single pixel of every channel.
                     let pixel_start = self.sample_prefix.before_pixel(
@@ -2053,7 +2034,7 @@ impl DeepTiledOutputFileState {
 
         // Serial pre-pass: one shared per-tile `samples_before_pixel` matrix
         // (reused across every channel — see the scope-restriction doc
-        // above), extending the persisted `RowPrefixCache` (D-10) in the
+        // above), extending the persisted `RowPrefixCache` in the
         // SAME row-major order `coords` was built in (dy outer per
         // `write_tiles`' line-order walk, dx inner), which keeps its
         // row-level extension monotonic in `y` — preserving the
@@ -2112,7 +2093,7 @@ impl DeepTiledOutputFileState {
         // `EncodedLine` alias).
         type EncodedTile = (Vec<u8>, Vec<u8>, u64);
 
-        // (alloc audit follow-up, 2026-09-25) Two pools -- count-table
+        // Two pools -- count-table
         // codecs and per-tile data codecs differ in constructor
         // (`new_compressor` vs `new_tile_compressor`) and size, so they
         // must not share one free list. See `gather_and_encode_deep_tile`'s
@@ -2162,8 +2143,8 @@ impl DeepTiledOutputFileState {
 /// worker body for [`DeepTiledOutputFileState::write_tiles_parallel`]. Fuses
 /// what the serial path's `gather_tile` + the inline count-table loop + both
 /// compression steps in [`DeepTiledOutputFileState::write_single_tile`] do.
-/// `count_pool`/`data_pool` are checkout/checkin `CodecPool`s (alloc audit
-/// follow-up, 2026-09-25) -- NEVER `self.count_compressor` (that field
+/// `count_pool`/`data_pool` are checkout/checkin `CodecPool`s -- NEVER
+/// `self.count_compressor` (that field
 /// stays serial-only; sharing it across concurrent tiles would race its
 /// internal buffers). Before `CodecPool` existed this constructed a FRESH
 /// compressor for BOTH codecs on every single call, unconditionally -- the
@@ -2281,8 +2262,8 @@ fn gather_and_encode_deep_tile(
         encode_cumulative_row(row, &mut count_table)?;
     }
 
-    // --- Compress the count table (pooled -- alloc audit follow-up,
-    // 2026-09-25, see `crate::compressor::CodecPool`'s own doc) ---------
+    // --- Compress the count table (pooled -- see
+    // `crate::compressor::CodecPool`'s own doc) ---------
     let mut count_compressor =
         count_pool.lease(|| new_compressor(compression, max_sample_count_table_size, header))?;
     let packed_count: Vec<u8> = {
@@ -2324,13 +2305,13 @@ fn gather_and_encode_deep_tile(
 }
 
 /// A **borrowing** view over one multipart part's persisted deep tiled writer
-/// state — the S-16 "ownership inversion" design mirror (`.bughunt/round4.md`),
-/// same shape as `crate::tiled::output::TiledOutputPartWriter` /
+/// state — the multipart file owns each part's writer state and this view
+/// borrows it, same shape as `crate::tiled::output::TiledOutputPartWriter` /
 /// `crate::deep::scanline_output::DeepScanLineOutputPartWriter`: instead of
 /// [`MultiPartOutputFile::deep_tiled_output_part`](crate::multipart::
 /// MultiPartOutputFile::deep_tiled_output_part) building a brand-new
-/// [`DeepTiledOutputFile`] (and its state — including D-11's `tile_map`/
-/// `next_tile_to_write`) on every call, the container persists one
+/// [`DeepTiledOutputFile`] (and its state — including the `tile_map`/
+/// `next_tile_to_write` buffering) on every call, the container persists one
 /// [`DeepTiledOutputFileState`] per deep tiled part across calls and hands
 /// out this thin view.
 ///
@@ -2529,7 +2510,7 @@ impl<'p> DeepTiledOutputPartWriter<'p> {
     }
 
     /// Quick pixel copy: transcode every tile of `input` straight into this
-    /// file, raw (no decompress/recompress). D-13, see
+    /// file, raw (no decompress/recompress). See
     /// [`DeepTiledOutputFileState::copy_pixels`] for the full doc.
     pub fn copy_pixels<T: DeepTiledCopySource>(&mut self, input: &mut T) -> Result<()> {
         self.state.copy_pixels(self.stream, input)
@@ -2794,8 +2775,8 @@ mod tests {
         verify(&header, &bytes, Compression::NoCompression, &counts, 4);
     }
 
-    /// D-13 — `update_preview_image` and `break_tile` (D-13's "missing API
-    /// surface" list; mirrors `tiled::output`'s own T-15 test).
+    /// `update_preview_image` and `break_tile` (mirrors `tiled::output`'s
+    /// own test of the same pair).
     #[test]
     fn d13_update_preview_image_and_break_tile() {
         use crate::attr::{PreviewImage, PreviewImageAttribute, PreviewRgba};
@@ -2880,7 +2861,7 @@ mod tests {
         );
     }
 
-    /// D-13 — `update_preview_image` on a header with NO preview image must
+    /// `update_preview_image` on a header with NO preview image must
     /// error (`ExrError::Logic`), matching C++'s `LogicExc` throw, instead of
     /// silently no-oping.
     #[test]
@@ -2904,10 +2885,10 @@ mod tests {
         }
     }
 
-    /// D-11: writing tiles out of call order (`write_tile` calls in reverse)
+    /// Writing tiles out of call order (`write_tile` calls in reverse)
     /// must produce a BYTE-IDENTICAL file to writing them in order, for both
     /// `INCREASING_Y` and `DECREASING_Y` — mirrors
-    /// `tiled::output`'s own T-13 test
+    /// `tiled::output`'s own test
     /// (`increasing_y_out_of_order_writes_match_in_order_byte_for_byte`).
     /// ZIPS (not NONE) so a byte-identical result actually proves the
     /// on-disk chunk ORDER matches, not merely that "no compression" makes
@@ -2958,7 +2939,7 @@ mod tests {
         assert_eq!(a, b, "out-of-order write_tile calls must produce byte-identical output");
     }
 
-    /// D-11: a tile still buffered (never flushed because tiles before it in
+    /// A tile still buffered (never flushed because tiles before it in
     /// line order were never written) when the writer is dropped is simply
     /// discarded — its offset-table slot stays 0 — matching C++'s destructor,
     /// which frees `tileMap` without flushing it.
@@ -3004,7 +2985,7 @@ mod tests {
         verify(&header, &bytes, Compression::Zips, &counts, 4);
     }
 
-    /// D-13 — `copy_pixels`: transcode a source deep tiled file into a fresh
+    /// `copy_pixels`: transcode a source deep tiled file into a fresh
     /// writer with a matching header, byte-for-byte, without ever
     /// decompressing. ZIPS (not NONE) so a byte-identical result actually
     /// proves `copy_pixels` never decompresses+recompresses. Both
@@ -3025,7 +3006,7 @@ mod tests {
                 let mut src = DeepTiledOutputFile::new(&mut src_out, &header).unwrap();
                 src.set_frame_buffer(&fb).unwrap();
                 // Arbitrary call order -- RANDOM_Y allows any order;
-                // INCREASING_Y's D-11 buffering makes this in-order on disk
+                // INCREASING_Y's out-of-order tile buffering makes this in-order on disk
                 // regardless of call order.
                 src.write_tile(&sc, &data, 1, 1, 0, 0).unwrap();
                 src.write_tile(&sc, &data, 0, 0, 0, 0).unwrap();
@@ -3051,7 +3032,7 @@ mod tests {
         }
     }
 
-    /// D-13 — `copy_pixels` must reject copying into a file that already has
+    /// `copy_pixels` must reject copying into a file that already has
     /// pixel data (C++ LogicExc "already contains pixel data").
     #[test]
     fn d13_copy_pixels_rejects_when_destination_already_has_pixel_data() {
@@ -3275,10 +3256,9 @@ mod tests {
 
     #[test]
     fn deep_tiled_missing_sample_count_slice_errors() {
-        // round4.md "pixel data is passed PER WRITE CALL": an empty
-        // sample-count buffer is no longer checkable at `set_frame_buffer`
-        // (no buffer is passed there anymore) — it is now `write_tiles`'
-        // null-base-pointer check.
+        // Pixel data is passed per write call: an empty sample-count buffer
+        // is not checkable at `set_frame_buffer` (no buffer is passed there)
+        // — it is `write_tiles`' null-base-pointer check.
         let td = one_level_td();
         let header = make_deep_tiled_header(4, 4, Compression::NoCompression, td);
         let (_sc, data, fb, _counts) = make_deep_pixels(4, 4);
@@ -3342,7 +3322,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // W3.9 phase B — parallel write determinism (deep tiled writer).
+    // Parallel write determinism (deep tiled writer).
     // -----------------------------------------------------------------------
 
     /// A 5x5 tile grid (3x3 tiles, 15x13 image → partial edge tiles in the
@@ -3393,7 +3373,7 @@ mod tests {
     /// Same grid, ZIPS compression (a real codec, so the fresh-per-worker
     /// count/data compressor path is exercised) and `DecreasingY` line order
     /// (so `write_tiles_parallel`'s emission through `feed_tile` must drive
-    /// D-11's `tile_map`/`next_tile_to_write` buffering exactly like the
+    /// the `tile_map`/`next_tile_to_write` buffering exactly like the
     /// serial path) — byte-identical across thread counts.
     #[test]
     fn parallel_write_zips_decreasing_y_byte_identical_across_thread_counts() {

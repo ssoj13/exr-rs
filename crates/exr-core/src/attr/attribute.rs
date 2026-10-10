@@ -17,7 +17,7 @@ use imath_rs::{
     Box2f, Box2i, M33d, M33f, M44d, M44f, V2d, V2f, V2i, V3d, V3f, V3i, Vec2, Vec3,
 };
 
-// Wave 3a support types registered in the factory below.
+// Support types registered in the factory below.
 use crate::attr::bytes_attr::Bytes;
 use crate::attr::channel_list::ChannelList;
 use crate::attr::chromaticities::Chromaticities;
@@ -401,7 +401,7 @@ impl AttrValue for Vec<f32> {
                 "Negative size field reading floatvector attribute".into(),
             ));
         }
-        // C-06: C++ 3.4 core `check_bad_attrsz` rejects a floatvector whose
+        // C++ 3.4 core `check_bad_attrsz` rejects a floatvector whose
         // declared size is not a multiple of 4 (the whole attribute is then
         // dropped non-strictly), rather than silently reading `size/4` floats
         // and leaving the remainder for the header reader to reinterpret.
@@ -752,7 +752,7 @@ fn read_typed<T: AttrValue>(
 /// Built once on first use with every built-in attribute type registered,
 /// mirroring the `registerAttributeType()` calls IlmImf performs at startup.
 ///
-/// A `RwLock` (not the immutable map this used to be) because C-16 ports
+/// A `RwLock` (not the immutable map this used to be) because this crate ports
 /// `Attribute::registerAttributeType`/`unRegisterAttributeType`: C++ guards
 /// its map with a mutex specifically so a host application can add its own
 /// attribute types at runtime (`ImfAttribute.cpp:63-119`), and this port now
@@ -786,7 +786,7 @@ fn type_map() -> &'static std::sync::RwLock<HashMap<String, AttributeReader>> {
         m.insert(<M33d as AttrValue>::static_type_name().to_string(), read_typed::<M33d>);
         m.insert(<M44f as AttrValue>::static_type_name().to_string(), read_typed::<M44f>);
         m.insert(<M44d as AttrValue>::static_type_name().to_string(), read_typed::<M44d>);
-        // Wave 3a support types
+        // Support types
         m.insert(<Compression as AttrValue>::static_type_name().to_string(),    read_typed::<Compression>);
         m.insert(<LineOrder as AttrValue>::static_type_name().to_string(),       read_typed::<LineOrder>);
         m.insert(<Envmap as AttrValue>::static_type_name().to_string(),          read_typed::<Envmap>);
@@ -796,11 +796,11 @@ fn type_map() -> &'static std::sync::RwLock<HashMap<String, AttributeReader>> {
         m.insert(<KeyCode as AttrValue>::static_type_name().to_string(),         read_typed::<KeyCode>);
         m.insert(<TimeCode as AttrValue>::static_type_name().to_string(),        read_typed::<TimeCode>);
         m.insert(<Rational as AttrValue>::static_type_name().to_string(),        read_typed::<Rational>);
-        // Wave 3b types
+        // Channel list, preview, opaque and ID-manifest types
         m.insert(<ChannelList as AttrValue>::static_type_name().to_string(),     read_typed::<ChannelList>);
         m.insert(<PreviewImage as AttrValue>::static_type_name().to_string(),    read_typed::<PreviewImage>);
         m.insert(<CompressedIDManifest as AttrValue>::static_type_name().to_string(), read_typed::<CompressedIDManifest>);
-        // OpenEXR 3.4 addition (C-11).
+        // OpenEXR 3.4 addition.
         m.insert(<Bytes as AttrValue>::static_type_name().to_string(), read_typed::<Bytes>);
         std::sync::RwLock::new(m)
     })
@@ -812,7 +812,7 @@ pub fn known_type(type_name: &str) -> bool {
 }
 
 /// Register a new attribute type at runtime — port of
-/// `Attribute::registerAttributeType` (C-16).
+/// `Attribute::registerAttributeType`.
 ///
 /// Lets a host application extend the registry with its own attribute types,
 /// exactly as C++ does (`ImfAttribute.cpp:72-90`). `reader` collapses C++'s
@@ -835,7 +835,7 @@ pub fn register_attribute_type(type_name: &str, reader: AttributeReader) -> Resu
 }
 
 /// Remove a previously-[`register_attribute_type`]d entry — port of
-/// `Attribute::unRegisterAttributeType` (C-16). A no-op if `type_name` is not
+/// `Attribute::unRegisterAttributeType`. A no-op if `type_name` is not
 /// registered (matching C++'s `tMap.erase`, which is likewise a no-op on a
 /// missing key). Removing a BUILT-IN type is possible (as in C++) — a
 /// subsequent read of that type falls back to [`OpaqueAttribute`], same as
@@ -907,7 +907,7 @@ mod tests {
     use super::*;
     use crate::io::std_io::{MemIStream, MemOStream};
 
-    /// C-16 — a custom type can be registered at runtime, is then read via
+    /// A custom type can be registered at runtime, is then read via
     /// the registered factory (not `OpaqueAttribute`), and a second
     /// registration of the same name is rejected. `unregister_attribute_type`
     /// then reverts it to the unknown/opaque path.
@@ -943,7 +943,7 @@ mod tests {
         assert!(attr2.as_any().downcast_ref::<OpaqueAttribute>().is_some());
     }
 
-    /// C-16 — `unregister_attribute_type` on a name that was never
+    /// `unregister_attribute_type` on a name that was never
     /// registered is a harmless no-op, matching C++'s `tMap.erase`.
     #[test]
     fn unregister_unknown_type_is_a_no_op() {
@@ -1136,7 +1136,7 @@ mod tests {
         round_trip(Vec::<f32>::new());
     }
 
-    /// C-06 — a floatvector whose declared size is not a multiple of 4 is
+    /// A floatvector whose declared size is not a multiple of 4 is
     /// rejected outright, matching C++ 3.4 core `check_bad_attrsz`.
     #[test]
     fn floatvector_rejects_non_multiple_of_4_size() {
@@ -1296,7 +1296,7 @@ mod tests {
         assert_eq!(opaque.data(), raw.as_slice());
     }
 
-    // CORE-IO-02: a tiny buffer declaring a ~2 GiB string attribute must error
+    // A tiny buffer declaring a ~2 GiB string attribute must error
     // (bounded by the stream's remaining bytes) rather than allocate/abort.
     #[test]
     fn string_huge_size_rejected_without_alloc() {

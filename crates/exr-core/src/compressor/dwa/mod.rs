@@ -48,8 +48,7 @@
 //!   `internal_dwa_simd.h` unconditionally compiles the SSE2 DCT bodies, and the
 //!   build host that produced our committed goldens has `avx=0` at runtime, so
 //!   `dctInverse8x8_sse2_N`/the SSE2 `dctForward8x8` are what actually ran — see
-//!   [`dct`]'s module doc and `crates/exr-core/CLAUDE.md`'s DWA section for the
-//!   full platform-dependence story (GCC x64 + AVX CPU uses AVX asm instead;
+//!   [`dct`]'s module doc for the full platform-dependence story (GCC x64 + AVX CPU uses AVX asm instead;
 //!   ARM uses the plain scalar bodies — none of the three are bit-identical to
 //!   each other).
 //! * The perceptual LUT is the analytic curve from `internal_dwa_table_init.c`
@@ -79,7 +78,7 @@
 //! behaviour in several places this module now follows over v3.3.11 (the LUT
 //! generator's precision, `validate_size`'s stricter UNKNOWN/RLE size checks,
 //! and — always builds the CSC en/decoder with the perceptual LUT regardless
-//! of `pLinear` — see W-03/W-04/W-05 in `.bughunt/r4_audit_dwa_htj2k.md`).
+//! of `pLinear`).
 //! * <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.3.11/src/lib/OpenEXR/ImfDwaCompressor.cpp>
 //! * <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXRCore/internal_dwa_compressor.h>
 
@@ -128,7 +127,7 @@ const DWA_ZLIB_LEVEL_9: i32 = 9;
 /// Fallback zlib level for the DC sub-stream when no `Header` context is
 /// available (e.g. plain unit tests calling `compress_dwa` directly) —
 /// matches the EXR default `EXR_DEFAULT_ZLIB_COMPRESS_LEVEL == 4`, the value
-/// `Header::zip_level()` itself resolves to when unset (W-13). Production
+/// `Header::zip_level()` itself resolves to when unset. Production
 /// callers (`DwaCompressor::compress`) pass `header.zip_level()`'s actual
 /// resolved value instead of this constant — never read outside `#[cfg(test)]`.
 #[cfg(test)]
@@ -256,8 +255,7 @@ fn zlib_decompress_exact(data: &[u8], expected: usize, decompressor: &mut LowDec
 /// Raw zlib decompress for DWA's UNKNOWN sub-stream — the one C call site
 /// (`internal_dwa_compressor.h:922-930`) that passes NULL for `actual_out`.
 ///
-/// Fills the caller's persistent `out` buffer directly (audit block D's
-/// out/scratch policy). Unlike [`zlib_decompress_exact`], a decode that
+/// Fills the caller's persistent `out` buffer directly. Unlike [`zlib_decompress_exact`], a decode that
 /// produces FEWER than `cap` bytes is NOT an error: `libdeflate` returns
 /// `LIBDEFLATE_SHORT_OUTPUT` in that case (reachable only with a NULL
 /// `actual_out`), and `exr_uncompress_buffer`'s `SHORT_OUTPUT` branch
@@ -266,9 +264,8 @@ fn zlib_decompress_exact(data: &[u8], expected: usize, decompressor: &mut LowDec
 /// after a short stream is accepted too), and does not require an exact
 /// fill. `out` is truncated to the real decoded length here, so its
 /// remaining slots (the tail `decompress_dwa`'s assembly loop would have
-/// read from this buffer) come from `output`'s own zero-init instead of
-/// C's stale heap memory -- ONE deterministic zero-fill instead of two,
-/// see `.bughunt/upstream_openexr.md` defect #3.
+/// read from this buffer) come from `output`'s own zero-init -- one
+/// deterministic zero-fill.
 fn zlib_decompress_unknown(
     data: &[u8],
     cap: usize,
@@ -298,7 +295,7 @@ fn ck_mul(a: usize, b: usize) -> Result<usize> {
 }
 
 // ---------------------------------------------------------------------------
-// W-06 (`.bughunt/r4_audit_dwa_htj2k.md`): per-channel subsampling support.
+// Per-channel subsampling support.
 // ---------------------------------------------------------------------------
 //
 // C++ derives each channel's own `width`/`height` for the chunk from
@@ -309,7 +306,7 @@ fn ck_mul(a: usize, b: usize) -> Result<usize> {
 // generic (non-DWA) packed-buffer layout — [`crate::misc::active_row_count`]
 // mirrors its `modp(y, y_sampling) == 0` row test (moved there so `compressor
 // ::htj2k` doesn't need to cross-import from this module for the same
-// convention — `.bughunt/progress_htj2k_ysub.md`), and the per-channel width
+// convention), and the per-channel width
 // uses the same `width / x_sampling` division (both reduce to the unsampled
 // case when `x_sampling`/`y_sampling == 1`, so a single formula serves both
 // cases; no separate "subsampled" code path is needed anywhere below).
@@ -375,7 +372,7 @@ fn classify_channels(channels: &ChannelList, rules: &[Rule]) -> Result<Classific
     let mut infos = Vec::new();
 
     for (c, (name, ch)) in channels.iter().enumerate() {
-        // C-08b: bytes throughout, matching C++ (`Classifier_find_suffix`/
+        // Bytes throughout, matching C++ (`Classifier_find_suffix`/
         // `Classifier_match` never check encoding), so a non-UTF-8 DWA
         // channel name classifies exactly like a UTF-8 one.
         let name = name.as_bytes();
@@ -436,7 +433,7 @@ fn classify_channels(channels: &ChannelList, rules: &[Rule]) -> Result<Classific
     })
 }
 
-/// (alloc audit E11) Everything `classify_channels` produces PLUS the fixed
+/// Everything `classify_channels` produces PLUS the fixed
 /// "which compact slot does file-channel `idx` land in" maps that
 /// `compress_dwa`/`decompress_dwa` used to rebuild from scratch every chunk
 /// (the `dct_to_info`/`info_to_dct` HashMap and the `dct_buf`->`dct_channels`
@@ -551,8 +548,7 @@ fn validate_dwa_size(
 ///
 /// See the module docs' "Decoder hardening" section — nothing read from
 /// `compressed` reaches an allocation or an index before it has been bounded.
-/// Persistent DC/RLE/UNKNOWN decode scratch for [`DwaCompressor`] (audit
-/// block D) — mirrors `ac_scratch`'s "filled in place, not reallocated per
+/// Persistent DC/RLE/UNKNOWN decode scratch for [`DwaCompressor`] — mirrors `ac_scratch`'s "filled in place, not reallocated per
 /// chunk" contract, one struct instead of three separate fields so the
 /// `decompress_dwa` call site reads as the same "&mut self.out, &mut
 /// scratch" shape every other codec's out/scratch split uses.
@@ -568,21 +564,20 @@ struct DwaScratch {
     /// share: each `zlib_decompress_exact`/`zlib_decompress_unknown` call is
     /// a complete, self-contained decode with no state carried between calls.
     decompressor: LowDecompressor,
-    /// DC un-predict/reorder scratch (alloc audit E10), reused instead of a
+    /// DC un-predict/reorder scratch, reused instead of a
     /// fresh `vec![0u8; n]` per chunk. [`unpredict_and_reorder`] fully
     /// overwrites every byte (it is the same shared predictor every ZIP/RLE
     /// chunk also runs — see [`crate::compressor::predictor`]'s contract), so
     /// [`super::ensure_len`] is sound here too.
     dc_reorder: Vec<u8>,
-    /// Persistent Huffman DECODE-side accelerated-decoder scratch (alloc
-    /// audit E8) for the AC coefficient stream's static-Huffman path — see
+    /// Persistent Huffman DECODE-side accelerated-decoder scratch for the AC coefficient stream's static-Huffman path — see
     /// `fast_huf::FastHufDecoder`'s doc.
     fast_huf: crate::compressor::piz::fast_huf::FastHufDecoder,
-    /// (alloc audit E11) Cached [`DwaChannelPlan`] plus the exact `channels`
+    /// Cached [`DwaChannelPlan`] plus the exact `channels`
     /// and `rules` it was built from. The plan is a function of BOTH
-    /// (`build_channel_plan`), so both are part of the key (engagement audit
-    /// U17: the key used to be `rules` alone). `channels` is compared by name
-    /// AND value, not with `ChannelList::eq`, which ignores names (C-23),
+    /// (`build_channel_plan`), so both are part of the key (keying on
+    /// `rules` alone would reuse a stale plan). `channels` is compared by name
+    /// AND value, not with `ChannelList::eq`, which ignores names,
     /// while DWA classification matches on names. A v2 stream stores its OWN channel rules per
     /// chunk (`channel_rules::read_channel_rules`), so -- unlike the encode
     /// side, where `classifier::default_rules()` is a compile-time constant --
@@ -595,7 +590,7 @@ struct DwaScratch {
     plan: Option<DwaChannelPlan>,
     plan_rules: Vec<Rule>,
     plan_channels: ChannelList,
-    /// Per-channel `(width, height)` for the CURRENT chunk (alloc audit E11)
+    /// Per-channel `(width, height)` for the CURRENT chunk
     /// -- genuinely recomputed whenever the rectangle or plan changes, but
     /// the Vec allocation is grow-only: `chan_dims_key` records the
     /// `(width, min_y, max_y)` this buffer was last computed for, and a
@@ -606,7 +601,7 @@ struct DwaScratch {
     /// Per-row byte count for the CURRENT chunk -- same grow-only-allocation
     /// / recompute-on-key-change policy as `chan_dims`, keyed identically.
     bytes_per_line: Vec<usize>,
-    /// (alloc audit E11 remainder, decode side) Per-channel decoded DCT
+    /// Per-channel decoded DCT
     /// output, keyed by file-channel index -- grow-only, reused across
     /// chunks instead of a fresh `Vec<Option<Vec<u16>>>` (and a fresh
     /// `Vec<u16>` per channel/group inside it) every chunk. Indexed exactly
@@ -619,7 +614,7 @@ struct DwaScratch {
     dct_outputs: Vec<Vec<u16>>,
     dct_filled: Vec<bool>,
     /// Row-of-blocks scratch shared by every `decode_channel_into` call this
-    /// chunk (E11 remainder) -- grow-only, `ensure_len`'d to the current
+    /// chunk -- grow-only, `ensure_len`'d to the current
     /// channel's `blocks_x * BLOCK_ELEMENTS` each call (varies with a
     /// subsampled channel's own width).
     row_blocks: Vec<u16>,
@@ -694,7 +689,7 @@ fn decompress_dwa(
         classifier::legacy_rules()
     };
 
-    // (alloc audit E11) Cache-validated classification: a v2 stream's rules
+    // Cache-validated classification: a v2 stream's rules
     // are read fresh above every call, so reuse the previous `DwaChannelPlan`
     // only when `rules` compares equal to what built it -- see
     // `DwaScratch::plan`'s doc. Taken out of `scratch` (not borrowed) so the
@@ -727,7 +722,7 @@ fn decompress_dwa(
     let width = (rectangle.max.x - rectangle.min.x + 1) as usize;
     let height = (rectangle.max.y - rectangle.min.y + 1) as usize;
 
-    // (alloc audit E11) `chan_dims`/`bytes_per_line`: the VALUES are a real
+    // `chan_dims`/`bytes_per_line`: the VALUES are a real
     // function of this chunk's own rectangle (a subsampled channel's extent
     // genuinely varies with chunk height, and the file's last chunk can be
     // shorter than every other), so they cannot be cached across chunks of
@@ -739,7 +734,7 @@ fn decompress_dwa(
     let chan_dims_key = (width, rectangle.min.y, rectangle.max.y);
     let key_changed = scratch.chan_dims_key != Some(chan_dims_key);
 
-    // W-06: each channel's OWN `(width, height)` for this chunk -- reduces to
+    // Each channel's OWN `(width, height)` for this chunk -- reduces to
     // `(width, height)` when it isn't subsampled (see `channel_dims`'s doc).
     let mut chan_dims = std::mem::take(&mut scratch.chan_dims);
     if key_changed {
@@ -833,7 +828,7 @@ fn decompress_dwa(
         return Err(ExrError::Input("DWA: DC count without DC data".into()));
     }
 
-    // W-05 — `validate_size` (`internal_dwa_compressor.h:691-726`, called at
+    // `validate_size` (`internal_dwa_compressor.h:691-726`, called at
     // `:907`/`:910`), absent from our v3.3.11 port base but present in the 3.4.15
     // oracle. If a scheme's channels need planar bytes, the stream must actually
     // carry a non-empty compressed section that covers them; if none of the
@@ -928,10 +923,10 @@ fn decompress_dwa(
 
     // --- Reconstruct pixels ---
     // Decoded DCT channels indexed by channel position, `dct_filled[idx]`
-    // false until decoded this chunk (alloc audit E11 remainder: was a fresh
+    // false until decoded this chunk (rather than a fresh
     // `Vec<Option<Vec<u16>>>` -- with a fresh `Vec<u16>` inside each `Some`
-    // -- every call; `scratch.dct_outputs`/`dct_filled` are grow-only and
-    // reused instead). The channel count is fixed by the header for the
+    // -- every call, `scratch.dct_outputs`/`dct_filled` are grow-only and
+    // reused). The channel count is fixed by the header for the
     // compressor's whole life, so after the first call this is a no-op
     // resize plus an `infos.len()`-sized `fill(false)` -- no allocation.
     if scratch.dct_outputs.len() < infos.len() {
@@ -945,7 +940,7 @@ fn decompress_dwa(
     // The per-channel decoders consume `ac_iter` (the shared AC-token stream)
     // DIRECTLY, in block raster order — no per-channel collect/re-encode buffer
     // and no hashing. Each group/channel gets ITS OWN decoder at its own
-    // (possibly subsampled) `(width, height)` (W-06).
+    // (possibly subsampled) `(width, height)`.
     let mut dc_offset = 0usize;
     let mut ac_iter = ac_scratch.iter().copied();
 
@@ -970,13 +965,13 @@ fn decompress_dwa(
         // C++ ALWAYS builds a CSC decoder with the LUT (`LossyDctDecoderCsc_construct`,
         // `internal_dwa_compressor.h:1113-1126`, unconditional) — `p_linear` is honoured
         // only for single (non-CSC) LOSSY_DCT channels (`:1181`). An R channel with
-        // `pLinear=1` inside an RGB CSC group must still be perceptually decoded (W-04).
+        // `pLinear=1` inside an RGB CSC group must still be perceptually decoded.
         // Pulls 3 * nb blocks from the shared AC stream (Y,Cb,Cr interleaved per
         // block) and advances `ac_iter` to the next group/channel.
         //
         // `decode_rgb_into` needs three INDEPENDENT `&mut Vec<u16>` borrows out
         // of the same `scratch.dct_outputs` Vec, which plain indexing can't
-        // give the borrow checker (E11 remainder) -- `mem::take` each slot
+        // give the borrow checker -- `mem::take` each slot
         // into a local (leaving an empty placeholder), decode into the
         // locals (preserving their existing capacity from a prior chunk),
         // then move them back. On an early `?` return the three slots stay
@@ -1128,7 +1123,7 @@ fn decompress_dwa(
             }
         }
     }
-    // (alloc audit E11) Return the taken-out plan/geometry scratch to
+    // Return the taken-out plan/geometry scratch to
     // `scratch` for the next chunk to (maybe) reuse -- `infos`/`csc_groups`/
     // `in_csc` (borrows of `plan`) and `chan_dims`/`bytes_per_line` (owned
     // locals) have no remaining uses past this point.
@@ -1170,18 +1165,18 @@ fn compress_ac(
         return Ok(Some((Vec::new(), AcCompression::StaticHuffman)));
     }
     if use_deflate_for_ac {
-        // (alloc audit E10) `ac_deflate_bytes` is a persistent, reused
+        // `ac_deflate_bytes` is a persistent, reused
         // buffer -- `u16s_to_le_bytes` fully overwrites every byte.
         super::ensure_len(ac_deflate_bytes, all_ac.len() * 2);
         crate::misc::u16s_to_le_bytes(all_ac, ac_deflate_bytes)?;
         return Ok(Some((zlib_compress(ac_deflate_bytes, level9)?, AcCompression::Deflate)));
     }
-    // `huf_scratch` (alloc audit E7) is the persistent ~2 MiB encode-table
+    // `huf_scratch` is the persistent ~2 MiB encode-table
     // scratch; the compressed bytes themselves land in a plain local `Vec`
     // (NOT a persistent field) since this function returns them by value one
     // level up to `compress_dwa`'s own header/assembly logic, exactly like
     // its sibling `dc_compressed`/`rle_compressed`/`unknown_compressed`
-    // results (E10's deferred remainder covers making those reused too).
+    // results (those are not reused yet either).
     let mut huf_out = Vec::new();
     if huf::compress_with_limit(all_ac, huf_scratch, huf_limit, &mut huf_out)? {
         Ok(Some((huf_out, AcCompression::StaticHuffman)))
@@ -1215,7 +1210,7 @@ impl DwaDeflateCompressors {
 // compress_dwa — port of DwaCompressor_compress
 // ===========================================================================
 
-/// (alloc audit E11) Persistent, grow-only encode-side scratch for
+/// Persistent, grow-only encode-side scratch for
 /// `compress_dwa` -- mirrors `DwaScratch`'s "filled in place, not reallocated
 /// per chunk" contract on the decode side. Every `Vec<Vec<_>>` here is
 /// preallocated to the exact outer length `plan.num_dct`/`num_rle`/
@@ -1284,7 +1279,7 @@ impl DwaCompressScratch {
 }
 
 /// Compress the native-LE scanline-interleaved line buffer with DWA into
-/// `out` (audit block D: the same out/scratch policy every codec's compress
+/// `out` (the same out/scratch policy every codec's compress
 /// AND uncompress path follows). `use_deflate_for_ac` selects DEFLATE (tiled
 /// DWAA) vs static Huffman (scanline / DWAB) for the AC coefficients.
 /// Returns whether the assembled chunk actually SHRANK against `data`
@@ -1313,7 +1308,7 @@ fn compress_dwa(
     // and NOTHING else; the legacy lowercase table is a decode-only fallback for
     // v0/v1 streams.  Classifying `red/green/blue` or `r/g/b/a` as DCT on encode
     // produced chunks real OpenEXR rejects with EXR_ERR_CORRUPT_CHUNK.
-    // (alloc audit E11) `plan` is `classify_channels`'s output, computed ONCE
+    // `plan` is `classify_channels`'s output, computed ONCE
     // in `DwaCompressor::new` -- see `DwaChannelPlan`'s doc for why this is
     // always valid here (encode always uses `classifier::default_rules()`
     // against a channel list that never changes after construction).
@@ -1323,7 +1318,7 @@ fn compress_dwa(
 
     scratch.resize_for_plan(plan);
 
-    // (alloc audit E11) Same grow-only-allocation / recompute-on-key-change
+    // Same grow-only-allocation / recompute-on-key-change
     // policy as `DwaScratch::chan_dims` on the decode side -- see its doc.
     // Under tiled DWAA, `compress_tile` moves `min_x`/`max_x`/`max_y` per
     // tile, so (unlike `plan`) this genuinely can change chunk to chunk.
@@ -1343,12 +1338,12 @@ fn compress_dwa(
     // Row-major over the INPUT: for each absolute `y`, every channel that
     // `y_sampling` includes contributes its `cw` samples, in channel-list
     // order, with no gap for a channel `y` excludes -- the same convention
-    // `misc::bytes_per_line_table` uses to lay the buffer out (W-06). RLE
+    // `misc::bytes_per_line_table` uses to lay the buffer out. RLE
     // bytes are collected per-pixel-interleaved here and reordered into the
     // planar (all byte0, then byte1, ...) layout afterward, once, from each
     // channel's own (possibly subsampled) pixel count.
     //
-    // (alloc audit E11) Written DIRECTLY into `scratch`'s per-scheme slots
+    // Written DIRECTLY into `scratch`'s per-scheme slots
     // (`plan.dct_slot`/`rle_slot`/`unknown_slot`) instead of the old
     // per-ALL-channels staging arrays (`dct_buf`/`rle_interleaved`/
     // `unknown_buf`) that were then `mem::take`-compacted into a second,
@@ -1449,10 +1444,10 @@ fn compress_dwa(
 
     // --- Encode DCT channels (CSC groups first, then singles) ---
     // Each group/channel gets ITS OWN encoder at its own (possibly subsampled)
-    // `(width, height)` (W-06) -- a shared chunk-wide encoder was only correct
+    // `(width, height)` -- a shared chunk-wide encoder was only correct
     // when every channel shared the chunk's own dimensions (unsampled).
     //
-    // (alloc audit E11) `info_to_dct` is `plan`'s (built once, not rebuilt
+    // `info_to_dct` is `plan`'s (built once, not rebuilt
     // per chunk); `all_dc`/`all_ac` are `scratch`'s persistent, grow-only
     // buffers, cleared (not reallocated) below, and the encoder writes
     // straight into them via `encode_channel_into`/`encode_rgb_into` instead
@@ -1474,7 +1469,7 @@ fn compress_dwa(
         // C++ ALWAYS builds a CSC encoder with the LUT (`LossyDctEncoderCsc_construct`,
         // `internal_dwa_compressor.h:370-381`, unconditional) -- `p_linear` is honoured
         // only for single (non-CSC) LOSSY_DCT channels (`:420`). Mirrors the decode-side
-        // fix above (W-04): an R channel with `pLinear=1` inside an RGB CSC group is
+        // fix above: an R channel with `pLinear=1` inside an RGB CSC group is
         // still perceptually encoded.
         LossyDctEncoder::new(gw, gh, Some(level)).encode_rgb_into(
             &scratch.dct_channels[r_dct],
@@ -1506,9 +1501,8 @@ fn compress_dwa(
     }
 
     // --- RLE + Unknown raw byte streams ---
-    // (alloc audit E11) `scratch.rle_raw`/`scratch.unknown_raw` are
-    // persistent, grow-only -- were `rle_raw_data`/`unknown_raw_data`, fresh
-    // `Vec::new()`s per chunk.
+    // `scratch.rle_raw`/`scratch.unknown_raw` are
+    // persistent, grow-only -- not fresh `Vec::new()`s per chunk.
     scratch.rle_raw.clear();
     for slot in 0..plan.num_rle {
         let bytes = std::mem::take(&mut scratch.rle_channels[slot]);
@@ -1527,7 +1521,7 @@ fn compress_dwa(
         &scratch.all_ac, use_deflate_for_ac, u32::MAX as u64, &mut deflate.level9, huf_scratch, ac_deflate_bytes,
     )? {
         Some(pair) => pair,
-        // K-02 / W-09: the AC Huffman stream exceeded the encodable bit-count range.
+        // The AC Huffman stream exceeded the encodable bit-count range.
         // C++ does not error here -- see `compress_ac`'s doc -- it abandons the whole
         // DWA-encoded chunk, which for us means "cannot shrink this chunk, store raw".
         None => {
@@ -1538,11 +1532,11 @@ fn compress_dwa(
 
     // --- Compress DC (reorder+predict, then zlib at the DC level) ---
     let dc_compressed = if !scratch.all_dc.is_empty() {
-        // (alloc audit E10) `dc_encode_bytes`/`dc_encode_reorder` are
+        // `dc_encode_bytes`/`dc_encode_reorder` are
         // persistent, reused buffers -- `u16s_to_le_bytes` and
         // `reorder_and_predict` each fully overwrite every byte (the same
-        // shared ZIP/RLE predictor contract already established safe for
-        // `ensure_len` elsewhere this round).
+        // shared ZIP/RLE predictor contract that makes `ensure_len` safe
+        // elsewhere).
         super::ensure_len(dc_encode_bytes, scratch.all_dc.len() * 2);
         crate::misc::u16s_to_le_bytes(&scratch.all_dc, dc_encode_bytes)?;
         super::ensure_len(dc_encode_reorder, dc_encode_bytes.len());
@@ -1638,39 +1632,39 @@ pub struct DwaCompressor {
     /// see [`DwaScratch`]'s doc (also owns the persistent zlib decompressor).
     scratch: DwaScratch,
     /// Persistent low-level zlib compressors for the AC-deflate/RLE/Unknown
-    /// (level 9) and DC (`Header::zip_level()` — W-13; C++ `me->_zipLevel`
+    /// (level 9) and DC (`Header::zip_level()`; C++ `me->_zipLevel`
     /// via `exr_get_zip_compression_level`, the SAME per-header/
     /// process-global seam the ZIP codec uses) sub-streams — constructed
     /// once here instead of per `compress()` call (perf follow-up,
     /// 2026-09-24; see `compressor::zlib`'s module doc).
     deflate: DwaDeflateCompressors,
-    /// Persistent Huffman ENCODE-side scratch (alloc audit E7) for the AC
+    /// Persistent Huffman ENCODE-side scratch for the AC
     /// coefficient stream's static-Huffman path (`compress_ac`) — see
     /// [`huf::HufEncScratch`]'s doc. Unused when `use_deflate_for_ac` is set
     /// (tiled DWAA), but always present since `use_deflate_for_ac` is a
     /// runtime, not compile-time, choice.
     huf_scratch: huf::HufEncScratch,
-    /// Persistent AC-DEFLATE-path scratch (alloc audit E10) for
+    /// Persistent AC-DEFLATE-path scratch for
     /// `compress_ac`'s `use_deflate_for_ac` branch (tiled DWAA only) --
     /// `u16s_to_le_bytes` fully overwrites every byte, so `ensure_len` is
     /// sound, matching the same argument as `dc_encode_bytes`/
     /// `dc_encode_reorder` below.
     ac_deflate_bytes: Vec<u8>,
-    /// Persistent DC-encode scratch (alloc audit E10): `dc_encode_bytes`
+    /// Persistent DC-encode scratch: `dc_encode_bytes`
     /// (fully overwritten by `u16s_to_le_bytes`) and `dc_encode_reorder`
     /// (fully overwritten by `reorder_and_predict` -- the same shared
-    /// ZIP/RLE predictor contract already established safe for `ensure_len`
-    /// in E3/E4/E7).
+    /// ZIP/RLE predictor contract that makes `ensure_len` safe in the ZIP
+    /// and RLE codecs).
     dc_encode_bytes: Vec<u8>,
     dc_encode_reorder: Vec<u8>,
-    /// (alloc audit E11) `classify_channels`'s output for `self.channels`,
+    /// `classify_channels`'s output for `self.channels`,
     /// computed ONCE here in `new()` -- see [`DwaChannelPlan`]'s doc for why
     /// this is valid for the compressor's whole lifetime (encode always
     /// uses `classifier::default_rules()` against a channel list that never
     /// changes after construction, even across `compress_tile`'s per-tile
     /// `min_x`/`max_x`/`max_y` updates).
     plan: DwaChannelPlan,
-    /// Persistent, grow-only per-chunk encode scratch (alloc audit E11) --
+    /// Persistent, grow-only per-chunk encode scratch --
     /// see [`DwaCompressScratch`]'s doc.
     compress_scratch: DwaCompressScratch,
 }
@@ -1690,19 +1684,19 @@ impl DwaCompressor {
         // C++ `DwaCompressor_construct` (:152) reads the level through
         // `exr_get_dwa_compression_level`, which yields the header's own
         // `dwaCompressionLevel` attribute when present, else the process-global
-        // default — `Header::codec_dwa_level()` (fix-container, C-13, plus
+        // default — `Header::codec_dwa_level()` (plus
         // `exr_set_dwa_compression_level`'s range rule), the ONE seam for this:
         // it never errors (unlike the raw attribute
         // accessor `header.dwa_compression_level()`, which is a different,
         // narrower thing — see its doc in `header.rs`) and already folds in
         // `Header::set_dwa_level`/`set_default_dwa_compression_level`.
         let level = header.codec_dwa_level();
-        // W-13: the DC sub-stream's zlib level is `Header::codec_zip_level()` — the
+        // The DC sub-stream's zlib level is `Header::codec_zip_level()` — the
         // SAME per-header override / process-global default the ZIP codec
-        // reads (`compressor/zip.rs`'s K-06 seam), not a DWA-specific value.
+        // reads (`compressor/zip.rs`), not a DWA-specific value.
         let dc_zip_level = header.codec_zip_level();
         let deflate = DwaDeflateCompressors::new(dc_zip_level)?;
-        // (alloc audit E11) See `DwaChannelPlan`'s doc: encode's classification
+        // See `DwaChannelPlan`'s doc: encode's classification
         // is a pure function of `(channels, classifier::default_rules())`,
         // both fixed for this compressor's whole life, so it is built exactly
         // once, here, rather than once per `compress()`/`compress_tile()` call.
@@ -1751,7 +1745,7 @@ impl Compressor for DwaCompressor {
             return Ok(&self.out);
         }
         let rect = self.rectangle(min_y);
-        // (audit block D) compress_dwa fills self.out directly; on "no-shrink"
+        // compress_dwa fills self.out directly; on "no-shrink"
         // it clears self.out itself and reports `false`, so we store raw here.
         let shrunk = compress_dwa(
             &self.channels, data, rect, self.level, self.use_deflate_for_ac, &self.plan, &mut self.deflate,
@@ -1765,7 +1759,7 @@ impl Compressor for DwaCompressor {
         Ok(&self.out)
     }
 
-    /// `expected_len` (alloc audit C6) is unused: `decompress_dwa`'s
+    /// `expected_len` is unused: `decompress_dwa`'s
     /// `uncompressed_size` comes entirely from `channels`/`rectangle`
     /// (`bytes_per_line_table`), never a construction-time bound.
     fn uncompress(&mut self, data: &[u8], min_y: i32, _expected_len: usize) -> Result<&[u8]> {
@@ -1833,7 +1827,7 @@ mod tests {
         Ok(out)
     }
 
-    /// Test-only convenience wrapper restoring the pre-block-D
+    /// Test-only convenience wrapper offering the
     /// `Result<Option<Vec<u8>>>` shape (`Some` = shrunk chunk, `None` =
     /// "no-shrink → store raw") for the many existing call sites — NOT a
     /// second production API, exactly like `decompress_dwa`'s wrapper above.
@@ -1853,7 +1847,7 @@ mod tests {
         let mut ac_deflate_bytes = Vec::new();
         let mut dc_encode_bytes = Vec::new();
         let mut dc_encode_reorder = Vec::new();
-        // (alloc audit E11) throwaway plan/scratch, matching the real
+        // Throwaway plan/scratch, matching the real
         // signature's split (a persistent `DwaChannelPlan` + a persistent
         // `DwaCompressScratch` on `DwaCompressor` in production).
         let plan = super::build_channel_plan(channels, super::classifier::default_rules())?;
@@ -1865,15 +1859,15 @@ mod tests {
         Ok(if shrunk { Some(out) } else { None })
     }
 
-    /// (audit block D-3) DWA's UNKNOWN sub-stream tolerates a genuinely SHORT
+    /// DWA's UNKNOWN sub-stream tolerates a genuinely SHORT
     /// zlib decode -- C passes NULL `actual_out` there, so `libdeflate`'s
     /// `LIBDEFLATE_SHORT_OUTPUT` converts to `EXR_ERR_SUCCESS`
     /// UNCONDITIONALLY (`compression.c:144-208`), unlike every other zlib
     /// caller in this codec (`zlib_decompress_exact`, `RequireExact` policy),
     /// which always demands the consume-all-input check. Must accept a short
     /// decode (`cap` larger than what the stream actually contains) AND
-    /// trailing garbage appended after that short stream (team-lead's
-    /// finding: C's `SHORT_OUTPUT` branch skips the consume-all check
+    /// trailing garbage appended after that short stream (C's
+    /// `SHORT_OUTPUT` branch skips the consume-all check
     /// entirely, not just the exact-size one). The result is truncated to
     /// the real decoded length here -- the deterministic zero tail comes
     /// from `decompress_dwa`'s own `output` buffer (already zero-resized
@@ -1959,10 +1953,10 @@ mod tests {
         panic!("{msg}");
     }
 
-    /// (audit block D-3, ORACLE-VERIFIED) A real C++ OpenEXR reader accepts a
+    /// (ORACLE-VERIFIED) A real C++ OpenEXR reader accepts a
     /// DWA chunk whose UNKNOWN sub-stream decodes to FEWER bytes than its
-    /// declared `unknownUncompressedSize` -- confirming team-lead's
-    /// `compression.c:144-208` finding (`LIBDEFLATE_SHORT_OUTPUT ->
+    /// declared `unknownUncompressedSize` -- confirming the
+    /// `compression.c:144-208` reading (`LIBDEFLATE_SHORT_OUTPUT ->
     /// EXR_ERR_SUCCESS`, unconditional, no consume-all check) against the
     /// REAL library, not just our own reading of the source.
     ///
@@ -1975,7 +1969,7 @@ mod tests {
     /// deterministically zero tail; the real C++ oracle, reading the SAME
     /// patched file (spliced in via the public `RawImage`/`RawChunk`
     /// passthrough API), must also accept it (exit success) -- C's own tail
-    /// content is NOT compared (it is stale heap memory, not deterministic).
+    /// content is NOT compared (it is not deterministic).
     #[test]
     fn oracle_dwa_unknown_short_stream_is_accepted_by_real_cpp() {
         use crate::attr::{ChannelListAttribute, Compression, LineOrder};
@@ -2131,7 +2125,7 @@ mod tests {
         buf
     }
 
-    /// Scratch-buffer reuse: `ac_scratch` (`b39674e`/`9b82f90`) is a
+    /// Scratch-buffer reuse: `ac_scratch` is a
     /// persistent `DwaCompressor` field, filled in place on every
     /// `uncompress()` call instead of freshly allocated — this test exists
     /// specifically to catch stale AC-coefficient data leaking from a PRIOR,
@@ -2213,9 +2207,9 @@ mod tests {
         );
     }
 
-    /// Alloc audit E10: `DwaCompressor`'s `ac_deflate_bytes` (the
+    /// `DwaCompressor`'s `ac_deflate_bytes` (the
     /// `use_deflate_for_ac` / tiled-DWAA path), `dc_encode_bytes`, and
-    /// `dc_encode_reorder` are now persistent, reused fields instead of
+    /// `dc_encode_reorder` are persistent, reused fields instead of
     /// fresh `vec![...]`s per `compress()` call. Poison all three with
     /// implausible values BEFORE the first real call, then compress a
     /// SEQUENCE of genuinely different-sized/sloped blocks (same
@@ -2268,11 +2262,11 @@ mod tests {
         );
     }
 
-    /// (alloc audit E11) `DwaChannelPlan`'s slot maps (`dct_slot`/`rle_slot`/
+    /// `DwaChannelPlan`'s slot maps (`dct_slot`/`rle_slot`/
     /// `unknown_slot`/`dct_to_info`/`info_to_dct`) and `DwaCompressScratch`'s
     /// grow-only per-scheme Vecs (`dct_channels`/`rle_interleaved`/
     /// `rle_channels`/`unknown_channels`/`all_dc`/`all_ac`/`dc_y`/`dc_cb`/
-    /// `dc_cr`/`rle_raw`/`unknown_raw`) are all NEW this round. Exercise a
+    /// `dc_cr`/`rle_raw`/`unknown_raw`) are reused across chunks. Exercise a
     /// RICH classification -- TWO CSC groups (`R,G,B` and the second-seen
     /// `Hair.R,Hair.G,Hair.B` layer prefix, both driven by the same
     /// `channel_rules` v2 write-then-read path `decoder_uses_rules_stored_in_the_chunk`
@@ -2281,7 +2275,7 @@ mod tests {
     /// big-then-small chunk-size sequence (same methodology as
     /// `compress_scratch_does_not_leak_between_a_big_then_small_block` /
     /// `uncompress_ac_scratch_does_not_leak_between_a_big_then_small_block`),
-    /// covering both encode's and decode's new scratch fields' "clear, not
+    /// covering both encode's and decode's scratch fields' "clear, not
     /// reallocate" contract at once, with a non-trivial channel SET (not
     /// just a size change) driving the plan/slot maps every call.
     #[test]
@@ -2369,19 +2363,17 @@ mod tests {
         );
     }
 
-    /// Alloc audit E11 remainder (decode side, team-lead-assigned, deflate-fast):
+    /// Decode-side scratch reuse:
     /// `LossyDctDecoder::decode_channel_into`/`decode_rgb_into` and
     /// `DwaScratch::dct_outputs`/`dct_filled`/`row_blocks`/`row_blocks_rgb`
-    /// (was `decode_channel`/`decode_rgb` returning fresh owned `Vec<u16>`s,
-    /// and `decompress_dwa`'s `dct_outputs: Vec<Option<Vec<u16>>>` rebuilt
-    /// fresh every chunk). Reuses the EXACT rich-classification fixture from
+    /// are grow-only buffers reused across chunks. Reuses the EXACT rich-classification fixture from
     /// `compress_and_uncompress_scratch_survive_rich_classification_big_then_small`
     /// above (two CSC groups, an RLE channel, an Unknown channel, a real
     /// v2 stream with channel rules embedded per chunk -- `DwaCompressor`
     /// always writes version 2, `Field::Version` set to `2` at `:1563`, so
     /// this exercises `DwaScratch::plan`/`plan_rules`'s v2 rules-from-chunk
     /// path the same way `decoder_uses_rules_stored_in_the_chunk` does),
-    /// this time poisoning ONLY the new decode-side buffers with content
+    /// this time poisoning ONLY the decode-side buffers with content
     /// LARGER than either chunk needs (so a broken `ensure_len`/truncate
     /// would leak stale, wrong-sized garbage into the decoded pixels) before
     /// the first real decode, through the same big (32-row) then small
@@ -2400,7 +2392,7 @@ mod tests {
     /// `DwaScratch::row_blocks` starts as an empty `Vec`, so the very first
     /// write into it panics without the grow) rather than the "diverges from
     /// fresh" byte-comparison this test's assertions check for. That is an
-    /// honest, different kind of proof than the encode-side E11 poison
+    /// honest, different kind of proof than the encode-side poison
     /// test's (which catches STALE BYTES leaking through): every pixel these
     /// decode buffers hold is fully overwritten every call regardless of
     /// buffer reuse (see the `ensure_len`/"fully overwritten" reasoning in
@@ -2461,7 +2453,7 @@ mod tests {
         let big_buf = build_buffer_with_slope(w as usize, 32, &channels, 0.2);
         let big_compressed = c.compress(&big_buf, 0).unwrap().to_vec();
 
-        // Poison the DECODE-side E11-remainder scratch fields ONLY, and only
+        // Poison the DECODE-side scratch fields ONLY, and only
         // AFTER the compress above (compress doesn't touch `scratch` at all,
         // but this keeps the poisoning obviously scoped to what this test
         // claims to cover) -- deliberately oversized vs. what either chunk
@@ -2587,7 +2579,7 @@ mod tests {
         buf
     }
 
-    /// W-06 (`.bughunt/r4_audit_dwa_htj2k.md`): DWA must support sub-sampled
+    /// DWA must support sub-sampled
     /// channels rather than reject them (C++ `compute_sampled_width`/
     /// `compute_sampled_height`, `internal_dwa_compressor.h:314-322`/`:1047-1062`).
     /// Exercises a standalone (non-CSC) LOSSY_DCT channel (`BY`, 2x2 — the
@@ -2595,8 +2587,7 @@ mod tests {
     /// UNKNOWN channel (`custom`, 1x2), round-tripped through our own
     /// encoder/decoder. Self-consistency only: no C++ oracle fixture exists
     /// yet for a subsampled DWA file (would need an `oracle.cpp` addition,
-    /// shared test infra outside `compressor/dwa/`) — see
-    /// `crates/exr-core/CLAUDE.md`'s DWA section.
+    /// shared test infra outside `compressor/dwa/`).
     #[test]
     fn round_trip_subsampled_channels() {
         let w = 16usize;
@@ -2648,7 +2639,7 @@ mod tests {
         }
     }
 
-    /// W-05: an UNKNOWN channel whose section the header zeroes out
+    /// An UNKNOWN channel whose section the header zeroes out
     /// (`unknownCompressedSize == 0`) while the channel still exists (so
     /// `requiredSize > 0`) must be a corrupt chunk, not a silent zero-fill —
     /// `validate_dwa_size` ports C++'s `validate_size`
@@ -2674,7 +2665,7 @@ mod tests {
         );
     }
 
-    /// W-04 (`.bughunt/r4_audit_dwa_htj2k.md`): a CSC group (R/G/B) must always be
+    /// A CSC group (R/G/B) must always be
     /// quantised through the perceptual LUT, even when a member channel's `pLinear`
     /// flag is set — C++ builds the CSC en/decoder with the table unconditionally
     /// (`LossyDctEncoderCsc_construct`/`LossyDctDecoderCsc_construct`,
@@ -2744,7 +2735,7 @@ mod tests {
         }
     }
 
-    /// T4 (engagement audit): the DC-only IDCT is what a flat block actually
+    /// The DC-only IDCT is what a flat block actually
     /// decodes through on the real chunk path, for both the per-channel and
     /// the CSC (RGB) decoders, and a textured block takes the full IDCT.
     /// Byte identity alone can't show this, since the full IDCT of a DC-only
@@ -2778,7 +2769,7 @@ mod tests {
         }
     }
 
-    /// U17 (engagement audit): the decode-side plan cache is keyed on
+    /// The decode-side plan cache is keyed on
     /// `(channels, rules)`. `x.R/x.G/x.B` and `x.R/y.G/z.B` match the SAME
     /// R/G/B rules, so their chunks embed identical rules, but only the first
     /// forms a CSC group. Both decoded through ONE scratch must each match a
@@ -2910,7 +2901,7 @@ mod tests {
         assert!(decompress_dwa(&channels, &bad, rect(8, 8)).is_err());
     }
 
-    /// W1.4 (C2): CSC groups are ordered by the first appearance of each layer
+    /// CSC groups are ordered by the first appearance of each layer
     /// PREFIX, not by the position of the Red channel.  Channel lists sort
     /// alphabetically, so `B,G,R,Hair.B,Hair.G,Hair.R` puts the base layer's
     /// prefix ("") first and `Hair.` second; ordering by Red would emit `Hair.`
@@ -2940,7 +2931,7 @@ mod tests {
         assert_eq!(names[c.csc_groups[1].b], "Hair.B");
     }
 
-    /// W1.4 (C2) end to end: a two-layer RGB image must decode each layer back
+    /// CSC group order end to end: a two-layer RGB image must decode each layer back
     /// to ITS OWN values.  Before the fix the base and `Hair.` pixels swapped.
     #[test]
     fn layered_rgb_round_trip_keeps_layers_apart() {
@@ -2984,7 +2975,7 @@ mod tests {
         }
     }
 
-    /// W1.5 (C3): the ENCODER must classify with the default (case-sensitive)
+    /// The ENCODER must classify with the default (case-sensitive)
     /// rules only.  `red/green/blue` therefore go down the lossless UNKNOWN
     /// path, so the round-trip is bit-exact — and real OpenEXR accepts the
     /// chunk instead of returning EXR_ERR_CORRUPT_CHUNK.
@@ -3013,7 +3004,7 @@ mod tests {
         }
     }
 
-    /// W1.5 (C3): the DECODER classifies with the rules the CHUNK carries, not
+    /// The DECODER classifies with the rules the CHUNK carries, not
     /// with our static default table.  A v2 chunk written by an encoder whose
     /// rule set matched lowercase `r/g/b` must group them as a CSC set here.
     #[test]
@@ -3049,7 +3040,7 @@ mod tests {
         assert!(p.infos.iter().all(|i| i.scheme == CompressionScheme::LossyDct));
     }
 
-    /// W1.6 (C4): every size/count in the chunk header is attacker-controlled.
+    /// Every size/count in the chunk header is attacker-controlled.
     /// Patching any of the 11 fields with a hostile value must produce a clean
     /// `Err` — never a debug overflow panic, a reversed slice range, or a
     /// terabyte allocation.  (Confirmed C++ 3.4.15 returns EXR_ERR_CORRUPT_CHUNK
@@ -3217,8 +3208,8 @@ mod tests {
     /// individual term exceeding the bound always forces the sum term to
     /// exceed it too (the other addend is always `>= 0`), so
     /// `(T1&&T2)||T3 == T1||T2||T3` identically for every reachable input -
-    /// proven by exhaustive case analysis over `{T1,T2}x{true,false}` (see
-    /// `.bughunt/mutation-report.md`) and confirmed empirically: hand-
+    /// proven by exhaustive case analysis over `{T1,T2}x{true,false}` and
+    /// confirmed empirically: hand-
     /// mutating `582:9` left the full 60-test suite (including this one)
     /// green. `583:9` (between the combined term and the sum term) is
     /// structurally the real gap (`T3` can be true while `T1`/`T2` are both
@@ -3438,7 +3429,7 @@ mod tests {
         }
     }
 
-    /// W1.6: a truncated sub-stream is a corrupt chunk, not a silent zero fill —
+    /// A truncated sub-stream is a corrupt chunk, not a silent zero fill —
     /// C++ passes a NULL `actual_out` to libdeflate, which fails unless the
     /// stream yields the full declared size.
     #[test]
@@ -3456,13 +3447,13 @@ mod tests {
         }
     }
 
-    /// W-09 (`.bughunt/r4_audit_dwa_htj2k.md`): when static-Huffman AC encoding
+    /// When static-Huffman AC encoding
     /// hits the entropy-coded-bit-count ceiling, `compress_ac` must return
     /// `Ok(None)` ("store raw"), not an error — C++'s
     /// `EXR_ERR_ARGUMENT_OUT_OF_RANGE` handling
     /// (`internal_dwa_compressor.h:551-566`) abandons the whole chunk and
     /// stores it raw rather than failing the encode. Inject a tiny
-    /// `huf_limit` via [`huf::compress_with_limit`] (K-02's own test seam)
+    /// `huf_limit` via [`huf::compress_with_limit`] (the Huffman coder's own test seam)
     /// instead of actually building an AC stream large enough to hit
     /// `u32::MAX` bits for real.
     #[test]
@@ -3471,7 +3462,7 @@ mod tests {
         let mut level9 = new_deflate_compressor(DWA_ZLIB_LEVEL_9).unwrap();
         let mut huf_scratch = huf::HufEncScratch::default();
         let mut ac_deflate_bytes = Vec::new();
-        // A real ceiling: `compress_with_limit`'s own K-02 test uses `8` to
+        // A real ceiling: `compress_with_limit`'s own test uses `8` to
         // force `Ok(None)` deterministically (see `huffman.rs`).
         let result = compress_ac(&all_ac, false, 8, &mut level9, &mut huf_scratch, &mut ac_deflate_bytes).unwrap();
         assert!(result.is_none(), "a Huffman stream over the bit-count ceiling must report None, not error");
@@ -3495,7 +3486,7 @@ mod tests {
         assert!(compress_dwa(&channels, &buf, rect(w as i32, h as i32), DEFAULT_COMPRESSION_LEVEL, false, DWA_ZLIB_LEVEL_DC_DEFAULT).is_ok());
     }
 
-    /// W3.2 (C5): the header's `dwaCompressionLevel` must reach the codec.  The
+    /// The header's `dwaCompressionLevel` must reach the codec.  The
     /// hardcoded 45 made every level produce byte-identical chunks (ours 2598 B
     /// at 5/45/200/2000 vs C++ 4983/2535/1731/663).
     #[test]
@@ -3617,8 +3608,8 @@ mod tests {
         );
     }
 
-    /// W-13: the DC sub-stream's zlib level must come from `Header::zip_level()`
-    /// — the SAME seam the ZIP codec's K-06 fix uses — not the hardcoded `4`
+    /// The DC sub-stream's zlib level must come from `Header::zip_level()`
+    /// — the SAME seam the ZIP codec uses — not the hardcoded `4`
     /// this crate used before. A CSC-free single-channel image (so the whole
     /// packed buffer is DC-and-AC LOSSY_DCT, giving the DC stream real content
     /// to compress) at zlib level 1 vs level 9 must differ.

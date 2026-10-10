@@ -1,6 +1,6 @@
 //! Port of OpenEXR `ImfIDManifestAttribute.h/.cpp` + `ImfIDManifest.h/.cpp` —
 //! the `"idmanifest"` attribute, its on-disk [`CompressedIDManifest`]
-//! payload, and the full structured [`IDManifest`] model (C-15).
+//! payload, and the full structured [`IDManifest`] model.
 //!
 //! # Module layout
 //! * `mod.rs` (this file) — the attribute wire format
@@ -91,7 +91,7 @@ impl CompressedIDManifest {
 
     /// Decompress this manifest's payload — port of the bounds-checked half
     /// of `IDManifest::IDManifest(const CompressedIDManifest&)`
-    /// (`ImfIDManifest.cpp:586-638`; C-15).
+    /// (`ImfIDManifest.cpp:586-638`).
     ///
     /// This reproduces the 3.4 hardening C++ added around zlib decompression —
     /// * `uncompressed_data_size == 0` is rejected outright (C++ throws
@@ -102,9 +102,9 @@ impl CompressedIDManifest {
     ///   allocation before any content check runs,
     /// * the actual decompressed length must equal the declared size exactly
     ///   (matching C++'s post-hoc `outSize != uncompressedDataSize` check),
-    /// * (audit block A) routed through the same SSOT
+    /// * routed through the same SSOT
     ///   [`crate::compressor::zlib::uncompress_into`] every other codec uses,
-    ///   which also rejects trailing bytes after the zlib stream (K-01) —
+    ///   which also rejects trailing bytes after the zlib stream —
     ///   `deflate_rs::Decompressor::zlib_decompress_exact` (the old call
     ///   here) only checked the OUTPUT length, not this.
     ///
@@ -160,7 +160,7 @@ impl CompressedIDManifest {
     /// [`IDManifest::to_compressed`] for the full pipeline from a structured
     /// manifest ([`codec::serialize`] feeding into this).
     pub fn compress(uncompressed: &[u8]) -> Result<Self> {
-        // (audit block A) DEFAULT_ZIP_LEVEL is now the ONE constant for this
+        // DEFAULT_ZIP_LEVEL is now the ONE constant for this
         // fallback (`OpenEXRCore/compression.c:112-114`'s
         // `EXR_DEFAULT_ZLIB_COMPRESS_LEVEL`) -- this used to be its own local
         // `const EXR_DEFAULT_ZLIB_COMPRESS_LEVEL: i32 = 4;` duplicate.
@@ -311,7 +311,7 @@ mod tests {
         assert_eq!(back, m);
     }
 
-    /// C-15 — `compress`/`decompress` round-trip an arbitrary payload.
+    /// `compress`/`decompress` round-trip an arbitrary payload.
     #[test]
     fn compress_decompress_round_trip() {
         let payload = b"the quick brown fox jumps over the lazy dog".repeat(20);
@@ -321,7 +321,7 @@ mod tests {
         assert_eq!(back, payload);
     }
 
-    /// C-15 — the wire attribute round-trips a real compressed manifest end
+    /// The wire attribute round-trips a real compressed manifest end
     /// to end: `compress` -> `write_value` -> `read_value` -> `decompress`.
     #[test]
     fn wire_round_trip_through_decompress() {
@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(back.decompress().unwrap(), payload);
     }
 
-    /// C-15 — `uncompressed_data_size == 0` is rejected outright (matches
+    /// `uncompressed_data_size == 0` is rejected outright (matches
     /// C++ 3.4's hardened `IDManifest::IDManifest(const
     /// CompressedIDManifest&)`, which would otherwise decompress into a
     /// zero-length buffer).
@@ -344,7 +344,7 @@ mod tests {
         assert!(m.decompress().is_err());
     }
 
-    /// C-15 — a declared uncompressed size wildly out of proportion to the
+    /// A declared uncompressed size wildly out of proportion to the
     /// compressed size (beyond zlib's ~1032:1 worst-case ratio) is rejected
     /// before any allocation, rather than trusting an attacker-controlled
     /// 64-bit size taken directly from the file.
@@ -355,7 +355,7 @@ mod tests {
         assert!(m.decompress().is_err());
     }
 
-    /// C-15 — a declared size that does not match the stream's actual
+    /// A declared size that does not match the stream's actual
     /// decompressed length is rejected (`zlib_decompress_exact`'s
     /// short-output check), matching C++'s post-hoc `outSize != declared` test.
     #[test]
@@ -368,7 +368,7 @@ mod tests {
         assert!(m.decompress().is_err());
     }
 
-    /// C-15 — the full structured pipeline: build an `IDManifest`,
+    /// The full structured pipeline: build an `IDManifest`,
     /// `to_compressed()` it, write/read it through the wire attribute, then
     /// `from_compressed()` it back, and it must equal the original.
     #[test]

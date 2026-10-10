@@ -5,7 +5,7 @@
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.3.11/src/lib/OpenEXR/ImfTiledOutputFile.cpp>
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.3.11/src/lib/OpenEXR/ImfTiledOutputFile.h>
 //!
-//! # What this Wave (W6-2) covers (1:1 with C++)
+//! # What this module covers (1:1 with C++)
 //!
 //! * The constructor's *header + magic + version* write (reusing
 //!   [`Header::write_to`], whose [`Header::version_field`] folds in the `TILED`
@@ -28,12 +28,12 @@
 //!   exactly the byte layout of `writeTileData`), and back-patches the tile's
 //!   offset into the reserved table slot.
 //!
-//! # Compressed-tile parity scope (W6-2)
+//! # Compressed-tile parity scope
 //!
 //! For `NONE` and the byte-stream codecs (`RLE`/`ZIP`/`ZIPS`, which ignore the
 //! chunk rectangle) the written tile chunk is byte-identical to C++.  The
 //! rectangle-sensitive codecs (`PIZ`/`B44`/`B44A`/`PXR24`/`DWAA`/`DWAB`) encode
-//! against the tile's own pixel rectangle via the **W6-4a compressor seam**
+//! against the tile's own pixel rectangle via the **tile compressor seam**
 //! [`Compressor::compress_tile(data, tile_range)`][crate::compressor::Compressor::compress_tile]
 //! — mirroring C++ `Compressor::compressTile`, which forwards the tile's
 //! `Box2i range` into the encode step (ImfCompressor.cpp:118).  This fixes
@@ -55,22 +55,15 @@
 //! # Tile order on disk
 //!
 //! Tiles are written to the file in the order the caller invokes `write_tile` /
-//! `write_tiles` for `RANDOM_Y`.  For `INCREASING_Y` / `DECREASING_Y` (T-13,
-//! round 4 tiled audit), a tile written out of turn is *buffered*
+//! `write_tiles` for `RANDOM_Y`.  For `INCREASING_Y` / `DECREASING_Y`, a tile
+//! written out of turn is *buffered*
 //! (`tile_map` / `next_tile_to_write`, mirroring C++ `tileMap` /
 //! `nextTileToWrite`) until every tile ahead of it in line order has been
 //! written, so the on-disk chunk order matches in-order writing regardless
 //! of call order — see [`Self::next_tile_coord`] / [`Self::write_single_tile`].
 //!
-//! # What this Wave intentionally does NOT cover (tracked, not faked)
+//! # What this module intentionally does NOT cover
 //!
-//! * **Multipart** tiled output's `copyPixels` (4 overloads: tiled↔tiled and
-//!   scanline↔tiled input, incl. C++'s preconditions on matching geometry) —
-//!   a real feature addition, not ported yet. `rawTileData` (reader),
-//!   `fileName` (both), `updatePreviewImage`, `breakTile` ARE ported (T-15).
-//! * Threading (`ThreadPool`, `TileBufferTask`, the semaphore handshake).  The
-//!   single-threaded gather here is observationally identical for the file
-//!   bytes it produces.
 //! * The `NATIVE`-format `convertToXdr` fallback: every ported codec reports
 //!   [`Format::Xdr`], so the gather always produces Xdr and the codec's own
 //!   "no-shrink → store raw" rule keeps the chunk byte-identical to C++.  If a
@@ -101,7 +94,7 @@ use std::marker::PhantomData;
 /// [`TiledOutputFile::copy_pixels`] is generic over this trait instead of
 /// four separate methods.
 ///
-/// **Redesigned** (round 4 continuation, S-16 follow-up, 2026-09-22): the
+/// **Redesigned**: the
 /// original shape had exactly ONE method, `as_tiled_input(&mut self) ->
 /// Result<&mut TiledInputFile<'a>>` — every OTHER call `copy_pixels` makes
 /// (`header`, `tile_order`, `raw_tile_data`) was routed through the concrete
@@ -269,8 +262,8 @@ pub struct TiledOutputFile<'a, S = &'a mut dyn OStream> {
     /// `DerefMut<Target = dyn OStream>` (the C++ `_streamData->os`).
     stream: S,
 
-    /// Everything else this writer owns — the S-16 "ownership inversion"
-    /// design (round 4, `.bughunt/round4.md`, mirroring
+    /// Everything else this writer owns — the "ownership inversion"
+    /// design (mirroring
     /// `crate::scanline::OutputFileState`): factored into its own,
     /// non-generic, stream-free struct so [`crate::multipart::MultiPartOutputFile`]
     /// can persist it across separate [`crate::multipart::MultiPartOutputFile::tiled_output_part`]
@@ -287,7 +280,7 @@ pub struct TiledOutputFile<'a, S = &'a mut dyn OStream> {
 
 /// Everything a [`TiledOutputFile`] owns except its stream — the write-state
 /// object [`crate::multipart::MultiPartOutputFile`] persists per tiled part
-/// (S-16). Has NO generic stream parameter and NO lifetime of its own: every
+/// Has NO generic stream parameter and NO lifetime of its own: every
 /// method that needs to write takes `stream: &mut dyn OStream` explicitly
 /// (mirroring `crate::scanline::OutputFileState`), so the state can outlive
 /// any one borrow of the container's stream.
@@ -326,12 +319,12 @@ pub struct TiledOutputFileState {
 
     /// File position where the header's `preview` attribute's VALUE bytes
     /// begin, or `0` if the header has no preview image — C++
-    /// `_data->previewPosition`. Feeds [`Self::update_preview_image`] (T-15).
+    /// `_data->previewPosition`. Feeds [`Self::update_preview_image`].
     /// Set by [`new_standalone`](Self::new_standalone) (the real value from
     /// `Header::write_to`) or by
     /// [`from_part_with_preview`](Self::from_part_with_preview) (the real
-    /// value `MultiPartOutputFile` captured from `Header::write_attributes_to`,
-    /// M-07, round-4 multipart audit); `0` only via the plain
+    /// value `MultiPartOutputFile` captured from `Header::write_attributes_to`);
+    /// `0` only via the plain
     /// [`from_part`](Self::from_part), used by the public
     /// `TiledOutputFile::from_part` constructor, which does not itself write
     /// any header and so has no real value to supply.
@@ -344,7 +337,7 @@ pub struct TiledOutputFileState {
     /// Per-channel write descriptors — C++ `_data->slices` (empty until
     /// [`set_frame_buffer`][TiledOutputFile::set_frame_buffer] is called).
     ///
-    /// T-14 (round 4 tiled audit, REVISED 2026-09-22): `set_frame_buffer`
+    /// `set_frame_buffer`
     /// stores only this LAYOUT (channel offsets/strides/types) — no pixel
     /// bytes and no lifetime-tied borrow. The pixel bytes are passed to each
     /// `write_tile`/`write_tiles` call instead (`pixels: &[u8]`), matching
@@ -353,7 +346,7 @@ pub struct TiledOutputFileState {
     /// the writer. An earlier design stored `Option<&'a [u8]>` here; it was
     /// withdrawn because a stored borrow makes exactly that streaming
     /// pattern (and a fresh per-level MIP buffer each loop iteration)
-    /// impossible to express — see `.bughunt/progress_fix_tiled.md`.
+    /// impossible to express.
     slices: Vec<TOutSliceInfo>,
 
     /// Byte size of one gathered tile, `maxBytesPerTileLine * tileDesc.ySize`
@@ -365,7 +358,7 @@ pub struct TiledOutputFileState {
     /// mirrors the C++ `TileBuffer::compressor` built by `newTileCompressor`.
     compressor: Option<Box<dyn Compressor>>,
 
-    /// T-13 (round 4 tiled audit, P2, W3.8): out-of-order write buffering —
+    /// Out-of-order write buffering —
     /// port of C++ `TiledOutputFile::Data::{tileMap, nextTileToWrite}`
     /// (`ImfTiledOutputFile.cpp:281-555`). For `INCREASING_Y`/`DECREASING_Y`,
     /// a tile written out of the file's line order is held here (its final
@@ -381,7 +374,7 @@ pub struct TiledOutputFileState {
     /// The next tile coordinate, in the file's line order, that is ready to
     /// be written to disk — C++ `Data::nextTileToWrite`. `None` for
     /// `RANDOM_Y` (tiles are always written immediately in call order, C++'s
-    /// existing behaviour, unchanged by T-13). Initialized in `build()` to
+    /// existing behaviour). Initialized in `build()` to
     /// `(0,0,0,0)` for `INCREASING_Y` or `(0, numYTiles[0]-1, 0,0)` for
     /// `DECREASING_Y` (top row of level 0), advanced by
     /// [`Self::next_tile_coord`] after every tile actually written.
@@ -391,14 +384,14 @@ pub struct TiledOutputFileState {
     /// file, `None` for a standalone single-part file — C++
     /// `TiledOutputFile::Data::{multipart, partNumber}`.
     ///
-    /// This is the same seam W8-1 added to the scanline writer: when `Some`,
+    /// This is the same seam the scanline writer has: when `Some`,
     /// every tile chunk is prefixed with the `partNumber` (i32 LE) exactly as
     /// C++ `writeTileData` does (`if (ofd->multipart) Xdr::write(partNumber)`,
     /// ImfTiledOutputFile.cpp:418-421); when `None`, no prefix is written, so
     /// single-part output is byte-identical to the pre-multipart writer.
     part_number: Option<i32>,
 
-    /// W3.9 phase B: this file's captured thread count — see
+    /// This file's captured thread count — see
     /// [`crate::threading::ThreadCount`] and the scanline writer's identical
     /// field (`scanline/output.rs`).
     num_threads: crate::threading::ThreadCount,
@@ -422,11 +415,10 @@ pub struct TiledOutputFileState {
 /// [`TiledOutputFile::new_owned`]; the produced file is byte-identical to the
 /// borrowed path for the same input.
 ///
-/// Generic over `'a` (T-14): `'a` now means "how long the pixel buffer(s)
+/// Generic over `'a`: `'a` means "how long the pixel buffer(s)
 /// passed to [`set_frame_buffer`](TiledOutputFile::set_frame_buffer) — and
 /// the boxed stream itself — must live", the same meaning `'a` has for the
-/// borrowed-stream default. Pinning it to `'static` (as this alias did
-/// before T-14, when nothing needed `'a` but the unused `S` default) would
+/// borrowed-stream default. Pinning it to `'static` would
 /// make `set_frame_buffer` unusable with an ordinary local/heap buffer —
 /// exactly the buffer a long-lived streaming writer refills every
 /// iteration. The stream slot is `Box<dyn OStream + 'a>` rather than the
@@ -463,7 +455,7 @@ impl<'a> TiledOutputFile<'a, &'a mut dyn OStream> {
     }
 
     /// Same as [`Self::new`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::new`]).
+    /// override (`None` behaves exactly like [`Self::new`]).
     pub fn with_num_threads(
         stream: &'a mut dyn OStream,
         header: &Header,
@@ -498,7 +490,7 @@ impl<'a> TiledOutputFile<'a, &'a mut dyn OStream> {
         part_number: Option<i32>,
         tile_offsets_position: u64,
     ) -> Result<Self> {
-        // T-20 (round 4 tiled audit, P3): C++ 3.4.15
+        // C++ 3.4.15
         // `TiledOutputFile::TiledOutputFile(const OutputPartData* part)`
         // (`ImfTiledOutputFile.cpp:911-917`) checks
         // `part->header.type() != TILEDIMAGE` and throws
@@ -523,8 +515,7 @@ impl<'a> TiledOutputFile<'a, &'a mut dyn OStream> {
         Ok(Self { stream, state, _stream_lt: PhantomData })
     }
 
-    /// Same as [`Self::from_part`], with an explicit `num_threads` override
-    /// (W3.9 phase B).
+    /// Same as [`Self::from_part`], with an explicit `num_threads` override.
     pub fn from_part_mt(
         stream: &'a mut dyn OStream,
         header: &Header,
@@ -549,8 +540,8 @@ impl<'a> TiledOutputFile<'a, &'a mut dyn OStream> {
 }
 
 // Owned-stream constructor (`S = Box<dyn OStream + 'a>`).  Generic over `'a`
-// (T-14) — see the [`TiledOutputFileOwned`] doc for why this is no longer
-// pinned to `'static`.
+// — see the [`TiledOutputFileOwned`] doc for why this is not pinned to
+// `'static`.
 impl<'a> TiledOutputFile<'a, Box<dyn OStream + 'a>> {
     /// Open a [`TiledOutputFileOwned`] that **owns** its output stream — the
     /// owned-stream analogue of [`new`](TiledOutputFile::new).
@@ -574,7 +565,7 @@ impl<'a> TiledOutputFile<'a, Box<dyn OStream + 'a>> {
     }
 }
 
-// S-16 (round 4, ownership inversion): the write-state algorithm body lives
+// Ownership inversion: the write-state algorithm body lives
 // on `TiledOutputFileState`, which owns no stream and no lifetime of its
 // own — this is what lets `crate::multipart::MultiPartOutputFile` persist it
 // across separate `tiled_output_part(n)` calls (mirrors
@@ -585,8 +576,7 @@ impl<'a> TiledOutputFile<'a, Box<dyn OStream + 'a>> {
 /// every constructor path — a named struct instead of a long tuple so a
 /// mutation-testing tool doesn't have to enumerate the product of every
 /// element's candidate return values (a 19-element tuple made
-/// `cargo mutants --list` blow up: see `.bughunt` for the round-5 audit
-/// note). Field names match [`TiledOutputFileState`]'s own fields 1:1 where
+/// `cargo mutants --list` blow up). Field names match [`TiledOutputFileState`]'s own fields 1:1 where
 /// they overlap, so callers destructure it with a plain `let Self { .. } =`.
 struct TiledOutputComputed {
     header: Header,
@@ -798,7 +788,7 @@ impl TiledOutputFileState {
             &num_y_tiles,
         )?;
 
-        // T-13: C++ `TiledOutputFile::initialize`
+        // C++ `TiledOutputFile::initialize`
         // (`ImfTiledOutputFile.cpp:993-996`) — "Determine the first tile
         // coordinate that we will be writing if the file is not RANDOM_Y."
         // `RANDOM_Y` never buffers, so it has no next-tile tracking.
@@ -858,7 +848,7 @@ impl TiledOutputFileState {
     }
 
     /// Same as [`Self::new_standalone`], with an explicit `num_threads`
-    /// override (W3.9 phase B; `None` = capture the current process-wide
+    /// override (`None` = capture the current process-wide
     /// default).
     fn new_standalone_mt(
         stream: &mut dyn OStream,
@@ -913,7 +903,7 @@ impl TiledOutputFileState {
     /// `pub` (not `pub(crate)`): mirrors
     /// `crate::scanline::OutputFileState::from_part`, called directly by
     /// [`crate::multipart::MultiPartOutputFile::tiled_output_part`] to build
-    /// the persisted per-part state (S-16).
+    /// the persisted per-part state.
     pub fn from_part(
         header: &Header,
         part_number: Option<i32>,
@@ -923,12 +913,11 @@ impl TiledOutputFileState {
         // constructor (this function's only OTHER caller besides
         // `MultiPartOutputFile`) does not itself write any header, so it has
         // no real value to supply. `MultiPartOutputFile` calls
-        // `from_part_with_preview` instead (M-07, round-4 multipart audit).
+        // `from_part_with_preview` instead.
         Self::from_part_with_preview_mt(header, part_number, tile_offsets_position, 0, None)
     }
 
-    /// Same as [`Self::from_part`], with an explicit `num_threads` override
-    /// (W3.9 phase B).
+    /// Same as [`Self::from_part`], with an explicit `num_threads` override.
     pub fn from_part_mt(
         header: &Header,
         part_number: Option<i32>,
@@ -939,7 +928,7 @@ impl TiledOutputFileState {
     }
 
     /// Like [`from_part`](Self::from_part), but additionally records
-    /// `preview_position` — M-07 (round-4 multipart audit): C++
+    /// `preview_position`: C++
     /// `ImfMultiPartOutputFile.cpp:474-477` captures
     /// `parts[i]->previewPosition = headers[i].writeTo(..)` for every part
     /// while writing the header list, so `updatePreviewImage` works on a
@@ -957,7 +946,7 @@ impl TiledOutputFileState {
     }
 
     /// Same as [`Self::from_part_with_preview`], with an explicit
-    /// `num_threads` override (W3.9 phase B).
+    /// `num_threads` override.
     pub fn from_part_with_preview_mt(
         header: &Header,
         part_number: Option<i32>,
@@ -998,8 +987,7 @@ impl TiledOutputFileState {
 
     /// Replace the header's preview-image pixels and rewrite them in place
     /// on disk — port of `void updatePreviewImage(const PreviewRgba
-    /// newPixels[])` (T-15, round 4 tiled audit; C++
-    /// `ImfTiledOutputFile.cpp:1824-1873`).
+    /// newPixels[])` (C++ `ImfTiledOutputFile.cpp:1824-1873`).
     ///
     /// `new_pixels` must have exactly as many entries as the header's
     /// existing preview image (`width * height`) — C++ trusts the caller's
@@ -1053,9 +1041,9 @@ impl TiledOutputFileState {
 
     /// Overwrite `length` bytes of an already-written tile's chunk, starting
     /// `offset` bytes into it, with the byte `c` — port of `void breakTile(int
-    /// dx, int dy, int lx, int ly, int offset, int length, char c)` (T-15,
-    /// round 4 tiled audit; test-only helper for exercising corrupt-chunk
-    /// error paths, `ImfTiledOutputFile.cpp:1878-1901`).
+    /// dx, int dy, int lx, int ly, int offset, int length, char c)`
+    /// (test-only helper for exercising corrupt-chunk error paths,
+    /// `ImfTiledOutputFile.cpp:1878-1901`).
     ///
     /// # Errors
     /// Returns [`ExrError::Arg`] if the tile has not been written yet
@@ -1265,7 +1253,7 @@ impl TiledOutputFileState {
     /// Set the pixel LAYOUT (channel offsets/strides/types) — port of
     /// `TiledOutputFile::setFrameBuffer`.
     ///
-    /// T-14 (round 4 tiled audit, REVISED): this stores only the layout, not
+    /// This stores only the layout, not
     /// pixel bytes — `write_tile`/`write_tiles` take the bytes per call
     /// (`pixels: &[u8]`), matching C++'s streaming pattern (one small
     /// buffer, refilled and re-passed per tile) instead of forcing the
@@ -1342,7 +1330,7 @@ impl TiledOutputFileState {
     /// Write the rectangle of tiles `[dx1..=dx2] x [dy1..=dy2]` at level
     /// `(lx, ly)` — port of `TiledOutputFile::writeTiles(dx1,dx2,dy1,dy2,lx,ly)`.
     ///
-    /// T-14 (round 4 tiled audit, REVISED): `pixels` is the caller's current
+    /// `pixels` is the caller's current
     /// pixel data for this call — read fresh each call, never stored. The
     /// same small buffer can be refilled and passed again for the next
     /// call, matching C++'s streaming pattern; `set_frame_buffer`'s slices
@@ -1417,7 +1405,7 @@ impl TiledOutputFileState {
             dy += dy_step;
         }
 
-        // W3.9 phase B gate: parallel only when there is more than one tile
+        // Parallel only when there is more than one tile
         // AND the captured thread count is `> 1` — 1:1 with C++'s
         // `nTiles > 1 && numThreads > 1` (`ImfTiledOutputFile.cpp:1191`).
         if coords.len() > 1 && self.num_threads.is_parallel() {
@@ -1426,7 +1414,7 @@ impl TiledOutputFileState {
             return Ok(());
         }
 
-        // Alloc audit C4: one pool for the whole serial loop, so
+        // One pool for the whole serial loop, so
         // `write_single_tile`'s `encode_tile` call reuses one buffer across
         // every tile in this call instead of allocating fresh each time.
         let pool = crate::buf::BufPool::new();
@@ -1437,7 +1425,7 @@ impl TiledOutputFileState {
         Ok(())
     }
 
-    /// The parallel write body (design_r5.md §1.2.7, tiled variant): gather +
+    /// The parallel write body (tiled variant): gather +
     /// encode the tiles on the shared pool (each on its own pooled buffer and
     /// pooled per-worker codec) while this thread FEEDS finished tiles -
     /// [`feed_tile`], the existing `bufferedTileWrite` state machine - one at a
@@ -1482,7 +1470,7 @@ impl TiledOutputFileState {
         // emit step mutates the emit state: disjoint field borrows, no clones.
         let (header, slices, mut sink) = self.split();
 
-        // Alloc audit C4: one pool shared by the encode workers and the emit
+        // One pool shared by the encode workers and the emit
         // step (which gives each buffer back once `feed_tile` is done with
         // it). At most `window` tiles are outstanding, so `window` buffers
         // cover the ring.
@@ -1516,7 +1504,7 @@ impl TiledOutputFileState {
             },
             |k, chunk| -> Result<()> {
                 sink.feed(stream, coords[k], &chunk)?;
-                // Alloc audit C4: return the encode buffer once feed_tile is
+                // Return the encode buffer once feed_tile is
                 // done reading it -- sound even when feed_tile internally
                 // buffers a COPY into `self.tile_map` for out-of-turn
                 // writing (that copy is a separate allocation, unaffected;
@@ -1729,8 +1717,8 @@ impl TiledOutputFileState {
     //
     // Fuses C++ `TileBufferTask::execute` (gather + compress) with
     // `bufferedTileWrite` / `writeTileData` (the chunk write + offset record).
-    // Single-threaded. T-13: for `INCREASING_Y`/`DECREASING_Y` the on-disk
-    // order now follows the file's line order regardless of call order (a
+    // Single-threaded. For `INCREASING_Y`/`DECREASING_Y` the on-disk
+    // order follows the file's line order regardless of call order (a
     // tile written out of turn is buffered in `self.tile_map` until the
     // tiles before it are written); `RANDOM_Y` still writes immediately at
     // the current stream position in call order, unchanged.
@@ -1780,7 +1768,7 @@ impl TiledOutputFileState {
     /// Write one already-encoded tile chunk to the stream NOW and back-patch
     /// its offset-table slot — port of C++ `writeTileData`
     /// (`ImfTiledOutputFile.cpp:391-437`). Split out of
-    /// [`Self::write_single_tile`] (T-13) so it can be called either
+    /// [`Self::write_single_tile`] so it can be called either
     /// immediately or later, when a buffered tile's turn comes up, without
     /// re-deriving the chunk bytes. Takes the exact fields it touches rather
     /// than `&mut self` so callers can hold `chunk` borrowed from another
@@ -1830,7 +1818,7 @@ impl TiledOutputFileState {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)] // C4's pool param pushed this over the limit; 1:1 shape otherwise
+    #[allow(clippy::too_many_arguments)] // the buffer-pool param pushed this over the limit; 1:1 shape otherwise
     fn write_single_tile(
         &mut self,
         stream: &mut dyn OStream,
@@ -1889,14 +1877,14 @@ impl TiledOutputFileState {
         result
     }
 
-    /// T-13's `bufferedTileWrite` state machine, extracted as its own step
-    /// (W3.9 phase B) so the parallel path can gather+encode a whole window
+    /// The `bufferedTileWrite` state machine, extracted as its own step
+    /// so the parallel path can gather+encode a whole window
     /// of tiles first and then feed each ALREADY-COMPUTED chunk through this
     /// SAME stateful logic, one at a time, in file order — see
     /// `write_tiles_parallel`'s doc comment for why that keeps on-disk bytes
     /// independent of thread count. Port of C++ `bufferedTileWrite`
-    /// (`ImfTiledOutputFile.cpp:441-556`); unchanged behaviour from the
-    /// pre-W3.9 tail of `write_single_tile`.
+    /// (`ImfTiledOutputFile.cpp:441-556`); the serial path's
+    /// `write_single_tile` feeds through it too.
     fn feed_tile(
         &mut self,
         stream: &mut dyn OStream,
@@ -1908,7 +1896,7 @@ impl TiledOutputFileState {
 }
 
 impl TileSink<'_> {
-    /// T-13's `bufferedTileWrite` state machine (port of C++
+    /// The `bufferedTileWrite` state machine (port of C++
     /// `bufferedTileWrite`, `ImfTiledOutputFile.cpp:441-556`): write `chunk`
     /// now when it is the next tile in the file's line order (then flush any
     /// buffered successors), else hold a copy until its turn. The serial path
@@ -1968,7 +1956,7 @@ impl TileSink<'_> {
                 } else {
                     // Out of turn: hold a copy until its turn comes up (C++
                     // `BufferedTile` — also a `memcpy`, so this is not an
-                    // extra cost T-13 introduces, only the one C++ always
+                    // extra cost buffering introduces, only the one C++ always
                     // pays for a buffered tile).
                     crate::probe::hit(crate::probe::Probe::TileBuffered);
                     self.tile_map.insert(key, chunk.to_vec());
@@ -1981,7 +1969,7 @@ impl TileSink<'_> {
 }
 
 // ---------------------------------------------------------------------------
-// W3.9 phase B — pure per-tile pipeline functions (writer side)
+// Pure per-tile pipeline functions (writer side)
 // ---------------------------------------------------------------------------
 //
 // `gather_tile`/`encode_tile` are the writer-side analogue of the tiled
@@ -2084,14 +2072,14 @@ where
 
     /// Replace the header's preview-image pixels and rewrite them in place
     /// on disk -- port of `void updatePreviewImage(const PreviewRgba
-    /// newPixels[])` (T-15, round 4 tiled audit).
+    /// newPixels[])`.
     pub fn update_preview_image(&mut self, new_pixels: &[crate::attr::PreviewRgba]) -> Result<()> {
         self.state.update_preview_image(&mut *self.stream, new_pixels)
     }
 
     /// Overwrite `length` bytes of an already-written tile's chunk, starting
     /// `offset` bytes into it, with the byte `c` -- port of `void breakTile(...)`
-    /// (T-15, round 4 tiled audit; test-only corrupt-chunk helper).
+    /// (test-only corrupt-chunk helper).
     #[allow(clippy::too_many_arguments)] // 1:1 with C++ breakTile's parameter list
     pub fn break_tile(
         &mut self,
@@ -2116,7 +2104,7 @@ where
     }
 
     /// Name of the underlying file or stream -- port of `const char*
-    /// fileName() const` (T-15, round 4 tiled audit).
+    /// fileName() const`.
     pub fn file_name(&self) -> &str {
         self.stream.file_name()
     }
@@ -2278,12 +2266,12 @@ where
 }
 
 /// A borrowing view over a tiled output part's PERSISTED write state -- the
-/// S-16 (round 4) analogue of `crate::scanline::OutputPartWriter` for tiled
+/// analogue of `crate::scanline::OutputPartWriter` for tiled
 /// parts. `crate::multipart::MultiPartOutputFile::tiled_output_part` returns
 /// this instead of rebuilding a fresh [`TiledOutputFile`] on every call, so
 /// interleaved writes across parts -- write part 0's tiles, write part 1,
 /// come back and write more of part 0 -- resume correctly: the SAME
-/// [`TiledOutputFileState`] (incl. T-13's `tile_map`/`next_tile_to_write`)
+/// [`TiledOutputFileState`] (incl. the `tile_map`/`next_tile_to_write` buffering)
 /// is reused, not reset. Exposes the identical public method set as
 /// [`TiledOutputFile`] by delegating to the same [`TiledOutputFileState`]
 /// methods, driven by the SAME `stream: &mut dyn OStream` reborrowed from
@@ -2449,7 +2437,7 @@ impl<'p> TiledOutputPartWriter<'p> {
 
     /// Replace the header's preview-image pixels and rewrite them in place
     /// on disk. See [`TiledOutputFileState::update_preview_image`] for the
-    /// full doc. M-07 (round-4 multipart audit): now reachable on a
+    /// full doc. Reachable on a
     /// multipart part because `MultiPartOutputFile::tiled_output_part`
     /// builds this part's state with `from_part_with_preview`.
     pub fn update_preview_image(&mut self, new_pixels: &[crate::attr::PreviewRgba]) -> Result<()> {
@@ -2606,7 +2594,7 @@ mod tests {
         (offsets, chunks_start)
     }
 
-    /// W3.9 phase B: write the SAME multi-tile rectangle with `num_threads`
+    /// Write the SAME multi-tile rectangle with `num_threads`
     /// in {0, 1, 2, 3, 8, 17} and assert the produced FILE BYTES are
     /// identical at every thread count — the tiled-writer analogue of
     /// `scanline::output::tests::parallel_write_whole_image_is_byte_identical_across_thread_counts`.
@@ -2908,7 +2896,7 @@ mod tests {
         fb
     }
 
-    /// ADD-2: the OWNED-stream path.  A small struct OWNS both its
+    /// The OWNED-stream path.  A small struct OWNS both its
     /// `StdOfStream` (boxed, via the writer) and the persisted
     /// [`TiledOutputFileOwned`] in ONE struct, and writes tiles across
     /// MULTIPLE `write_tile` calls — proving the lifetime works (impossible
@@ -2937,8 +2925,8 @@ mod tests {
         // A long-lived holder that OWNS both the stream (inside the writer) and
         // the writer — the exact shape a streaming/region writer needs.
         // `'a` is the stream's own lifetime (`Box<dyn OStream + 'a>`); pixel
-        // data carries no lifetime at all since T-14's revised design (passed
-        // per `write_tile` call, never stored).
+        // data carries no lifetime at all (passed per `write_tile` call,
+        // never stored).
         struct OwningWriter<'a> {
             writer: TiledOutputFileOwned<'a>,
         }
@@ -3034,7 +3022,7 @@ mod tests {
         assert_eq!(dy, 2, "DECREASING_Y must write the top tile row (dy=2) first");
     }
 
-    /// T-20 (round 4 tiled audit) — `TiledOutputFile::from_part` must reject a
+    /// `TiledOutputFile::from_part` must reject a
     /// header whose `type` is not `tiledimage` instead of silently retyping
     /// it. C++ 3.4.15 `TiledOutputFile::TiledOutputFile(const
     /// OutputPartData*)` (`ImfTiledOutputFile.cpp:911-917`) throws
@@ -3059,7 +3047,7 @@ mod tests {
         }
     }
 
-    /// T-14 (round 4 tiled audit, REVISED design) — the C++ streaming-writer
+    /// The C++ streaming-writer
     /// pattern: ONE tile-sized buffer, refilled IN PLACE and passed to
     /// `write_tile` fresh each call (no per-image-sized buffer; no stored
     /// borrow on the writer at all — `set_frame_buffer` only installs the
@@ -3156,7 +3144,7 @@ mod tests {
         }
     }
 
-    /// T-13 (round 4 tiled audit, P2, W3.8) — writing tiles out of the file's
+    /// Writing tiles out of the file's
     /// line order must still produce the SAME on-disk chunk order as writing
     /// them in order, for `INCREASING_Y`. Port of C++
     /// `TiledOutputFile::Data::{tileMap, nextTileToWrite}` /
@@ -3204,7 +3192,7 @@ mod tests {
         );
     }
 
-    /// T-13 — the DECREASING_Y counterpart: on-disk order must match writing
+    /// The DECREASING_Y counterpart: on-disk order must match writing
     /// in line order (dy descending) even when the caller writes dy
     /// ascending (the reverse of the file's line order).
     #[test]
@@ -3246,7 +3234,7 @@ mod tests {
         );
     }
 
-    /// T-13 — a tile still buffered when the writer is dropped is simply
+    /// A tile still buffered when the writer is dropped is simply
     /// discarded (never written), matching C++'s destructor (frees `tileMap`
     /// without flushing it): the file is missing that tile's chunk and its
     /// offset-table slot stays 0.
@@ -3288,7 +3276,7 @@ mod tests {
         assert!(err.is_err(), "tile (0,0) was never written and must not read successfully");
     }
 
-    /// T-15 (round 4 tiled audit) — `file_name`, `break_tile`,
+    /// `file_name`, `break_tile`,
     /// `update_preview_image` accessors added to the writer.
     #[test]
     fn t15_writer_accessors() {
@@ -3368,7 +3356,7 @@ mod tests {
         assert_eq!(raw[0], 0xFF, "break_tile must have corrupted the chunk's first payload byte");
     }
 
-    /// T-15 remainder — `copy_pixels` (`TiledOutputFile::copyPixels`, round 4):
+    /// `copy_pixels` (`TiledOutputFile::copyPixels`):
     /// write a 4x4 (2x2 tiles) source file, quick-copy it into a fresh
     /// `TiledOutputFile` with a matching header, and confirm the destination's
     /// on-disk chunk bytes are byte-identical to the source's (raw copy, no
@@ -3397,7 +3385,7 @@ mod tests {
                 let mut src = TiledOutputFile::new(&mut src_out, &header).unwrap();
                 src.set_frame_buffer(&fb).unwrap();
                 // Write in an arbitrary call order (RANDOM_Y allows any
-                // order; INCREASING_Y's own T-13 buffering makes this
+                // order; INCREASING_Y's own out-of-order buffering makes this
                 // in-order on disk regardless of call order).
                 src.write_tile(&pixels, 1, 1, 0, 0).unwrap();
                 src.write_tile(&pixels, 0, 0, 0, 0).unwrap();

@@ -36,8 +36,7 @@ use crate::{
 /// the struct is dropped.
 pub struct StdIfStream {
     file_name: String,
-    /// W3.9 phase B follow-up ("as C++ or better" wall-time comparison):
-    /// a raw `File` here made every `seekg` a real syscall even when the
+    /// A raw `File` here made every `seekg` a real syscall even when the
     /// target offset was already inside the OS's page cache / this
     /// process's most recent read — and scanline/tiled readers issue one
     /// `seekg` PER CHUNK (`fetch_chunk`/`fetch_tile`, unconditionally, even
@@ -48,7 +47,7 @@ pub struct StdIfStream {
     /// for BufReader<R>`'s `SeekFrom::Start` arm unconditionally delegates
     /// to the inner reader and discards the buffer, regardless of whether
     /// the target is the position already sitting in it (confirmed in
-    /// std's source — team-lead review caught this). `pos` (below) is what
+    /// std's source). `pos` (below) is what
     /// actually eliminates the redundant syscall: `seekg` compares against
     /// it and skips the underlying `Seek::seek` call — and therefore the
     /// buffer discard — entirely when the caller is already there.
@@ -105,7 +104,7 @@ impl IStream for StdIfStream {
     ///   EOF before the read even starts.
     /// * `InputExc("Early end of file: …")` on a short read mid-buffer.
     ///
-    /// C-21: this used to disagree with C++ by probing one byte past the
+    /// This used to disagree with C++ by probing one byte past the
     /// requested data (plus a `seek(-1)`) to decide whether the *last*
     /// successful read should report `false` — three syscalls per read for a
     /// distinction the real reader never observes, since no caller inspects
@@ -182,9 +181,9 @@ impl IStream for StdIfStream {
 /// is flushed and closed when the struct is dropped.
 pub struct StdOfStream {
     file_name: String,
-    /// W3.9 phase B follow-up: same rationale as `StdIfStream::file` — a raw
+    /// Same rationale as `StdIfStream::file` — a raw
     /// `File` made every `seekp` (the writer back-patches offset-table
-    /// entries and, for tiled/deep, out-of-order chunk positions — D-11/D-15)
+    /// entries and, for tiled/deep, out-of-order chunk positions)
     /// a real syscall even when the target offset sits inside the write
     /// buffer BufWriter would already hold. As with `StdIfStream`, `Seek for
     /// BufWriter<W>`'s `SeekFrom::Start` arm unconditionally flushes and
@@ -418,7 +417,7 @@ impl<D: AsRef<[u8]> + Send> IStream for MemIStream<D> {
         self.cursor.read_exact(buf).map_err(ExrError::from_io)?;
 
         // A full, exact read of `n` bytes is always `true` in C++, even when
-        // it consumed the buffer's last byte (C-21 — matches `StdIfStream`).
+        // it consumed the buffer's last byte (matches `StdIfStream`).
         Ok(true)
     }
 
@@ -440,8 +439,8 @@ impl<D: AsRef<[u8]> + Send> IStream for MemIStream<D> {
     }
 
     /// A `Vec<u8>` backing buffer needs no shared cursor to read an offset
-    /// range, so `MemIStream` genuinely supports stateless reads (C-16
-    /// follow-up) — unlike `StdIfStream`, whose backing `std::fs::File`
+    /// range, so `MemIStream` genuinely supports stateless reads
+    /// — unlike `StdIfStream`, whose backing `std::fs::File`
     /// would need a platform-specific positional read (`pread`/`ReadFileEx`)
     /// to implement this without disturbing the shared file cursor; that is
     /// not ported here (see the module doc), so `StdIfStream` keeps the
@@ -622,7 +621,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// C-21 — `MemIStream::read` shares the same fix: an exact read to the
+    /// `MemIStream::read` shares the same fix: an exact read to the
     /// end of the buffer returns `true`, not `false`.
     #[test]
     fn mem_istream_read_exactly_to_eof_returns_true() {
@@ -632,7 +631,7 @@ mod tests {
         assert_eq!(buf, [1, 2, 3, 4]);
     }
 
-    /// C-16 follow-up — `MemIStream` supports stateless reads: an in-range
+    /// `MemIStream` supports stateless reads: an in-range
     /// offset read, a partial read at the tail, and a fully-past-the-end
     /// offset (which reads 0 bytes, not an error).
     #[test]
@@ -654,7 +653,7 @@ mod tests {
         assert_eq!(s.read_stateless(&mut buf3, 100).unwrap(), 0);
     }
 
-    /// C-16 follow-up — `StdIfStream` keeps the trait's default
+    /// `StdIfStream` keeps the trait's default
     /// "unsupported" stateless-read behaviour.
     #[test]
     fn std_if_stream_stateless_read_unsupported_by_default() {
@@ -672,7 +671,7 @@ mod tests {
         std::fs::remove_file(&path).expect("remove temp file");
     }
 
-    // CORE-IO-05: the disk-file stream must report its length via `size()` so
+    // The disk-file stream must report its length via `size()` so
     // the header parser can apply the remaining-bytes bound on the primary path.
     #[test]
     fn std_if_stream_reports_size() {
@@ -691,7 +690,7 @@ mod tests {
         std::fs::remove_file(&path).expect("remove temp file");
     }
 
-    /// C-21 — a read of exactly the remaining bytes returns `true`, matching
+    /// A read of exactly the remaining bytes returns `true`, matching
     /// C++ `StdIFStream::read` (`istream::read` only sets `eofbit` on a
     /// *short* read, not on one that lands exactly on the last byte).
     #[test]
@@ -713,7 +712,7 @@ mod tests {
         std::fs::remove_file(&path).expect("remove temp file");
     }
 
-    /// C-21 — a short read (past what the file actually holds) is a hard
+    /// A short read (past what the file actually holds) is a hard
     /// error, never a silent `false`.
     #[test]
     fn read_past_eof_errors() {

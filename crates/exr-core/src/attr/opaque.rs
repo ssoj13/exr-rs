@@ -168,7 +168,7 @@ mod tests {
         assert!(o.into_data().is_empty());
     }
 
-    // CORE-IO-02: a tiny buffer declaring a ~2 GiB opaque payload must error
+    // A tiny buffer declaring a ~2 GiB opaque payload must error
     // (bounded by the stream's remaining bytes) rather than allocate/abort.
     #[test]
     fn huge_size_rejected_without_alloc() {

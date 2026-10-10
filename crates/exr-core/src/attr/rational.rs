@@ -45,7 +45,7 @@ impl Rational {
 
     /// Construct the best rational approximation of a `double` — a 1:1 port
     /// of `Rational::Rational(double x)` (continued-fraction expansion
-    /// contributed by Greg Ward; C-16).
+    /// contributed by Greg Ward).
     ///
     /// `x == NaN` yields `n = 0, d = 0`; `|x| >= 2^31 - 0.5` yields the
     /// signed infinity encoding (`n = ±1, d = 0`), matching the C++ exactly.
@@ -152,7 +152,7 @@ mod tests {
         assert_eq!(Rational::static_type_name(), "rational");
     }
 
-    /// C-16 — `Rational::from_f64` (the ported `Rational(double)` ctor)
+    /// `Rational::from_f64` (the ported `Rational(double)` ctor)
     /// finds a small exact fraction for common values.
     #[test]
     fn from_f64_exact_fractions() {
@@ -165,7 +165,7 @@ mod tests {
         assert!((r.as_f64() - -2.5).abs() < 1e-9);
     }
 
-    /// C-16 — NaN and near-`i32::MAX` magnitudes hit the special-cased
+    /// NaN and near-`i32::MAX` magnitudes hit the special-cased
     /// branches (NaN encoding, signed infinity) rather than the continued
     /// fraction.
     #[test]

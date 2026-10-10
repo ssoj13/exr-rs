@@ -1,5 +1,5 @@
-//! W3.9 ZIP perf follow-up (team-lead task, parallel to deflate-fast's
-//! deflate-only-vs-libdeflate measurement): an IN-PROCESS timing breakdown of
+//! ZIP perf breakdown (companion to deflate-rs's deflate-only-vs-libdeflate
+//! measurement): an IN-PROCESS timing breakdown of
 //! ONE ZIP chunk, splitting `Compressor::compress`/`uncompress`'s total time
 //! into "predictor/interleave" (`compressor::predictor::{reorder_and_predict,
 //! unpredict_and_reorder}`) vs "everything else" (mostly the zlib
@@ -8,17 +8,16 @@
 //! predictor_only`).
 //!
 //! Chunk shape: 16 lines x 16384 width x 3 HALF channels (R, G, B) —
-//! team-lead's exact spec, one ZIP chunk (`numScanLines == 16`).
+//! one ZIP chunk (`numScanLines == 16`).
 //!
 //! Run explicitly (ignored by default):
 //! ```text
 //! cargo test -p exr-core --release --test w39b_zip_predictor_vs_zlib -- --ignored --nocapture
 //! ```
 //!
-//! Bench discipline: hold `bench.lock` (`C:\Users\joss1\AppData\Local\Temp\claude\bench.lock`)
-//! before running, delete it after — checked by whoever launches this test,
-//! not by the test itself. 5 repeats, median + min reported, raw numbers
-//! logged to `.bughunt/bench/*.log`.
+//! Bench discipline: run one benchmark at a time on a quiet machine — enforced
+//! by whoever launches this test, not by the test itself. 5 repeats, median +
+//! min reported.
 
 use std::time::{Duration, Instant};
 

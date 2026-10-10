@@ -1,16 +1,14 @@
-//! W3.9 phase B follow-up (2026-09-24): confirm real parallel speedup on a
+//! Confirm real parallel speedup on a
 //! MULTI-CHANNEL deep scanline read now that `deep_line_write_interval`
 //! computes one EXACT range per active slice instead of one over-wide
-//! merged range across all slices (`.bughunt/alloc_audit.md`'s
-//! C6-followup entry). Before that fix, `plan_disjoint` rejected the
+//! merged range across all slices. Before that fix, `plan_disjoint` rejected the
 //! parallel fast path for any 2+-channel deep image, so `num_threads`
 //! made no difference to `read_pixels`'s wall time on real files with
 //! more than one channel -- this measures 1 vs 8 threads to show the
 //! parallel path now genuinely engages and helps.
 //!
-//! NOT run under `bench.lock` coordination (no lock file was available in
-//! this session) -- a confirmatory measurement of THIS fix's effect, not a
-//! formal cross-agent perf claim; absolute numbers may include some
+//! A confirmatory measurement of THIS fix's effect, not a
+//! formal perf claim; absolute numbers may include some
 //! concurrent-load noise, but the direction (N threads faster than 1) is
 //! what this test exists to prove.
 //!

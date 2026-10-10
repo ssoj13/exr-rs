@@ -1,4 +1,4 @@
-//! Tile sources (`.bughunt/design_tiling.md` §3.2): where tile pixels come
+//! Tile sources: where tile pixels come
 //! from. A source produces tiles in WORK UNITS: the in-RAM frame one tile at a
 //! time, a file one tile row of a level at a time (one band decode yields the
 //! whole row). The scheduler ([`super::view::TileState`]) de-duplicates by
@@ -145,7 +145,7 @@ pub trait TileSource: Send + Sync {
     ) -> Option<(u32, Arc<Vec<f32>>)>;
 }
 
-/// The in-RAM materialized frame (phase 1): level-0 RGBA `f32`.
+/// The in-RAM materialized frame: level-0 RGBA `f32`.
 #[derive(Clone)]
 pub struct FrameSource {
     /// `w * h * 4` linear RGBA.

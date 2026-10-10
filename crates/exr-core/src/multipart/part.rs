@@ -94,7 +94,7 @@ macro_rules! part_wrapper {
 part_wrapper! {
     /// Scanline output part — port of `Imf::OutputPart`.  Forwards
     /// `set_frame_buffer` / `write_pixels` / `header` to the underlying
-    /// [`OutputPartWriter`] (S-16: a borrowing view over this part's
+    /// [`OutputPartWriter`] (a borrowing view over this part's
     /// persisted writer state, not a fresh `OutputFile` per call) for this
     /// part (chunks carry the leading `partNumber`).
     OutputPart, OutputPartWriter
@@ -103,7 +103,7 @@ part_wrapper! {
 part_wrapper! {
     /// Scanline input part — port of `Imf::InputPart`.  Forwards
     /// `set_frame_buffer` / `read_pixels` / `header` to the underlying
-    /// [`InputFilePartReader`] (S-16, round 4 continuation: a borrowing view
+    /// [`InputFilePartReader`] (a borrowing view
     /// over this part's persisted reader state, not a fresh `InputFile`
     /// built from scratch each call) for this part (the leading `partNumber`
     /// is verified).
@@ -113,7 +113,7 @@ part_wrapper! {
 part_wrapper! {
     /// Tiled output part — port of `Imf::TiledOutputPart`.  Forwards
     /// `set_frame_buffer` / `write_tile(s)` / `header` to the underlying
-    /// [`TiledOutputPartWriter`] (S-16, round 4 continuation: a borrowing
+    /// [`TiledOutputPartWriter`] (a borrowing
     /// view over this part's persisted writer state, not a fresh
     /// `TiledOutputFile` per call) for this part.
     TiledOutputPart, TiledOutputPartWriter
@@ -122,14 +122,14 @@ part_wrapper! {
 part_wrapper! {
     /// Tiled input part — port of `Imf::TiledInputPart`.  Forwards
     /// `set_frame_buffer` / `read_tile(s)` / `header` to the underlying
-    /// [`TiledInputPartReader`] (S-16, round 4 continuation: a borrowing view
+    /// [`TiledInputPartReader`] (a borrowing view
     /// over this part's persisted reader state, not a fresh `TiledInputFile`
     /// built from scratch each call) for this part.
     TiledInputPart, TiledInputPartReader
 }
 
-// `TiledOutputFile::copy_pixels` (T-15 remainder, round 4; trait redesigned
-// round 4 continuation, S-16 follow-up) is generic over `TiledCopySource`;
+// `TiledOutputFile::copy_pixels` (trait redesigned
+// for the borrowing part views) is generic over `TiledCopySource`;
 // trait bounds on a generic parameter are not satisfied via `Deref` coercion
 // the way a concrete-type call site is, so `TiledInputPart`/`InputPart` —
 // C++'s `TiledInputPart&`/`InputPart&` `copyPixels` overloads — each need
@@ -176,7 +176,7 @@ impl<'a> TiledCopySource for InputPart<'a> {
     }
 }
 
-// `OutputFile::copy_pixels` (W3.6) is generic over `ScanLineCopySource`
+// `OutputFile::copy_pixels` is generic over `ScanLineCopySource`
 // (`scanline/output.rs`); same reasoning as the `TiledCopySource` impls
 // above — `InputPart` (C++'s `InputPart&` `copyPixels` overload) needs its
 // own thin forwarding impl.
@@ -192,8 +192,8 @@ impl<'a> ScanLineCopySource for InputPart<'a> {
 part_wrapper! {
     /// Deep scanline output part — port of `Imf::DeepScanLineOutputPart`.
     /// Forwards `set_frame_buffer` / `write_pixels` / `header` to the
-    /// underlying [`DeepScanLineOutputPartWriter`] (S-16, round 4
-    /// continuation: a borrowing view over this part's persisted writer
+    /// underlying [`DeepScanLineOutputPartWriter`] (a
+    /// borrowing view over this part's persisted writer
     /// state, not a fresh `DeepScanLineOutputFile` per call) for this part.
     DeepScanLineOutputPart, DeepScanLineOutputPartWriter
 }
@@ -201,8 +201,8 @@ part_wrapper! {
 part_wrapper! {
     /// Deep scanline input part — port of `Imf::DeepScanLineInputPart`.
     /// Forwards `set_frame_buffer` / `read_pixel_sample_counts` / `read_pixels`
-    /// / `header` to the underlying [`DeepScanLineInputPartReader`] (S-16,
-    /// round 4 continuation: a borrowing view over this part's persisted
+    /// / `header` to the underlying [`DeepScanLineInputPartReader`] (a
+    /// borrowing view over this part's persisted
     /// reader state, not a fresh `DeepScanLineInputFile` built from scratch
     /// each call) for this part.
     DeepScanLineInputPart, DeepScanLineInputPartReader
@@ -211,21 +211,21 @@ part_wrapper! {
 part_wrapper! {
     /// Deep tiled output part — port of `Imf::DeepTiledOutputPart`.  Forwards
     /// `set_frame_buffer` / `write_tile(s)` / `header` to the underlying
-    /// [`DeepTiledOutputPartWriter`] (S-16, round 4 continuation: a borrowing
+    /// [`DeepTiledOutputPartWriter`] (a borrowing
     /// view over this part's persisted writer state, not a fresh
     /// `DeepTiledOutputFile` per call) for this part.
     DeepTiledOutputPart, DeepTiledOutputPartWriter
 }
 
 // `DeepScanLineOutputFile::copy_pixels` / `DeepTiledOutputFile::copy_pixels`
-// (D-13, round 4 continuation) are generic over `DeepScanLineCopySource` /
+// are generic over `DeepScanLineCopySource` /
 // `DeepTiledCopySource` (`deep/scanline_output.rs` / `deep/tiled_output.rs`).
-// fix-deep redesigned both traits mid-round-4 to the same duck-typed,
-// no-lifetime shape `TiledCopySource` got in this session (`header` +
+// Both traits have the same duck-typed,
+// no-lifetime shape as `TiledCopySource` (`header` +
 // `raw_pixel_data` / `total_tiles`+`tile_order`+`raw_tile_data`), specifically
 // so a borrowing cache view (which never owns a concrete file to hand back)
-// can implement them — see `deep/CLAUDE.md`'s "Trait redesign mid-pass".
-// `DeepScanLineInputPart`/`DeepTiledInputPart` wrap the S-16 borrowing views
+// can implement them.
+// `DeepScanLineInputPart`/`DeepTiledInputPart` wrap the borrowing views
 // ([`DeepScanLineInputPartReader`] / [`DeepTiledInputPartReader`]), which now
 // carry the matching forwarding methods (`multipart/input.rs`), so these
 // impls delegate to them directly.
@@ -259,7 +259,7 @@ impl<'a> DeepTiledCopySource for DeepTiledInputPart<'a> {
     }
 }
 
-// `CompositeDeepScanLine::add_source` (D-12) is generic over
+// `CompositeDeepScanLine::add_source` is generic over
 // `DeepScanLineCompositeSource`; same reasoning as the `*CopySource` impls
 // above -- `DeepScanLineInputPart` (C++'s `addSource(DeepScanLineInputPart*)`
 // overload) needs its own thin forwarding impl.
@@ -292,8 +292,8 @@ impl<'a> DeepScanLineCompositeSource for DeepScanLineInputPart<'a> {
 part_wrapper! {
     /// Deep tiled input part — port of `Imf::DeepTiledInputPart`.  Forwards
     /// `set_frame_buffer` / `read_pixel_sample_counts` / `read_tile(s)` /
-    /// `header` to the underlying [`DeepTiledInputPartReader`] (S-16, round 4
-    /// continuation: a borrowing view over this part's persisted reader
+    /// `header` to the underlying [`DeepTiledInputPartReader`] (a
+    /// borrowing view over this part's persisted reader
     /// state, not a fresh `DeepTiledInputFile` built from scratch each call)
     /// for this part.
     DeepTiledInputPart, DeepTiledInputPartReader

@@ -275,7 +275,7 @@ mod tests {
         }
     }
 
-    /// The number the whole W5.1 fix is about: scene-linear 18 % grey must reach
+    /// The number the whole transfer-function fix is about: scene-linear 18 % grey must reach
     /// an sRGB-8 surface as code 118 (0.4613), not code 46 (which is what the
     /// old "write linear, let egui encode" chain produced).
     #[test]

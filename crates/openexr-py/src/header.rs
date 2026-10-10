@@ -5,7 +5,7 @@
 //!
 //! Read via `MultiPartInputFile`, which serves single- AND multi-part files
 //! uniformly. Rare attribute types (keycode/timecode/preview) are not yet mapped
-//! here — they round-trip opaquely; see CLAUDE.md.
+//! here — they round-trip opaquely.
 
 use exr_core::attr::{
     Attribute, Box2fAttribute, Box2iAttribute, Chromaticities, Compression, Envmap, ExrString,
@@ -25,7 +25,7 @@ use crate::types;
 
 /// Build the full header dict for `header`.
 ///
-/// C-08: an attribute NAME is a raw byte string in the underlying `Header`
+/// An attribute NAME is a raw byte string in the underlying `Header`
 /// (no encoding assumed — C++ `Name` never checks). The real C++ PyOpenEXR
 /// binding converts it with `py::str(const char*)`, which is `pybind11`'s
 /// strict UTF-8 `PyUnicode_FromString` — a non-UTF-8 name raises
@@ -142,7 +142,7 @@ fn attr_to_py(
         // A code `comp_to_py` can't map (on-disk garbage — HTJ2K256/HTJ2K32 have
         // real enum members now that the target is v3.4.15) is OMITTED, like any
         // other unmapped attribute below, rather than raising and failing the whole
-        // header read (r3_surfaces.md item 8).
+        // header read.
         "compression" => match get!(Compression).and_then(|c| comp_member(*c).ok()) {
             Some(c) => Some(c.into_pyobject(py)?.into_any().unbind()),
             None => None,
@@ -176,8 +176,8 @@ fn attr_to_py(
             Some(p) => Some(Py::new(py, p)?.into_any()),
             None => None,
         },
-        // OpenEXR 3.4's "bytes" attribute (C-11) — target is v3.4.15, not v3.3.11
-        // (team-lead correction 2026-09-22): `OpenEXR.Bytes` exists in the
+        // OpenEXR 3.4's "bytes" attribute — target is v3.4.15, not v3.3.11:
+        // `OpenEXR.Bytes` exists in the
         // reference (`PyOpenEXR.cpp:2694`), so this is a real gap, not out-of-scope.
         "bytes" => match get!(exr_core::attr::Bytes) {
             Some(b) => Some(Py::new(py, types::Bytes::from_core(b))?.into_any()),

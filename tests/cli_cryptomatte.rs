@@ -1,4 +1,4 @@
-//! End-to-end gate for the `exr-rs cryptomatte` CLI (bug-hunt r3 §4 C4, C10):
+//! End-to-end gate for the `exr-rs cryptomatte` CLI:
 //! `encode` reads the coverage from R (not "the first channel", `A` for RGBA)
 //! and keeps the coverage file's windows; `extract --out` writes the matte with
 //! the source's data and display windows. Drives the real binary.
@@ -91,7 +91,7 @@ fn encode_rejects_a_coverage_file_without_an_unambiguous_channel() {
     assert!(!exr_rs(&["cryptomatte", "encode", out.to_str().unwrap(), "-c", "CryptoObject", "-m", &bunny]));
 }
 
-// ---- `inject` (phase 6) ----------------------------------------------------
+// ---- `inject` ----------------------------------------------------------------
 
 use cryptomatte::{from_named_mattes, EncodeOptions, NamedMatte, Windows};
 use exr_core::io::StdIfStream;

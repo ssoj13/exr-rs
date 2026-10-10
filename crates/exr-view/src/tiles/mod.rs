@@ -1,4 +1,4 @@
-//! Tiled display pyramid (`.bughunt/design_tiling.md`): the grid geometry, the
+//! Tiled display pyramid: the grid geometry, the
 //! one reduction rule for every level, and the byte-budget LRU the RAM tile
 //! cache and the GPU atlas share.
 

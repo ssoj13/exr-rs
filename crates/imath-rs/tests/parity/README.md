@@ -1,4 +1,4 @@
-# imath-rs ⟷ C++ Imath golden parity (Wave 7)
+# imath-rs ⟷ C++ Imath golden parity
 
 This directory proves `imath-rs` matches the **real C++ Imath** library
 bit-for-bit where the math is exact, and within tight ULP where transcendentals

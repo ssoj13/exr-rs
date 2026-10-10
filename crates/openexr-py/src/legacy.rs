@@ -5,7 +5,7 @@
 //! Scope (this slice): `Header(w, h)`, `OutputFile.writePixels` (single full-image
 //! call), `InputFile.channel`/`channels` with pixel-type conversion and scanline
 //! slicing. The full Imath-typed CUSTOM-attribute round-trip and chunked
-//! `writePixels` are the remaining legacy work (see CLAUDE.md).
+//! `writePixels` are the remaining legacy work.
 
 use exr_core::ChannelData;
 use exr_core::api::Image;
@@ -316,7 +316,7 @@ fn attr_to_imath(py: Python<'_>, attr: &dyn Attribute, header: &Header, name: &s
     Ok(obj)
 }
 
-/// (r3_surfaces.md item 8) A code with no legacy Imath.Compression member
+/// A code with no legacy Imath.Compression member
 /// (HTJ2K256/HTJ2K32/Invalid) raises instead of silently reporting ZIP (3).
 fn comp_to_code(c: Compression) -> PyResult<i32> {
     match c {
@@ -371,7 +371,7 @@ fn ptype_from_py(v: &Bound<'_, PyAny>) -> PyResult<PixelType> {
 /// Serialise samples `[start, end)` of `cd` in `target` type as little-endian
 /// (XDR) bytes.
 ///
-/// W4.6 SSOT: routes entirely through the canonical `exr_core` conversion
+/// Routes entirely through the canonical `exr_core` conversion
 /// surface instead of hand-rolled per-sample arithmetic — `ChannelData::
 /// convert` (which is exact: e.g. UINT->UINT is a `.clone()`, never an
 /// intermediate `f32` round-trip that would lose precision above 2^24) for
@@ -578,7 +578,7 @@ impl OutputFile {
         }
         // Custom header metadata (Box2i/V2f/Chromaticities/TimeCode/KeyCode/Rational/
         // TileDescription/str/int/float) round-trips through the extra-attribute
-        // overlay instead of being silently dropped (r3_surfaces.md §3.4 item 12).
+        // overlay instead of being silently dropped.
         let extra = legacy_extra_attrs(py, header)?;
         // Matches `outwrite`'s `try { setFrameBuffer; writePixels; } catch
         // (std::exception&) { IOError }` (`PyOpenEXR_old.cpp:1223-1233`).
@@ -587,7 +587,7 @@ impl OutputFile {
     }
 }
 
-/// (r3_surfaces.md item 8) An out-of-range code — including 3 itself, which this
+/// An out-of-range code — including 3 itself, which this
 /// `match` used to miss entirely and fall through to the `_ => Zip` default for the
 /// right answer by accident — now raises instead of silently becoming ZIP.
 fn comp_from_code(code: i32) -> PyResult<Compression> {
@@ -665,13 +665,13 @@ impl InputFile {
             "lineOrder",
             imath.getattr("LineOrder")?.call1((self.image.line_order as i32,))?,
         )?;
-        // Carried custom metadata (r3_surfaces.md §3.4 item 12): everything
+        // Carried custom metadata: everything
         // `OutputFile.close()` wrote via `legacy_extra_attrs` comes back here,
         // typed with the legacy `Imath` classes.
         let mut extra_header = Header::new();
         self.image.attributes().apply_to(&mut extra_header).map_err(verr)?;
         for (name, attr) in self.image.attributes().iter() {
-            // C-08: `name` is a raw-byte `Name` now; the legacy dict is
+            // `name` is a raw-byte `Name` now; the legacy dict is
             // Python-`str`-keyed, so a non-UTF-8 name is skipped here rather
             // than raising (this legacy binding already drops opaque/unknown
             // types the same way — see `attr_to_imath`'s doc).

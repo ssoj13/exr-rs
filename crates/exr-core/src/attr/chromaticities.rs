@@ -111,7 +111,7 @@ impl Chromaticities {
 
     /// Port of `Imf::XYZtoRGB` (ImfChromaticities.cpp): the CIE-XYZ→RGB matrix
     /// for these primaries — mathematically the inverse of
-    /// [`rgb_to_xyz`][Self::rgb_to_xyz] (C-16). Returns [`ExrError::Arg`] for
+    /// [`rgb_to_xyz`][Self::rgb_to_xyz]. Returns [`ExrError::Arg`] for
     /// degenerate primaries, mirroring the C++ throw from the underlying
     /// matrix inversion.
     pub fn xyz_to_rgb(&self, y: f32) -> Result<M44f> {
@@ -203,7 +203,7 @@ mod tests {
         assert_eq!(back, c);
     }
 
-    /// C-16 — `xyz_to_rgb` must be the inverse of `rgb_to_xyz`.
+    /// `xyz_to_rgb` must be the inverse of `rgb_to_xyz`.
     #[test]
     fn xyz_to_rgb_inverts_rgb_to_xyz() {
         let c = Chromaticities::default();

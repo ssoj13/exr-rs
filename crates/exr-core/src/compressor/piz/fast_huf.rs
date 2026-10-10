@@ -10,8 +10,8 @@
 //! generic decoder instead (see `huffman::decompress_dispatch`, which implements this
 //! exact dispatch). Real PIZ/DWA chunks are essentially always `nBits > 128`,
 //! so this module — not `super::huffman`'s generic path — is what C++ decodes
-//! through in practice; see `crates/exr-core/CLAUDE.md`'s codec-isolation
-//! table for the measured effect.
+//! through in practice, so it dominates measured PIZ/DWA
+//! decode time.
 //!
 //! Two decoders, one wire format: [`initialize`] parses the SAME packed
 //! code-length table `super::huffman::unpack_encoding_table` reads (reusing
@@ -104,7 +104,7 @@ impl Default for FastHufDecoder {
 }
 
 impl FastHufDecoder {
-    /// Reset to the empty/pre-init state — alloc audit E8: [`initialize`]
+    /// Reset to the empty/pre-init state: [`initialize`]
     /// calls this on every real call BEFORE rebuilding, since `self` is now a
     /// caller-owned, reused instance (previously a fresh `FastHufDecoder` was
     /// constructed and returned every call, so every field started at a
@@ -147,10 +147,10 @@ impl FastHufDecoder {
 #[cfg(test)]
 impl FastHufDecoder {
     /// Test-only: overwrite every field with implausible "poison" values
-    /// (never legitimately produced by `reset()`/`build_tables`) -- alloc
-    /// audit E8's explicit "prove coverage empirically with a poison test"
-    /// requirement (same methodology as B44's
-    /// `poison_reused_scratch_matches_fresh_instance`, alloc audit E6).
+    /// (never legitimately produced by `reset()`/`build_tables`) -- to
+    /// prove coverage empirically with a poison test
+    /// (same methodology as B44's
+    /// `poison_reused_scratch_matches_fresh_instance`).
     /// `huffman::tests` calls this on a persistent decoder BEFORE the first
     /// real `initialize`/`decompress` call, then diffs the result against a
     /// fresh decoder -- any field `initialize`/`build_tables` doesn't fully
@@ -180,7 +180,7 @@ fn truncated_table() -> ExrError {
 /// Builds the left-justified base/offset tables and the `TABLE_LOOKUP_BITS`
 /// acceleration table from the per-length `base`/`offset` arrays
 /// [`initialize`] computed.
-/// Fills `fhd`'s tables in place (alloc audit E8: `fhd` is the caller's
+/// Fills `fhd`'s tables in place (`fhd` is the caller's
 /// persistent, reused decoder -- `fhd.reset()` has already restored the
 /// sentinel/empty state before this runs, and `fhd.id_to_symbol` has already
 /// been filled by `initialize`'s second pass). Reads `fhd.id_to_symbol`
@@ -376,7 +376,7 @@ pub(crate) fn initialize(
     // uncompressed symbol list around, exactly per C's own comment) and fill
     // `id_to_symbol` via the `mapping` cursor, one id per length.
     //
-    // `fhd.id_to_symbol` (alloc audit E8) is grown/truncated via
+    // `fhd.id_to_symbol` is grown/truncated via
     // `ensure_len`, not a fresh `vec![0u32; ...]` -- every index in
     // `[0, num_symbols)` gets written exactly once by the mapping-cursor
     // loop below (the `offset[]` values computed above partition that whole
@@ -527,7 +527,7 @@ fn refill(
 /// unconditional 16-byte read is safe under that precondition, checked here
 /// explicitly rather than trusted from the caller.
 ///
-/// `out` is NOT cleared here (audit block B) — the one public entry point,
+/// `out` is NOT cleared here — the one public entry point,
 /// `huffman::decompress`, clears it once on entry; callers of THIS function
 /// directly (tests) must pass an already-empty `out` themselves.
 pub(super) fn decode(

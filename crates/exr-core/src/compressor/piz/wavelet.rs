@@ -29,10 +29,10 @@
 //! Port target (pinned tag v3.3.11):
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.3.11/src/lib/OpenEXR/ImfWav.cpp>
 //!
-//! K-08: the oracle (round-4 policy: behavioural target = 3.4.15) decodes
+//! The behavioural target (C++ 3.4.15) decodes
 //! through OpenEXRCore, not this legacy `Imf` file — see `internal_piz.c:120-461`
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXRCore/internal_piz.c#L120-L461>,
-//! whose `wdec14_4` decoder [`wdec14_4`] is now ported literally (K-04) rather
+//! whose `wdec14_4` decoder [`wdec14_4`] is now ported literally rather
 //! than through the legacy `ImfWav.cpp` two-stage `wdec14`+`wdec14` this module
 //! otherwise mirrors for the 16-bit basis and the encode direction.
 
@@ -82,7 +82,7 @@ fn wdec14(l: u16, h: u16) -> (u16, u16) {
 /// (`OpenEXRCore/internal_piz.c:139-172`,
 /// <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXRCore/internal_piz.c#L139-L172>).
 ///
-/// K-04: the interior (non-boundary) 2-D decode step used to chain two
+/// The interior (non-boundary) 2-D decode step used to chain two
 /// [`wdec14`] calls per axis (the legacy `ImfWav.cpp` two-stage decode this
 /// module previously ported), truncating the intermediate sums `ai`/`bi` to
 /// `i16` **between** the row and column stages. `wdec14_4` is the actual
@@ -344,7 +344,7 @@ pub fn decode(
                 idx_ok(buffer, &[pos_x, p01, p10, p11], "wav decode 2D")?;
 
                 if w14 {
-                    // K-04: single `wdec14_4` call, full-int intermediates —
+                    // Single `wdec14_4` call, full-int intermediates —
                     // NOT two chained `wdec14` stages (see its doc comment).
                     let (a, c, b, d) =
                         wdec14_4(buffer[pos_x], buffer[p01], buffer[p10], buffer[p11]);
@@ -456,7 +456,7 @@ mod tests {
         }
     }
 
-    /// K-04: `wdec14_4`'s repro value from the audit — `px == p01 == p10 ==
+    /// `wdec14_4`'s repro value — `px == p01 == p10 ==
     /// p11 == 0x7fff` (an out-of-range 14-bit value, only reachable from
     /// corrupt/adversarial input) must decode to the C++ OpenEXRCore result,
     /// which differs from the old two-chained-`wdec14` result
@@ -474,7 +474,7 @@ mod tests {
 
     /// `wdec14_4` inverts the `encode` interior 2x2 step (two chained
     /// [`wenc14`] calls per axis — only the *decode* direction has the
-    /// truncation divergence, K-04) for every value a real 14-bit encode can
+    /// truncation divergence) for every value a real 14-bit encode can
     /// produce.
     #[test]
     fn wdec14_4_inverts_forward_2x2_for_valid_14bit_values() {

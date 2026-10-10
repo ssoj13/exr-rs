@@ -46,8 +46,8 @@ impl LossyDctDecoder {
 
     /// Decode a single (non-CSC) channel into native half pixels, writing into
     /// caller-supplied, reused buffers instead of allocating a fresh `output`/
-    /// `row_blocks` every call (alloc audit E11 remainder, decode side: the
-    /// encode-side mirror is `LossyDctEncoder::encode_channel_into`).
+    /// `row_blocks` every call (the encode-side mirror is
+    /// `LossyDctEncoder::encode_channel_into`).
     ///
     /// `output` is [`crate::buf::ensure_len`]'d to `width * height` and then
     /// FULLY overwritten -- every `(y, x)` cell in `[0, height) x [0, width)`
@@ -112,8 +112,7 @@ impl LossyDctDecoder {
     }
 
     /// Decode an interleaved CSC group into native half R/G/B pixels, writing
-    /// into caller-supplied, reused buffers (alloc audit E11 remainder, same
-    /// rationale as [`Self::decode_channel_into`]: `r_out`/`g_out`/`b_out`
+    /// into caller-supplied, reused buffers (same rationale as [`Self::decode_channel_into`]: `r_out`/`g_out`/`b_out`
     /// and `row_blocks` are each `ensure_len`'d then FULLY overwritten by
     /// `unblock_row`, so growing them in place is sound).
     ///

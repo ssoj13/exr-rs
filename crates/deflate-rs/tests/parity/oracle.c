@@ -1,5 +1,5 @@
 /*
- * C libdeflate golden-parity oracle for exr-rs (Phase 2, Wave 6).
+ * C libdeflate golden-parity oracle for exr-rs.
  *
  * Proves `deflate-rs`'s zlib compressor output is BYTE-IDENTICAL to the real
  * C libdeflate (vcpkg, v1.25). For a fixed set of deterministic inputs and for
@@ -57,7 +57,7 @@
 
 /*
  * ---------------------------------------------------------------------------
- * CLI mode (plan4 V1/V2): a live subprocess mode alongside the fixed golden
+ * CLI mode: a live subprocess mode alongside the fixed golden
  * generator above, so the Rust side can throw ARBITRARY (large, or
  * deliberately malformed) bytes at the real C libdeflate without baking
  * megabyte-scale hex into a committed golden file.
@@ -73,7 +73,7 @@
  *                                 output buffer of exactly <out_cap> bytes.
  *
  * Both modes read the ENTIRE stdin into memory first (no streaming) --
- * fine for the multi-MiB inputs this plan calls for. Binary mode is forced
+ * fine for the multi-MiB inputs the parity tests use. Binary mode is forced
  * on stdin/stdout on Windows so CRLF translation never corrupts the bytes.
  * ---------------------------------------------------------------------------
  */
@@ -235,7 +235,7 @@ static int parse_int_arg_at(const char *mode, int argc, char **argv, int idx, lo
 
 /*
  * ---------------------------------------------------------------------------
- * bench mode (team-lead's BREAKDOWN request): deflate-only A/B timing,
+ * bench mode: deflate-only A/B timing,
  * isolated from exr-core's predictor/interleave and I/O -- measures ONLY
  * libdeflate_zlib_compress / libdeflate_zlib_decompress_ex on caller-supplied
  * bytes, so the Rust side can run the identical bytes through deflate-rs and

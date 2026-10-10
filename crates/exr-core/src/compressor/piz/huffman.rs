@@ -32,14 +32,14 @@
 //! Port target (pinned tag v3.3.11):
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.3.11/src/lib/OpenEXR/ImfHuf.cpp>
 //!
-//! K-08: the oracle (round-4 policy: behavioural target = 3.4.15) decodes
+//! The behavioural target (C++ 3.4.15) decodes
 //! through OpenEXRCore's `internal_huf.c`, not this legacy `Imf` file —
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXRCore/internal_huf.c>.
 //! [`decompress`] is the real `hufUncompress` dispatch: `nBits > 128` (real
 //! chunks essentially always are) takes the accelerated [`super::fast_huf`]
 //! decoder, `nBits <= 128` takes the generic scalar path ported here
-//! (`decode_generic`). See K-02 ([`compress_with_limit`]); K-05 (a documented
-//! FastHuf/slow-path accept-reject gap) is closed now that both paths are
+//! (`decode_generic`). See [`compress_with_limit`]. A former
+//! FastHuf/slow-path accept-reject gap is closed now that both paths are
 //! reached through one real dispatch rather than compared against each other
 //! as an approximation of it.
 
@@ -149,7 +149,7 @@ struct BitWriter {
 }
 
 impl BitWriter {
-    /// Build a writer over a caller-owned, reusable buffer (alloc audit E7)
+    /// Build a writer over a caller-owned, reusable buffer
     /// instead of always allocating a fresh one — `out.clear()` first since a
     /// reused buffer may carry a PRIOR call's bytes; `push`-based writes from
     /// then on don't care about the buffer's prior capacity/contents beyond
@@ -243,7 +243,7 @@ impl<'a> BitReader<'a> {
 /// Count occurrences of every symbol into `freq` — port of
 /// `countFrequencies`.
 ///
-/// `freq` is a caller-owned, reusable buffer (alloc audit E7's
+/// `freq` is a caller-owned, reusable buffer (part of
 /// [`HufEncScratch`]): grown to [`ENCODING_TABLE_SIZE`] once (via
 /// [`crate::compressor::ensure_len`]) and then fully re-zeroed EVERY call --
 /// this is an accumulator (`freq[v] += 1`), so a stale count left over from a
@@ -342,8 +342,8 @@ impl PartialOrd for HeapItem {
 /// of `hufBuildEncTable`.  Returns `(im, iM)` = the min / max non-zero symbol
 /// indices (with the run-length pseudo-symbol added at `iM`).
 ///
-/// `hlink`/`scode`/`heap_indices` are caller-owned, reusable buffers (alloc
-/// audit E7's [`HufEncScratch`]) instead of fresh per-call allocations:
+/// `hlink`/`scode`/`heap_indices` are caller-owned, reusable buffers (part of
+/// [`HufEncScratch`]) instead of fresh per-call allocations:
 /// * `hlink[i] = i` is written unconditionally for every `i` in
 ///   `[min_index, ENCODING_TABLE_SIZE)` by the loop just below, regardless of
 ///   what a prior call left there, and indices below `min_index` are never
@@ -656,7 +656,7 @@ fn send_code(writer: &mut BitWriter, s_code: u64, run_count: u64, run_code: u64)
 /// Entropy-encode `data` with the codes in `encoding_table` — 1:1 port of
 /// `hufEncode`.  Returns the produced bytes and the stream length in bits.
 ///
-/// `writer_buf` is a caller-owned, reusable buffer (alloc audit E7) for the
+/// `writer_buf` is a caller-owned, reusable buffer for the
 /// entropy stream's bytes instead of always allocating a fresh one.
 fn encode_data(
     encoding_table: &[u64],
@@ -742,7 +742,7 @@ fn read_code_into(
 /// all input; any corruption returns an [`ExrError`] (never a panic).
 ///
 /// `out` is NOT cleared here — the one public entry point ([`decompress`])
-/// clears it once on entry (audit block B); every internal function assumes
+/// clears it once on entry; every internal function assumes
 /// `out` already starts empty.
 fn decode_data(
     encoding_table: &[u64],
@@ -867,7 +867,7 @@ fn read_u32_le(buf: &[u8], off: usize) -> Result<u32> {
 }
 
 /// Persistent encode-side scratch for [`compress`]/[`compress_with_limit`]
-/// (alloc audit E7). `freq`/`hlink`/`scode` are each [`ENCODING_TABLE_SIZE`]
+/// `freq`/`hlink`/`scode` are each [`ENCODING_TABLE_SIZE`]
 /// (`(1 << 16) + 1`) elements — about 2 MiB combined — and were previously
 /// fresh `vec![...]` allocations on EVERY chunk; `heap_indices` and the two
 /// `BitWriter` buffers (`table_buf`/`data_buf`) are smaller but were also
@@ -892,11 +892,11 @@ pub(crate) struct HufEncScratch {
 
 /// Huffman-compress `raw` into `out` — 1:1 port of `hufCompress` — with an
 /// injectable bit-count ceiling (real callers always pass `u32::MAX as u64`;
-/// tests inject a tiny one to exercise the K-02 out-of-range path below
+/// tests inject a tiny one to exercise the out-of-range path below
 /// without a real >512 MiB fixture).
 ///
 /// There is no separate zero-argument `compress` entry point (unlike the
-/// pre-E7 shape): `PizCompressor`/`DwaCompressor` call this directly with the
+/// earlier shape): `PizCompressor`/`DwaCompressor` call this directly with the
 /// real ceiling, and a thin wrapper with no other caller would just be dead
 /// code under this module's `pub(crate)` boundary.
 ///
@@ -906,7 +906,7 @@ pub(crate) struct HufEncScratch {
 /// table-building failure. An empty input yields `Ok(true)` with `out`
 /// cleared (matching `nRaw == 0 → return 0`).
 ///
-/// Round-4 finding K-02: `hufEncode` (`internal_huf.c:846-848`,
+/// `hufEncode` (`internal_huf.c:846-848`,
 /// <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXRCore/internal_huf.c#L846-L848>)
 /// returns `EXR_ERR_ARGUMENT_OUT_OF_RANGE` when the entropy-coded bit count
 /// `c` exceeds `UINT32_MAX`, and `internal_piz.c:596-603`
@@ -934,19 +934,19 @@ pub(crate) fn compress_with_limit(
         &mut scratch.heap,
     )?;
 
-    // Pack the code table, into the reused `table_buf` (E7).
+    // Pack the code table, into the reused `table_buf`.
     let mut table_writer = BitWriter::with_buf(std::mem::take(&mut scratch.table_buf));
     pack_encoding_table(&scratch.freq, im, im_max, &mut table_writer);
     let (table_bytes, _) = table_writer.finish();
     let table_length = table_bytes.len();
 
     // Entropy-encode the data (the run-length code is symbol iM), into the
-    // reused `data_buf` (E7).
+    // reused `data_buf`.
     let (data_bytes, n_bits) = encode_data(&scratch.freq, raw, im_max, std::mem::take(&mut scratch.data_buf));
 
-    // K-02: `hufEncode`'s own out-of-range check, on the bit count only (the
+    // `hufEncode`'s own out-of-range check, on the bit count only (the
     // table length is bounded by the caller's allocation and cannot
-    // realistically overflow a u32 — see the finding's write-up).
+    // realistically overflow a u32).
     if n_bits > max_n_bits {
         // Give the buffers back to `scratch` for the NEXT call even on this
         // early return -- they're still perfectly good, just abandoned bytes.
@@ -956,7 +956,7 @@ pub(crate) fn compress_with_limit(
     }
 
     // Assemble: 20-byte LE header + packed table + data, directly into the
-    // caller's `out` (E7 -- no intermediate `Vec` this function returns and
+    // caller's `out` (no intermediate `Vec` this function returns and
     // the caller immediately copies elsewhere).
     out.clear();
     out.reserve(20 + table_bytes.len() + data_bytes.len());
@@ -975,7 +975,7 @@ pub(crate) fn compress_with_limit(
     Ok(true)
 }
 
-/// The fixed 20-byte header's fields, parsed ONCE (audit block B — the old
+/// The fixed 20-byte header's fields, parsed ONCE (the old
 /// `decompress`/`decompress_dispatch` pair each parsed and validated this
 /// same header independently, `internal_huf.c`'s own `hufUncompress` does it
 /// once). `body` is `compressed[20..]`, borrowed from the caller's slice.
@@ -1023,7 +1023,7 @@ fn parse_header(compressed: &[u8], expected: usize) -> Result<Option<ParsedHeade
 /// The generic scalar decoder — 1:1 port of `hufDecode`'s calling context in
 /// `hufUncompress` (`internal_huf.c:1976-1990`'s `else` branch: unpack the
 /// packed code-length table, build the decode table, then `hufDecode`). Takes
-/// an ALREADY-PARSED header (audit block B — this used to re-parse the same
+/// an ALREADY-PARSED header (this used to re-parse the same
 /// 20-byte header [`decompress`] itself, now the public entry point,
 /// had already parsed).
 fn decode_generic(
@@ -1076,7 +1076,7 @@ fn decode_generic(
 
 /// Huffman-decompress `compressed` into exactly `expected` `u16` values — the
 /// ONE public entry point, 1:1 port of `hufUncompress` itself
-/// (`internal_huf.c:1953-1989`, audit block B: this used to be split across a
+/// (`internal_huf.c:1953-1989`; this used to be split across a
 /// public `decompress` — actually just the generic scalar path — and a
 /// separate public `decompress_dispatch` that duplicated this same header
 /// parse before delegating). `nBits > 128` always takes the accelerated
@@ -1086,8 +1086,8 @@ fn decode_generic(
 /// scalar path ([`decode_generic`]) in that case. `nBits <= 128` uses
 /// [`decode_generic`]. This dispatch — not the generic path alone — is what
 /// real PIZ/DWA chunks decode through in practice (their entropy streams are
-/// essentially always `nBits > 128`); see `crates/exr-core/CLAUDE.md`'s
-/// codec-isolation table.
+/// essentially always `nBits > 128`), so it dominates measured
+/// PIZ/DWA decode time.
 ///
 /// `out` is cleared exactly once, here, on entry — every function this calls
 /// into ([`decode_generic`]/[`decode_data`]/`fast_huf::decode`) assumes `out`
@@ -1096,12 +1096,12 @@ fn decode_generic(
 /// # Errors
 /// Never panics; returns [`ExrError::Input`] for any truncation, oversized
 /// table indices, invalid codes, or a length mismatch — matching FastHuf's
-/// own error conditions when `nBits > 128` (this closes K-05's previously
+/// own error conditions when `nBits > 128` (this closes a previously
 /// documented FastHuf/slow-path accept-reject gap: both paths now share one
 /// real dispatch, not an approximation of one).
 ///
-/// `fhd` is the caller's persistent [`fast_huf::FastHufDecoder`] (alloc audit
-/// E8) — reused across calls instead of a fresh decoder (with its ~20 KiB
+/// `fhd` is the caller's persistent [`fast_huf::FastHufDecoder`]
+/// — reused across calls instead of a fresh decoder (with its ~20 KiB
 /// acceleration table plus a variable-size `id_to_symbol`) being built and
 /// returned every time.
 pub(crate) fn decompress(
@@ -1149,7 +1149,7 @@ pub(crate) fn decompress(
 mod tests {
     use super::*;
 
-    /// Test-only wrapper restoring the pre-E7 `Result<Option<Vec<u8>>>`
+    /// Test-only wrapper restoring the earlier `Result<Option<Vec<u8>>>`
     /// shape for the many existing call sites in this module -- NOT a second
     /// production API, exactly like `dwa`'s own `compress_dwa`/
     /// `decompress_dwa` test wrappers. Real callers (`PizCompressor`/
@@ -1167,13 +1167,13 @@ mod tests {
     }
 
     /// Test-only wrapper exercising the GENERIC scalar decoder directly
-    /// (`decode_generic`, now private since audit block B folded the header
-    /// parse into the one public `decompress` dispatcher) — for tests that
+    /// (`decode_generic`, now private since the header
+    /// parse was folded into the one public `decompress` dispatcher) — for tests that
     /// want to verify the generic path's own behaviour regardless of which
     /// path a real `decompress()` call would take for the same bytes (most
     /// of this file's fixtures have `n_bits > 128` and would otherwise always
     /// hit FastHuf). Named for what it actually calls (`decode_generic`), NOT
-    /// `decompress` — the earlier name (matching the audit's finding) invited
+    /// `decompress` — the earlier name invited
     /// exactly the confusion this rename fixes: the wrapper that called
     /// `decode_generic` directly was named `decompress`, while the wrapper
     /// for the real, dispatching `decompress` was named `decompress_dispatch`.
@@ -1308,7 +1308,7 @@ mod tests {
         assert_eq!(back, data);
     }
 
-    /// Alloc audit E7: `HufEncScratch`'s ~2 MiB `freq`/`hlink`/`scode` tables
+    /// `HufEncScratch`'s ~2 MiB `freq`/`hlink`/`scode` tables
     /// (plus the two `BitWriter` buffers) are now reused across calls instead
     /// of being fresh `vec![...]`s every time. Compress a SEQUENCE of chunks
     /// with genuinely DIFFERENT histograms -- a near-max-code-length
@@ -1385,7 +1385,7 @@ mod tests {
         }
     }
 
-    /// Alloc audit E8: `fast_huf::FastHufDecoder` is now reused across calls
+    /// `fast_huf::FastHufDecoder` is now reused across calls
     /// via `initialize`/`decompress` (its ~20 KiB acceleration table + a
     /// variable-size `id_to_symbol`) instead of being fresh every time.
     /// POISONS the persistent decoder (`poison_for_test`) BEFORE the first
@@ -1526,7 +1526,7 @@ mod tests {
         assert!(decode_generic_t(&[], 0).unwrap().is_empty());
     }
 
-    /// K-02: when the entropy-coded bit count exceeds the injected ceiling,
+    /// When the entropy-coded bit count exceeds the injected ceiling,
     /// `compress_with_limit` must return `Ok(None)` instead of writing a
     /// wrapped `n_bits` into the header (`hufEncode`'s
     /// `c > UINT32_MAX` check, see `compress_with_limit`'s doc comment).
@@ -1583,7 +1583,7 @@ mod tests {
     /// from the compressed stream's own packed code-length table (not
     /// re-derived independently) — used to ASSERT a test fixture really
     /// reaches the code-length range it claims to target, instead of just
-    /// asserting round-trip correctness (audit block F).
+    /// asserting round-trip correctness.
     fn max_code_length(compressed: &[u8]) -> u64 {
         let header = parse_header(compressed, usize::MAX)
             .unwrap()
@@ -1861,14 +1861,14 @@ mod tests {
         );
     }
 
-    /// `.bughunt/upstream_openexr.md` #2: `FastHufDecoder`'s `_tableSymbol`
+    /// `FastHufDecoder`'s `_tableSymbol`
     /// sentinel (`0xffff`) is the SAME bit pattern as the legitimate pixel
     /// value 65535 (`HUF_ENCSIZE = 65537` makes every symbol `0..=65536`
     /// real). Force symbol 65535 to be the most frequent value so canonical
     /// Huffman gives it a short (`<= TABLE_LOOKUP_BITS`), table-accelerated
     /// code, then confirm `decompress` (the real dispatcher) decodes it correctly — proving
     /// the shared bit pattern never actually gets confused with the "no
-    /// match yet" sentinel at runtime (see the `.bughunt` note for why: the
+    /// match yet" sentinel at runtime (the
     /// `table_min` guard guarantees a real match was already written before
     /// this slot is ever read).
     #[test]
@@ -1884,7 +1884,7 @@ mod tests {
         );
     }
 
-    /// Phase 4 item 1: the last per-chunk allocations of the PIZ/DWA Huffman
+    /// The last per-chunk allocations of the PIZ/DWA Huffman
     /// paths are gone — `build_encoding_table`'s `BinaryHeap` now lives in
     /// `HufEncScratch::heap`, and the generic (`nBits <= 128`) decoder's two
     /// ~512 KiB tables live in `GenScratch` inside the persistent
@@ -1967,7 +1967,7 @@ mod tests {
 }
 
 // -----------------------------------------------------------------------
-// FastHuf: one targeted test per C error site (verifier follow-up), each
+// FastHuf: one targeted test per C error site, each
 // crafting a MINIMAL stream that hits exactly that branch and checking the
 // error is that specific branch (by message), not merely "some Err" — the
 // existing `fast_huf_corrupt_input_errors_not_panics` fuzz-style test only

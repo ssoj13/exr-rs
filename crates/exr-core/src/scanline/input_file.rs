@@ -53,7 +53,7 @@ where
     /// (`ImfInputFile.cpp:306-311`, `Data::bufferedReadPixels`).
     Tiled(Box<TiledReader<'a, S>>),
     /// `EXR_STORAGE_DEEP_SCANLINE` → `DeepScanLineInputFile` flattened through
-    /// a `CompositeDeepScanLine` (W3.4, `ImfInputFile.cpp:300-305`). See
+    /// a `CompositeDeepScanLine` (`ImfInputFile.cpp:300-305`). See
     /// [`DeepReader`] for why the compositor is rebuilt per call rather than
     /// stored.
     Deep(Box<DeepReader<'a, S>>),
@@ -101,7 +101,7 @@ struct TiledReader<'a, S = &'a mut dyn IStream> {
 /// borrows its sources (`Vec<&'a mut dyn DeepScanLineCompositeSource>`), so
 /// storing both the owned `DeepScanLineInputFile` AND a compositor borrowing
 /// it in the same struct is self-referential — impossible in safe Rust (no
-/// `unsafe`/`Pin`/`ouroboros` in this crate, see `deep/CLAUDE.md`). Every
+/// `unsafe`/`Pin`/`ouroboros` in this crate). Every
 /// piece of a freshly-built `CompositeDeepScanLine`'s state
 /// (`channels`/`buffer_map`/`output_frame_buffer` from `set_frame_buffer`;
 /// `zback`/`data_window`/`display_window` from `add_source`, themselves
@@ -155,19 +155,19 @@ where
     }
 }
 
-/// The tiled-as-scanlines path's PERSISTABLE state — S-16 read-side mirror
-/// (round 4 continuation): everything [`TiledReader`] owns except its
+/// The tiled-as-scanlines path's PERSISTABLE state — the read-side mirror
+/// of the writers' per-part state caching: everything [`TiledReader`] owns except its
 /// stream, so [`crate::multipart::MultiPartInputFile`] can persist one of
 /// these per tiled-storage part across separate `input_part` calls instead
 /// of rebuilding (and silently discarding the tile-row cache of) a fresh one
 /// every time — the read-side analogue of `MultiPartOutputFile`'s
 /// `tiled_state`/`scanline_state` caching. `tiled` is itself already a
-/// stream-free state object ([`TiledInputFileState`], fix-tiled's own S-16
+/// stream-free state object ([`TiledInputFileState`], the tiled reader's own
 /// split); this struct simply bundles it with the SAME extra cache fields
 /// [`TiledReader`] carries, so the whole tiled-as-scanlines emulation —
 /// underlying reader state AND row cache — survives across calls together.
 ///
-/// Wired into `MultiPartInputFile::input_part` (round 4 continuation) once
+/// Wired into `MultiPartInputFile::input_part` once
 /// the `TiledCopySource` trait redesign (`tiled/output.rs`) unblocked it.
 pub(crate) struct TiledReaderState {
     tiled: TiledInputFileState,
@@ -188,7 +188,7 @@ impl TiledReaderState {
     /// [`InputFile::build`], minus the stream (already fully consumed by
     /// `multipart::input::read_prologue` before this ever runs, same as
     /// every other `*State::from_part_mt` in this crate). `num_threads` is
-    /// the W3.9 phase B per-file override (`None` = capture the current
+    /// the per-file override (`None` = capture the current
     /// process-wide default).
     pub(crate) fn from_part_mt(
         header: Header,
@@ -243,7 +243,7 @@ impl TiledReaderState {
     }
 
     /// Body IDENTICAL to [`TiledReader::set_frame_buffer`], operating on
-    /// `self.tiled` instead of `self.file` — see that method's docs (S-14).
+    /// `self.tiled` instead of `self.file` — see that method's docs.
     pub(crate) fn set_frame_buffer(
         &mut self,
         frame_buffer: &FrameBuffer,
@@ -272,7 +272,7 @@ impl TiledReaderState {
             if channels.find_channel(name).is_none() {
                 continue;
             }
-            // W4.6 design bug fix: C++'s `(s.type == HALF) ? 2 : 4`
+            // Design bug fix: C++'s `(s.type == HALF) ? 2 : 4`
             // (`ImfInputFile.cpp:407`) is safe there because a real
             // `Slice::Type` never holds the `NUM_PIXELTYPES` sentinel; our
             // `PixelType` enum can, so the ternary must not silently size an
@@ -442,7 +442,7 @@ impl<'a> InputFile<'a, &'a mut dyn IStream> {
     ///   offset table).
     /// * [`ExrError::Unsupported`] with [`Unsupported::Deep`] for a **deep
     ///   tiled** part (a deep *scanline* part is flattened through
-    ///   [`crate::deep::CompositeDeepScanLine`] instead — W3.4, see
+    ///   [`crate::deep::CompositeDeepScanLine`] instead — see
     ///   [`read_pixels`](Self::read_pixels)).
     /// * [`ExrError::Arg`] for a `type` this build does not know
     ///   (C++ "Unable to handle data storage type in file").
@@ -451,10 +451,9 @@ impl<'a> InputFile<'a, &'a mut dyn IStream> {
     }
 
     /// Same as [`Self::new`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::new`]).
+    /// override (`None` behaves exactly like [`Self::new`]).
     /// Effective on the **scanline** and **tiled** storage paths; deep parts
-    /// still read serially regardless of `num_threads` (tracked, not silent:
-    /// `.bughunt/progress_w39b.md`).
+    /// still read serially regardless of `num_threads` (a known limitation).
     pub fn with_num_threads(stream: &'a mut dyn IStream, num_threads: Option<i32>) -> Result<Self> {
         // C++ `InputFile` builds a MultiPartInputFile with autoAddType = false
         // and takes part 0 (ImfInputFile.cpp:126-136).
@@ -482,10 +481,10 @@ impl<'a> InputFile<'a, &'a mut dyn IStream> {
     }
 }
 
-// Owned-stream constructor (`S = Box<dyn IStream + 'a>`) -- queue item 5
-// (round-4, "not optional"): C++'s real, public `InputFile(const char
-// fileName[], int numThreads)` constructor (`ImfInputFile.h:91`), previously
-// impossible to provide here because `InputFile` had no owned-stream variant.
+// Owned-stream constructor (`S = Box<dyn IStream + 'a>`): C++'s real,
+// public `InputFile(const char fileName[], int numThreads)` constructor
+// (`ImfInputFile.h:91`), previously impossible to provide here because
+// `InputFile` had no owned-stream variant.
 impl<'a> InputFile<'a, Box<dyn IStream + 'a>> {
     /// Open `path`, OWNING the decoded stream, and dispatch on part 0's
     /// storage — the owned-stream analogue of [`new`](InputFile::new).
@@ -533,7 +532,7 @@ where
 {
     /// The storage dispatch itself — C++ `InputFile::initialize`
     /// (`ImfInputFile.cpp:292-323`).
-    #[allow(clippy::too_many_arguments)] // mirrors the C++ ctor's own parameter list plus W3.9's num_threads
+    #[allow(clippy::too_many_arguments)] // mirrors the C++ ctor's own parameter list plus num_threads
     fn build(
         stream: S,
         header: Header,
@@ -574,7 +573,7 @@ where
             }
             // C++ `ImfInputFile.cpp:300-305` wraps a deep part in a
             // `CompositeDeepScanLine`, which flattens the deep samples into the
-            // caller's flat frame buffer (W3.4, `deep::CompositeDeepScanLine` —
+            // caller's flat frame buffer (`deep::CompositeDeepScanLine` —
             // see `DeepReader`'s doc comment for why the compositor itself is
             // rebuilt per call rather than stored alongside the file).
             Storage::DeepScanline => {
@@ -750,7 +749,7 @@ where
     }
 
     /// Read the chunk covering `first_scan_line` RAW (still-packed, no
-    /// decompression) — W3.6, port of `InputFile::rawPixelData`
+    /// decompression) — port of `InputFile::rawPixelData`
     /// (`ImfInputFile.cpp:239-243`, `_data->_sFile->rawPixelData(..)`).
     ///
     /// C++ dereferences `_sFile` unconditionally, which is only initialised
@@ -779,7 +778,7 @@ where
 /// accept EITHER the standalone [`InputFile`] (its own `RgbaInputFile::new`
 /// path) or a multipart-cached view (`RgbaInputFile`'s `MultiPartInputFile`
 /// path) generically, since both expose the identical three operations but
-/// are, after the S-16 split, genuinely different concrete types (one owns
+/// are genuinely different concrete types (one owns
 /// its reader state, the other borrows a persisted one).
 pub trait GenericInputReader {
     /// The part's header.
@@ -840,7 +839,7 @@ where
     /// (`ImfInputFile.cpp:337-432`): remember the caller's frame buffer and
     /// rebuild the single-tile-row cache it will be copied out of.
     fn set_frame_buffer(&mut self, frame_buffer: &FrameBuffer, complete: bool) -> Result<()> {
-        // S-14 (round-4 audit): C++ `Data::lockedSetFrameBuffer` throws on an
+        // C++ `Data::lockedSetFrameBuffer` throws on an
         // incomplete/corrupt chunk table HERE -- whenever the tile-row cache
         // is (re)built, i.e. at `setFrameBuffer` time, BEFORE any read is
         // attempted (`ImfInputFile.cpp:386-394`). This guard used to live only
@@ -881,7 +880,7 @@ where
             }
             // C++: `bytes = (s.type == HALF) ? 2 : 4` — the CACHE holds the
             // caller's requested type, so the tiled reader converts once.
-            // W4.6 design bug fix: see `TiledReaderState::set_frame_buffer`
+            // Design bug fix: see `TiledReaderState::set_frame_buffer`
             // above (this method's exact duplicate) for the rationale.
             let bytes = pixel_type_size(slice.type_)? as i64;
             let tile_bytes = bytes
@@ -962,7 +961,7 @@ where
             return r;
         }
 
-        // S-14: the incomplete-chunk-table guard now lives in
+        // The incomplete-chunk-table guard now lives in
         // `set_frame_buffer` (fires before ANY read is attempted, including
         // this whole-window fast path above, matching C++
         // `ImfInputFile.cpp:386-394`) -- `self.user_fb` is only ever non-empty
@@ -1022,20 +1021,20 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// InputFilePartReader — the S-16 multipart-cache read-side view, dispatching
-// over BOTH storage kinds in one type (round 4 continuation)
+// InputFilePartReader — the multipart-cache read-side view, dispatching
+// over BOTH storage kinds in one type
 // ---------------------------------------------------------------------------
 
 /// Persisted state for ONE cached part reader inside
-/// [`crate::multipart::MultiPartInputFile`] — the read-side S-16 mirror,
+/// [`crate::multipart::MultiPartInputFile`] — the read-side mirror,
 /// covering every storage kind `InputFile`'s own [`Reader`] enum dispatches
 /// on, including deep-SCANLINE (multipart mirror of [`Reader::Deep`], added
-/// once `InputFile` itself gained deep-scanline flattening — W3.4 follow-up).
+/// once `InputFile` itself gained deep-scanline flattening).
 /// Deep-TILED stays a hard `Unsupported::Deep` error, matching
 /// `InputFile::build`'s own `Storage::DeepTiled` arm (see its comment for why
 /// that mirrors real, not merely deferred, C++ behaviour).
 ///
-/// Wired into `MultiPartInputFile::input_part` (round 4 continuation).
+/// Wired into `MultiPartInputFile::input_part`.
 pub(crate) enum PartReaderState {
     /// Boxed like the other persisted reader states; chunk caches can grow independently.
     ScanLine(Box<ScanLineInputFileState>),
@@ -1090,7 +1089,7 @@ impl crate::deep::DeepScanLineCompositeSource for DeepPartSourceView<'_> {
 }
 
 /// The multipart-cache PERSISTABLE state for a deep-scanline part served
-/// through the generic `InputFile`/`InputPart` front door — S-16 mirror of
+/// through the generic `InputFile`/`InputPart` front door — the cached-state mirror of
 /// [`DeepReader`] (see that struct's doc comment for the full "why the
 /// compositor is rebuilt per call, not stored" rationale, which applies
 /// identically here). Holds the owned, stream-free
@@ -1109,7 +1108,7 @@ impl DeepScanLineReaderState {
     /// Pure state construction — mirrors [`TiledReaderState::from_part_mt`]:
     /// no stream access at all (the prologue reader already parsed the
     /// header + chunk offset table before this ever runs). `num_threads` is
-    /// the W3.9 phase B per-file override (`None` = capture the current
+    /// the per-file override (`None` = capture the current
     /// process-wide default).
     pub(crate) fn from_part_mt(
         header: Header,
@@ -1176,7 +1175,7 @@ impl DeepScanLineReaderState {
 }
 
 /// A **borrowing** view over one multipart part's persisted reader state —
-/// the read-side S-16 mirror of `multipart::output`'s writer-side caching,
+/// the read-side mirror of `multipart::output`'s writer-side caching,
 /// intended to also cover the tiled-as-scanlines path. Would be built by
 /// [`crate::multipart::MultiPartInputFile::input_part`], which would persist
 /// a [`PartReaderState`] per part (built once, on first access, exactly like
@@ -1188,7 +1187,7 @@ impl DeepScanLineReaderState {
 /// (`header`, `version`, `is_complete`, `set_frame_buffer`, `read_pixels`),
 /// which is what `rgba::input`'s [`GenericInputReader`] trait bound is built
 /// around, and is now returned directly by
-/// `MultiPartInputFile::input_part` (round 4 continuation).
+/// `MultiPartInputFile::input_part`.
 pub struct InputFilePartReader<'p> {
     stream: &'p mut dyn IStream,
     inner: &'p mut PartReaderState,
@@ -1196,7 +1195,7 @@ pub struct InputFilePartReader<'p> {
     /// computed once by `read_prologue` and handed down; per-part, not
     /// per-call, so it is copied in here rather than looked up through
     /// `inner` (a scanline part's own state has no notion of completeness at
-    /// all — only the tiled path's `set_frame_buffer` needs it, S-14).
+    /// all — only the tiled path's `set_frame_buffer` needs it).
     complete: bool,
 }
 
@@ -1329,7 +1328,7 @@ impl<'p> InputFilePartReader<'p> {
     }
 
     // -----------------------------------------------------------------------
-    // `ScanLineCopySource` support (W3.6) — `multipart::part::InputPart`'s
+    // `ScanLineCopySource` support — `multipart::part::InputPart`'s
     // `ScanLineCopySource` impl wraps this type and forwards through this
     // method, exactly the shape the trait itself uses (`scanline/output.rs`).
     // -----------------------------------------------------------------------
@@ -1471,7 +1470,7 @@ fn fill_buffer(
 }
 
 // ---------------------------------------------------------------------------
-// Tests — the `InputFile::initialize` dispatch (W3.4)
+// Tests — the `InputFile::initialize` dispatch
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -1682,7 +1681,7 @@ mod tests {
     /// a y-subsampled channel's write+read round trip, combined with a
     /// non-zero data-window origin AND several multi-line ZIP chunks
     /// (including a partial last one) -- the reference technique is
-    /// `parity_exr.rs`'s `sub_matrix_*` tests (`d6081ea`): a dump-layout
+    /// `parity_exr.rs`'s `sub_matrix_*` tests: a dump-layout
     /// frame buffer (each channel's own tightly-packed reduced-grid plane,
     /// channels in alphabetical order, no interleaving), addressed via
     /// `Slice::make` so `x_sampling`/`y_sampling`'s `divp`/`modp` address
@@ -1871,7 +1870,7 @@ mod tests {
         out.into_data()
     }
 
-    /// W3.4: a TILED file opens through `InputFile` and is read as scanlines.
+    /// A TILED file opens through `InputFile` and is read as scanlines.
     #[test]
     fn input_file_reads_tiled_as_scanlines() {
         let bytes = write_tiled(Compression::Zip);
@@ -1882,8 +1881,8 @@ mod tests {
         assert!(inf.is_complete());
         inf.set_frame_buffer(&fb).unwrap();
 
-        // Whole data window — the C++ "skip the double copy" fast path (U18:
-        // it must actually be taken; a partial range must not take it).
+        // Whole data window — the C++ "skip the double copy" fast path (it
+        // must actually be taken; a partial range must not take it).
         let mut out = vec![0u8; expected_plane().len()];
         crate::probe::reset(crate::probe::Probe::TiledWholeWindow);
         inf.read_pixels(0, H - 1, &mut out).unwrap();
@@ -1893,7 +1892,7 @@ mod tests {
         assert_eq!(crate::probe::get(crate::probe::Probe::TiledWholeWindow), 1, "a one-row read must use the tile-row cache");
     }
 
-    /// W3.4: a partial scanline range through the tile-row cache must touch
+    /// A partial scanline range through the tile-row cache must touch
     /// ONLY the requested rows (C++ `bufferedReadPixels` + `copyCachedBuffer`).
     #[test]
     fn input_file_tiled_partial_range_touches_only_requested_rows() {
@@ -1915,7 +1914,7 @@ mod tests {
         assert_eq!(&out[row..5 * row], &expected[row..5 * row]);
     }
 
-    /// W3.4: a tiled `InputFile` fills a frame-buffer channel the file lacks
+    /// A tiled `InputFile` fills a frame-buffer channel the file lacks
     /// (C++ `Data::fillBuffer`), and only over the requested rows.
     #[test]
     fn input_file_tiled_fills_absent_channel() {
@@ -1947,7 +1946,7 @@ mod tests {
         }
     }
 
-    /// W3.4: part 0 of a MULTIPART file opens through `InputFile`, chunk
+    /// Part 0 of a MULTIPART file opens through `InputFile`, chunk
     /// `partNumber` prefixes and all (C++ `InputFile` takes `kDefaultPart`).
     #[test]
     fn input_file_reads_part_zero_of_multipart() {
@@ -1963,7 +1962,7 @@ mod tests {
         assert_eq!(out, expected_plane());
     }
 
-    /// W3.4/W3.5: `MultiPartInputFile::input_part` is the same dispatcher, so
+    /// `MultiPartInputFile::input_part` is the same dispatcher, so
     /// part 1 reads too — and `partComplete` is true for a fully written file.
     #[test]
     fn multipart_input_part_dispatches_and_part_complete() {
@@ -1997,7 +1996,7 @@ mod tests {
         assert!(mpi.part_complete(0).unwrap());
     }
 
-    /// M-01/T-03 (round-4 audit): `MultiPartInputFile::tiled_input_part(0)` on
+    /// `MultiPartInputFile::tiled_input_part(0)` on
     /// a SINGLE-part tiled file (no `partNumber` chunk prefix on disk) must
     /// actually READ every tile correctly, not just open — the tiled sibling
     /// of `multipart_input_part_reads_a_single_part_scanline_file` above.
@@ -2019,7 +2018,7 @@ mod tests {
         assert_eq!(out, expected_plane());
     }
 
-    /// S-04: `MultiPartInputFile::input_part(0)` on a SINGLE-part scanline
+    /// `MultiPartInputFile::input_part(0)` on a SINGLE-part scanline
     /// file (no `partNumber` chunk prefix on disk — the version word carries
     /// no `MULTI_PART_FILE_FLAG`) must actually READ the pixels correctly,
     /// not just open. C++ only reads/verifies the prefix when
@@ -2043,7 +2042,7 @@ mod tests {
         assert_eq!(out, expected_plane());
     }
 
-    /// Multipart follow-up to W3.4: `MultiPartInputFile::input_part` on a
+    /// Multipart counterpart: `MultiPartInputFile::input_part` on a
     /// deep-SCANLINE part must flatten it through `CompositeDeepScanLine` the
     /// same way the standalone `InputFile` does (`PartReaderState::Deep`),
     /// with the leading `partNumber` genuinely verified (part 1 of a real
@@ -2090,7 +2089,7 @@ mod tests {
 
         // The deep part's own dataWindow is small (2x1 -- unrelated to the
         // flat part's), but MultiPartOutputFile requires the SHARED
-        // attributes (displayWindow among them, W3.5) to agree across every
+        // attributes (displayWindow among them) to agree across every
         // part, so it borrows the flat part's displayWindow rather than
         // building its own via `Header::with_dimensions` (which would set
         // displayWindow == dataWindow and conflict).
@@ -2203,7 +2202,7 @@ mod tests {
         }
 
         // Under test: `MultiPartInputFile::input_part` (the generic front
-        // door's multipart-cache mirror, W3.4 follow-up).
+        // door's multipart-cache mirror).
         let mut got_out = vec![0u8; w as usize * 3 * 4];
         let mut is = MemIStream::new(bytes);
         let mut mpi = MultiPartInputFile::new(&mut is).unwrap();
@@ -2298,7 +2297,7 @@ mod tests {
         }
     }
 
-    /// W3.7: a header missing a required attribute is READ with C++'s default
+    /// A header missing a required attribute is READ with C++'s default
     /// (`validation.c::validate_req_attr` with `adddefault = !strict`), not
     /// rejected.
     #[test]
@@ -2310,7 +2309,7 @@ mod tests {
         assert_eq!(inf.header().screen_window_width().unwrap(), 1.0);
     }
 
-    /// W3.7: for a plain single-part image the version FLAGS decide the
+    /// For a plain single-part image the version FLAGS decide the
     /// storage, not the `type` attribute — a tiled file with no `type` at all
     /// still dispatches to the tiled reader
     /// (`parse_header.c:2791-2798`, `validation.c::validate_part_type`).
@@ -2342,7 +2341,7 @@ mod tests {
         out.into_data()
     }
 
-    /// W3.7: a `type` that disagrees with the version flags is SILENTLY
+    /// A `type` that disagrees with the version flags is SILENTLY
     /// CORRECTED, not rejected — non-strict
     /// `OpenEXRCore/validation.c::validate_part_type` ("the flags win").
     #[test]
@@ -2360,7 +2359,7 @@ mod tests {
         assert_eq!(out, expected_plane());
     }
 
-    /// W3.7: the version NUMBER is checked and must be exactly 2 — fatal
+    /// The version NUMBER is checked and must be exactly 2 — fatal
     /// regardless of strictness (`parse_header.c::read_magic_and_flags`
     /// 2686-2697).  It used to go unchecked.
     #[test]
@@ -2374,7 +2373,7 @@ mod tests {
         assert!(err.to_string().contains("unsupported version"), "{err}");
     }
 
-    /// W3.7: an unknown flag in the version word is fatal (same function,
+    /// An unknown flag in the version word is fatal (same function,
     /// 2700-2709).
     #[test]
     fn unknown_version_flags_are_rejected() {
@@ -2384,7 +2383,7 @@ mod tests {
         assert!(InputFile::new(&mut is).is_err());
     }
 
-    /// W3.4: an untyped TILED file with a destroyed offset table must be
+    /// An untyped TILED file with a destroyed offset table must be
     /// reconstructed with TILE framing.  The framing comes from the derived
     /// storage, not from `type` — with `autoAddType == false` there is no
     /// `type`, and scanline framing would misparse every chunk leader
@@ -2405,7 +2404,7 @@ mod tests {
         assert_eq!(out, expected_plane());
     }
 
-    /// S-14 regression test: a tiled-as-scanlines `InputFile` whose chunk
+    /// Regression test: a tiled-as-scanlines `InputFile` whose chunk
     /// table has an UNRECOVERABLE hole (not merely zeroed, genuinely
     /// truncated) must fail at `set_frame_buffer` -- matching C++
     /// `Data::lockedSetFrameBuffer` (`ImfInputFile.cpp:386-394`), which
@@ -2443,7 +2442,7 @@ mod tests {
         assert!(err.to_string().contains("corrupt chunk table"), "{err}");
     }
 
-    /// Queue item 5 (round-4, "not optional"): `InputFile::open` OWNS a
+    /// `InputFile::open` OWNS a
     /// path-opened stream (no caller-side `&mut` to keep alive) -- port of
     /// C++'s real, public `InputFile(const char*, int)` constructor. Covers
     /// BOTH storage kinds `InputFile` dispatches on (plain scanline, and
@@ -2484,7 +2483,7 @@ mod tests {
         }
     }
 
-    /// W4.6 design bug fix: the tiled-as-scanlines row cache used to size an
+    /// Design bug fix: the tiled-as-scanlines row cache used to size an
     /// invalid `PixelType::NumPixelTypes` slice as 4 bytes (C++'s own `(s.type
     /// == HALF) ? 2 : 4`, safe there because a real C++ `Slice::Type` never
     /// holds that sentinel; our `PixelType` enum can). `FrameBuffer::insert`
@@ -2510,7 +2509,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------
-    // W3.4: InputFile on a deep scanline part flattens via
+    // InputFile on a deep scanline part flattens via
     // CompositeDeepScanLine (ImfInputFile.cpp:300-305).
     // -----------------------------------------------------------------
 
@@ -2651,7 +2650,7 @@ mod tests {
             compositor.read_pixels(0, 0, &mut expected_out).unwrap();
         }
 
-        // Under test: the generic InputFile front door (W3.4).
+        // Under test: the generic InputFile front door.
         let (mut got_out, got_fb) = flat_rga_output(2);
         let mut is = MemIStream::new(bytes);
         let mut inf = InputFile::new(&mut is).unwrap();

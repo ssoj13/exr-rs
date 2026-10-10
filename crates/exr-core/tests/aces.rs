@@ -1,5 +1,5 @@
 //! Integration tests for `exr_core::rgba::{AcesOutputFile, AcesInputFile}`
-//! (W3.6(c)), against a real C++ `Imf::AcesOutputFile`/`AcesInputFile` oracle.
+//! against a real C++ `Imf::AcesOutputFile`/`AcesInputFile` oracle.
 //!
 //! `golden_aces.exr` is written by C++ `AcesOutputFile` from a known RGBA
 //! gradient (`oracle.cpp`'s `write-aces rgba` mode) — a byte-exact check of

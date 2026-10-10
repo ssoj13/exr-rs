@@ -13,7 +13,7 @@
 //!
 //! Scope (this slice): single-part, full-resolution, flat channels, via the
 //! `exr_core::api::Image` facade. Multipart / deep / tiled-write / the full header
-//! attribute set are the next roadmap phases (see CLAUDE.md). Errors map to Python
+//! attribute set are not covered yet. Errors map to Python
 //! exceptions — never a panic across the boundary.
 
 use exr_core::ChannelData;
@@ -29,8 +29,7 @@ use pyo3::types::{PyDict, PyList, PyString, PyTuple};
 use crate::enums;
 
 /// Map an `exr_core::ExrError` (any variant — Arg/Input/Io/Logic/Overflow/Base,
-/// all 1:1 ports of `Iex` exception classes, r3_surfaces.md item C-18 note in
-/// design_r5.md §3.5) to a Python exception. The reference never registers a
+/// all 1:1 ports of `Iex` exception classes) to a Python exception. The reference never registers a
 /// pybind11 exception translator for `Iex`, so every one of these falls through
 /// to pybind11's DEFAULT translation — `RuntimeError`, not `ValueError`
 /// (`PyOpenEXR.cpp` only ever throws `std::invalid_argument` — which pybind11
@@ -205,8 +204,7 @@ fn deep_array_pixel_type(pixels: &Bound<'_, PyAny>) -> PyResult<enums::PixelType
 /// this is invoked both from `Channel::new` and from `normalize_channels`'s
 /// "wrap any array into a Channel" path (`PyPart::PyPart`'s equivalent,
 /// `:2389-2394`). The reference throws `std::invalid_argument` for every case
-/// here, which pybind11 maps to `ValueError` — NOT `TypeError` (team-lead
-/// correction 2026-09-23).
+/// here, which pybind11 maps to `ValueError` — NOT `TypeError`.
 ///
 /// Returns the element pixel type for a plain numeric array, or
 /// `PixelType::NumPixelTypes` for a (validated) `dtype=object` deep array — the
@@ -263,12 +261,11 @@ fn array_pixel_type_any(arr: &Bound<'_, PyAny>) -> PyResult<PixelType> {
 }
 
 /// Normalise a channels dict the way the reference does when a `File`/`Part` is
-/// constructed for writing (`PyOpenEXR.cpp`'s `channels_to_pychannels`, r3_surfaces
-/// §3.4 item 3): every raw numpy array becomes a `Channel(name, array)`, and every
+/// constructed for writing (`PyOpenEXR.cpp`'s `channels_to_pychannels`): every raw numpy array becomes a `Channel(name, array)`, and every
 /// `Channel` whose `name` is still empty (`Channel(array, 1, 1)`, no name argument)
 /// gets the dict key as its name. A `Channel` that already has a name keeps it.
 /// Every header dict key must be a string (attribute name) — the reference raises
-/// at construction time (`PyPart::PyPart`, r3_surfaces.md item 3 /
+/// at construction time (`PyPart::PyPart`,
 /// `test_exceptions.py`'s `File({1:1}, {})`), not later at write time when a
 /// non-string key would otherwise just be silently skipped by `py_to_attrs`.
 fn validate_header_keys(header: &Bound<'_, PyDict>) -> PyResult<()> {
@@ -356,7 +353,7 @@ impl Channel {
         let mut ptype = PixelType::Half;
         if i < items.len() && items[i].cast::<PyUntypedArray>().is_ok() {
             // A 2-D `(H,W)` array (a single channel), a 3-D `(H,W,3|4)` array (an
-            // interleaved RGB/RGBA channel — r3_surfaces.md item 2, the reference's
+            // interleaved RGB/RGBA channel — the reference's
             // `Channel(rgb_array)` with no name is exactly how `test_rgba.py`'s
             // `do_rgb`/`do_rgba`/`do_rgba_prefix` construct every channel), or a
             // `dtype=object` deep array — `validate_pixel_array` is
@@ -667,7 +664,7 @@ impl File {
                 let compression = header_compression(b.header.bind(py))?;
                 let name = b.name_.clone().unwrap_or_else(|| format!("Part{i}"));
                 // Carry each part's own custom header metadata through — this
-                // used to be silently dropped entirely (r3_surfaces.md item 6 /
+                // used to be silently dropped entirely (see
                 // `test_header_only`'s `header["foo"]`/`header["n"]`), the same
                 // gap the single-part path below already closed via
                 // `write_with_attrs`. `ImageAttributes::insert` itself rejects
@@ -678,7 +675,7 @@ impl File {
                     // "tiles" is NOT in `STANDARD_KEYS` (the single-part path
                     // needs it to flow through — see that constant's doc), but
                     // `write_multipart_scanline` always forces a scanline part
-                    // (r3_surfaces.md item 5/6: multipart tiled write isn't
+                    // (multipart tiled write isn't
                     // supported), so `ImageAttributes::insert` would reject it
                     // as derived here. Drop it silently rather than fail the
                     // whole multipart write over a part that can't be tiled
@@ -758,7 +755,7 @@ pub(crate) fn peek_flags(path: &str) -> PyResult<u32> {
 /// Single-part read: pixels via the `Image` facade, full header via the low-level
 /// reader; one `Part`.
 fn read_single(py: Python<'_>, path: String, separate: bool, header_only: bool) -> PyResult<File> {
-    // C-08: the header dict (attribute + channel names via `py::str`) is built
+    // The header dict (attribute + channel names via `py::str`) is built
     // BEFORE any pixel decode, matching real C++ PyOpenEXR (`PyOpenEXR.cpp`'s
     // `PyFile` constructor fills `P.header` from `header.begin()/end()` first,
     // UNCAUGHT, then only afterwards attempts pixel reads inside a
@@ -1101,7 +1098,7 @@ pub(crate) fn channel_descriptor(
 /// the final 'R' leaves "A", which is neither empty nor "."-terminated).
 ///
 /// Mirrors the reference 1:1 (`PyOpenEXR.cpp` `PyPart::channelNameToRGBA`,
-/// r3_surfaces.md item 1 — the old version only grouped bare top-level `R/G/B/A`,
+/// The old version only grouped bare top-level `R/G/B/A`,
 /// missing prefixed groups like `left.R/G/B`).
 /// The channel name for component `comp` under `prefix` (the inverse of
 /// [`rgba_prefix`]): `("", 'R')` -> `"R"`, `("left", 'R')` -> `"left.R"` — `prefix`
@@ -1288,7 +1285,7 @@ fn assemble_image(py: Python<'_>, header: &Bound<'_, PyDict>, channels: &Bound<'
     {
         image.display_window = b;
     }
-    // Honour an explicit `header["lineOrder"]` (r3_surfaces.md item 9: it used to
+    // Honour an explicit `header["lineOrder"]` (it used to
     // be dropped as a "standard key" without ever being copied onto the `Image`,
     // so every write silently reset it to INCREASING_Y).
     image.line_order = header_line_order(header)?;
@@ -1366,7 +1363,7 @@ fn header_line_order(header: &Bound<'_, PyDict>) -> PyResult<LineOrder> {
 /// The write compression from `header["compression"]` (default ZIP), accepting an
 /// `OpenEXR.Compression` member or a plain integer code.
 ///
-/// r3_surfaces.md item 8: an out-of-range/garbage code used to silently become ZIP.
+/// An out-of-range/garbage code used to silently become ZIP.
 /// That is a fallback where a hard error is the logically correct behaviour — a
 /// caller who wrote a bogus compression code should see that, not have it silently
 /// reinterpreted as ZIP. Only an ABSENT key defaults to ZIP, matching the
@@ -1383,7 +1380,7 @@ fn header_compression(header: &Bound<'_, PyDict>) -> PyResult<Compression> {
 
 /// The single source of truth for a raw `int` compression code -> `exr_core`
 /// `Compression` (shared by `header_compression` here and `deep_compression` in
-/// `deep.rs`, design_r5.md W4.6 dedup). Only a genuinely unknown code (12+, or a
+/// `deep.rs`). Only a genuinely unknown code (12+, or a
 /// negative value) raises.
 pub(crate) fn code_to_compression(code: i32) -> PyResult<Compression> {
     match code {
@@ -1405,7 +1402,7 @@ pub(crate) fn code_to_compression(code: i32) -> PyResult<Compression> {
 }
 
 /// `exr_core` compression → the Python `Compression` enum member. Raises only for
-/// `Compression::Invalid` (r3_surfaces.md item 8's original complaint was HTJ2K
+/// `Compression::Invalid` (the original problem was HTJ2K
 /// being misreported as ZIP — since the real target is v3.4.15, HTJ2K256/HTJ2K32
 /// now have real enum members, so only `Invalid` — an on-disk garbage byte — has no
 /// faithful member to report).

@@ -119,7 +119,7 @@ fn read_header_only_still_rejects_multipart() {
     let mut out = MemOStream::new();
     {
         // Two parts, so the version word genuinely carries MULTI_PART_FILE_FLAG
-        // (a single-header multipart write has no part prefix -- S-02).
+        // (a single-header multipart write has no part prefix).
         let mut mp = crate::multipart::MultiPartOutputFile::new(
             &mut out,
             &[make_part_header("a"), make_part_header("b")],
@@ -430,7 +430,7 @@ fn pixel_count_normal_image_unchanged() {
 }
 
 // ---------------------------------------------------------------------------
-// W4.1 — header metadata survives a facade round trip
+// Header metadata survives a facade round trip
 // ---------------------------------------------------------------------------
 
 /// Write `img` through the facade with `extra` header attributes bolted on,
@@ -544,7 +544,7 @@ fn an_unknown_attribute_type_round_trips_as_an_opaque_blob() {
 }
 
 // ---------------------------------------------------------------------------
-// W4.2 — a tiled RANDOM_Y file can be written back through the facade
+// A tiled RANDOM_Y file can be written back through the facade
 // ---------------------------------------------------------------------------
 
 /// Write a 4x3 single-level tiled file with the given line order, using the
@@ -755,8 +755,8 @@ fn a_legal_scanline_line_order_is_not_rewritten() {
 }
 
 // ---------------------------------------------------------------------------
-// Channel mutation — `insert_channel` (checked) is the only mutation path
-// (W4.6 design-survey fix, `.bughunt/design_r5.md` §4.6): the removed
+// Channel mutation — `insert_channel` (checked) is the only mutation path:
+// the removed
 // `channel_mut` handed out a resizable `&mut ChannelData` with no way to
 // re-validate its length on mutation. `build_write_buffer` still re-checks
 // every plane as a second line of defense, since the chainable `with_channel`
@@ -867,7 +867,7 @@ fn a_multipart_part_still_carries_its_required_type() {
 }
 
 // ---------------------------------------------------------------------------
-// W4.6: ChannelData SSOT conversion methods (design_r5.md §4.3)
+// ChannelData single-source-of-truth conversion methods
 // ---------------------------------------------------------------------------
 
 #[test]

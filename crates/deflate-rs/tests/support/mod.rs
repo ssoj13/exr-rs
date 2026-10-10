@@ -1,5 +1,5 @@
-//! Shared test-support for deflate-rs's live-oracle integration tests (V1/V2,
-//! `parity_libdeflate_large.rs` / `parity_libdeflate_malformed.rs`).
+//! Shared test-support for deflate-rs's live-oracle integration tests
+//! (`parity_libdeflate_large.rs` / `parity_libdeflate_malformed.rs`).
 //!
 //! Modelled on `crates/exr-core/tests/support/mod.rs`'s convention: a skip is
 //! never silent (`EXR_ALLOW_SKIP=1` opt-out only, same env var the rest of the
@@ -9,8 +9,7 @@
 //! # Why this exists
 //! `parity_libdeflate_large.rs` and `parity_libdeflate_malformed.rs` used to
 //! each carry their own copy of `oracle_path`/`oracle_or_skip`/`lcg_bytes` and
-//! the subprocess spawn/write/wait boilerplate — found by an independent audit
-//! of the round diff (DUP-4/DIVERGE-6). Cargo does not share `tests/` modules
+//! the subprocess spawn/write/wait boilerplate. Cargo does not share `tests/` modules
 //! across crates, but it DOES share them within one crate's `tests/`
 //! directory via `mod support;` from each test binary — there was no reason
 //! for the duplication within deflate-rs itself.

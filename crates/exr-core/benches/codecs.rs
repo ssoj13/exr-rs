@@ -1,7 +1,7 @@
-//! Phase 9 W9-1 — criterion benchmark harness + baseline profile for exr-core.
+//! Criterion benchmark harness + baseline profile for exr-core.
 //!
 //! **MEASURE FIRST.** This bench establishes where the codec time actually goes
-//! so later Phase 9 waves (rayon parallel, DWA/ZIP/PIZ SIMD) target the real hot
+//! so performance work (rayon parallel, DWA/ZIP/PIZ SIMD) targets the real hot
 //! spots instead of guessing. It does **not** change any codec behaviour — it
 //! drives the existing, verified codec / scanline / tiled APIs.
 //!
@@ -495,7 +495,7 @@ fn bench_tiled_roundtrip(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4: PIZ scratch reuse on tiny-entropy chunks, apply_lut A/B
+// PIZ scratch reuse on tiny-entropy chunks, apply_lut A/B
 // ---------------------------------------------------------------------------
 
 /// PIZ compress/uncompress of CONSTANT-colour chunks, 512 and 16 pixels wide.

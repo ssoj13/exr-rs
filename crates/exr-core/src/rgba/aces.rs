@@ -12,8 +12,8 @@
 //!   Bradford-adapted 3x3 (stored as an affine `M44f`) matrix, computed once
 //!   at open time from the header's `chromaticities`/`adoptedNeutral`.
 //!
-//! Port target (pinned tag v3.4.15 — the repo's behavioural target, per root
-//! `CLAUDE.md`; verified via `git diff v3.3.11 v3.4.15 --
+//! Port target (pinned tag v3.4.15 — the repo's behavioural target;
+//! verified via `git diff v3.3.11 v3.4.15 --
 //! src/lib/OpenEXR/ImfAcesFile.{cpp,h}` that `ImfAcesFile.cpp` is BYTE-FOR-BYTE
 //! identical between the two tags and `ImfAcesFile.h`'s only change is a
 //! UTF-8-path doc comment — so nothing here needed a behavioural update, only
@@ -21,7 +21,7 @@
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXR/ImfAcesFile.cpp>
 //!
 //! This module follows the same "pixel data passed per call" convention as
-//! [`super::output`]/[`super::input`] (see `round4.md`): neither wrapper
+//! [`super::output`]/[`super::input`]: neither wrapper
 //! stores the caller's frame-buffer pointer between calls — `write_pixels`/
 //! `read_pixels` take the buffer directly, unlike C++'s `setFrameBuffer` +
 //! stateful `writePixels`/`readPixels`. This sidesteps needing unsafe raw

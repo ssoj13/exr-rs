@@ -374,7 +374,7 @@ impl FrameBuffer {
     /// Returns [`ExrError::Arg`] if `name` is empty, matching the C++ `THROW`
     /// for empty-string names.
     ///
-    /// C-08: `name` accepts anything convertible to a byte-string [`Name`].
+    /// `name` accepts anything convertible to a byte-string [`Name`].
     pub fn insert(&mut self, name: impl Into<Name>, slice: Slice) -> Result<()> {
         let name = name.into();
         if name.is_empty() {
@@ -738,7 +738,7 @@ mod tests {
         assert_eq!(s.y_stride, 128);
     }
 
-    // ---- CORE-IO-04: Slice layout invariant ----
+    // ---- Slice layout invariant ----
 
     #[test]
     fn slice_new_valid_ok() {

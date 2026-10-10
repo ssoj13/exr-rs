@@ -36,7 +36,7 @@ pub struct TiledRgbaInputFile<'a> {
     inp: tiled::TiledInputFile<'a>,
     channel_name_prefix: String,
     mode: TiledReadMode,
-    /// Persistent per-tile scratch (alloc audit C7): a tile IS the chunk
+    /// Persistent per-tile scratch: a tile IS the chunk
     /// here (unlike scanline's multi-line chunks), so there is no
     /// "N-times redecode" bug to fix -- `buf`/`out` were simply fresh
     /// allocations on EVERY `read_tile` call. `tile_staging` holds the raw
@@ -300,7 +300,7 @@ fn read_tile_grey(
     let n = tw * th;
     let y_off = 0usize;
     let a_off = y_off + n * 2;
-    // (alloc audit C7) `staging`/`out` are persistent, reused buffers (see
+    // `staging`/`out` are persistent, reused buffers (see
     // `TiledRgbaInputFile`'s field doc) -- every byte/element is fully
     // overwritten below, so `ensure_len` (grow/truncate, no unconditional
     // zero-fill) is sound.
@@ -342,7 +342,7 @@ fn read_tile_plain(
     let g_off = r_off + n * 2;
     let b_off = g_off + n * 2;
     let a_off = b_off + n * 2;
-    // (alloc audit C7) see `read_tile_grey`'s doc for why `ensure_len` is
+    // See `read_tile_grey`'s doc for why `ensure_len` is
     // sound here too (full overwrite every call).
     crate::compressor::ensure_len(staging, n * 4 * 2);
 
@@ -397,15 +397,14 @@ mod tests {
             .collect()
     }
 
-    /// Alloc audit C7: `TiledRgbaInputFile`'s `tile_staging`/`tile_rgba`
+    /// `TiledRgbaInputFile`'s `tile_staging`/`tile_rgba`
     /// scratch is now reused across `read_tile` calls instead of a fresh
     /// `Vec` per call. Poison BOTH fields with implausible values before the
     /// FIRST real call on one instance, then read a sequence of tiles of
     /// GENUINELY DIFFERENT sizes (a full 8x8 tile, then edge tiles narrower
     /// AND shorter than nominal) on that same poisoned-then-reused instance,
     /// diffing every tile against a FRESH instance -- same methodology as
-    /// B44's `poison_reused_scratch_matches_fresh_instance` (alloc audit
-    /// E6).
+    /// B44's `poison_reused_scratch_matches_fresh_instance`.
     #[test]
     fn poison_reused_tile_scratch_matches_fresh_instance_across_tile_sizes() {
         let (w, h) = (20usize, 13usize); // 8x8 tiles -> edge tiles at the right/bottom

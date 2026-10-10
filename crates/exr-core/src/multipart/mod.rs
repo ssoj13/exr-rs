@@ -27,18 +27,18 @@
 //! file's magic/version/headers/offset tables are parsed, for single-part and
 //! multipart alike.
 //!
-//! ## Wave plan
-//! * **W8-1:** the container + the scanline part write/read path.
-//! * **W8-2 (done):** the unified `partNumber` chunk seam now also covers the
+//! ## Coverage
+//! * The container + the scanline part write/read path.
+//! * The unified `partNumber` chunk seam now also covers the
 //!   TILED and DEEP (scanline + tiled) chunk writers/readers (each via the same
 //!   `part_number: Option<i32>` `from_part` constructor), plus the thin
 //!   per-type [`part`] wrappers (`OutputPart`/`InputPart`,
 //!   `TiledOutputPart`/`TiledInputPart`, `DeepScanLine*Part`,
-//!   `DeepTiled*Part`) that drive the Phase 4–7 single-part logic on a chosen
+//!   `DeepTiled*Part`) that drive the single-part logic on a chosen
 //!   part — reuse, not reimplementation.
-//! * **W8-3:** the `multiView` (StringVector) attribute + `ImfMultiView`
+//! * The `multiView` (StringVector) attribute + `ImfMultiView`
 //!   view/channel helpers.
-//! * **W8-4:** C++ cross-read parity for mixed-type multipart files.
+//! * C++ cross-read parity for mixed-type multipart files.
 //!
 //! Port target (pinned tag v3.3.11):
 //! <https://github.com/AcademySoftwareFoundation/openexr/tree/v3.3.11/src/lib/OpenEXR>
@@ -222,7 +222,7 @@ mod tests {
         }
     }
 
-    /// W3.9 phase B: write + read a 2-part multipart file (both parts
+    /// Write + read a 2-part multipart file (both parts
     /// multi-chunk: "left" ZIP 16-line blocks, "right" NONE 1-line chunks)
     /// with `num_threads` in {0, 1, 2, 4, 8} on BOTH the writer and the
     /// reader, and assert the produced file bytes AND the read-back pixels
@@ -264,7 +264,7 @@ mod tests {
                 }
             }
             let bytes = out.into_data();
-            // U12: the multipart num_threads must reach every part's writer
+            // The multipart num_threads must reach every part's writer
             // and reader; both parts are multi-chunk, so each engages.
             let part_writes = crate::probe::get(crate::probe::Probe::ScanWriteParallel);
             assert_eq!(part_writes, if n > 1 { 2 } else { 0 }, "num_threads={n}: parallel part writes");
@@ -297,7 +297,7 @@ mod tests {
         }
     }
 
-    /// S-16 (round-4 audit, ownership-inversion design): writes INTERLEAVED
+    /// Ownership inversion (per-part writer state persists): writes INTERLEAVED
     /// across two scanline parts, with the first part's writer resumed
     /// MID-BLOCK, must produce a file both we and (conceptually) C++ read back
     /// correctly. `output_part(0)` used to build a brand-new `OutputFile` from
@@ -389,9 +389,9 @@ mod tests {
         }
     }
 
-    /// S-16 mirror for TILED parts (round 4 continuation): same interleave
+    /// The same for TILED parts: same interleave
     /// shape as [`interleaved_writes_across_parts_resume_mid_block`] above,
-    /// but exercising T-13's out-of-order tile buffering
+    /// but exercising the out-of-order tile buffering
     /// (`tile_map`/`next_tile_to_write`) instead of a partial scanline
     /// block. Sequence: part 0 writes tile `(1,0)` OUT OF ORDER (buffered,
     /// since `INCREASING_Y`'s first tile is `(0,0)`) -> drop that view ->
@@ -554,7 +554,7 @@ mod tests {
         }
     }
 
-    /// W1.2: a multipart file whose chunk offset tables were never written
+    /// A multipart file whose chunk offset tables were never written
     /// must still read — every part's table is rebuilt in one sweep over the
     /// chunk region (C++ `chunk.c::reconstruct_chunk_table`).
     #[test]
@@ -670,7 +670,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // W3.5 — shared-attribute rules (write) + required-attribute rules (read)
+    // Shared-attribute rules (write) + required-attribute rules (read)
     // `ImfMultiPartOutputFile.cpp::do_header_sanity_checks` /
     // `OpenEXRCore/validation.c::validate_req_attr`
     // -----------------------------------------------------------------------
@@ -711,7 +711,7 @@ mod tests {
         Ok(out.into_data())
     }
 
-    /// W3.5(a): with `overrideSharedAttributes == false` (the C++ default) a
+    /// With `overrideSharedAttributes == false` (the C++ default) a
     /// part whose `displayWindow` disagrees with part 0 is a hard error, and
     /// the message names the offending part and attribute.
     #[test]
@@ -726,7 +726,7 @@ mod tests {
         );
     }
 
-    /// W3.5(a): with `overrideSharedAttributes == true` part 0's value is
+    /// With `overrideSharedAttributes == true` part 0's value is
     /// copied onto every other part instead (C++
     /// `overrideSharedAttributesValues`).
     #[test]
@@ -740,7 +740,7 @@ mod tests {
         );
     }
 
-    /// W3.5(b): on READ, a multipart part with no `name` is fatal
+    /// On READ, a multipart part with no `name` is fatal
     /// (`validation.c::validate_req_attr`: "'name' attribute for multipart file
     /// not found").
     #[test]
@@ -755,7 +755,7 @@ mod tests {
         assert!(err.to_string().contains("'name' attribute"), "{err}");
     }
 
-    /// W3.5(b): likewise for `type` — and `autoAddType` does NOT rescue it,
+    /// Likewise for `type` — and `autoAddType` does NOT rescue it,
     /// because C++ validates before that loop ever runs.
     #[test]
     fn multipart_part_without_type_is_fatal_on_read() {
@@ -768,7 +768,7 @@ mod tests {
         assert!(err.to_string().contains("'type' attribute"), "{err}");
     }
 
-    /// W3.5(c): `partComplete` is `false` when reconstruction cannot recover a
+    /// `partComplete` is `false` when reconstruction cannot recover a
     /// chunk — C++ `exr_validate_chunk_table` re-checks the table *after*
     /// reconstruction, so a hole that survives the sweep is still a hole.
     #[test]
@@ -797,7 +797,7 @@ mod tests {
         );
     }
 
-    /// S-02: `MultiPartOutputFile::new` with ONE header must produce a file
+    /// `MultiPartOutputFile::new` with ONE header must produce a file
     /// byte-identical in *structure* to the single-part writer — no
     /// `partNumber` chunk prefix, and NO `MULTI_PART_FILE_FLAG` in the version
     /// word (C++ `OutputPartData(..., parts > 1)`,
@@ -858,7 +858,7 @@ mod tests {
         assert_eq!(got2, pixels);
     }
 
-    /// M-05 (round-4 audit): a single-header `MultiPartOutputFile` whose
+    /// A single-header `MultiPartOutputFile` whose
     /// header carries no `type` must be REJECTED, matching C++
     /// `ImfGenericOutputFile.cpp::writeMagicNumberAndVersionField(os, headers,
     /// parts)`, which calls `headers[0].type()` unconditionally when `parts ==
@@ -947,7 +947,7 @@ mod tests {
         bytes[p + 12..p + 16].copy_from_slice(&new_box.3.to_le_bytes());
     }
 
-    /// M-03 (round-4 audit): `MultiPartInputFile::new` must reject a file
+    /// `MultiPartInputFile::new` must reject a file
     /// whose parts disagree on a SHARED attribute — C++
     /// `parse_header.c:2855-2887` runs this check unconditionally right after
     /// parsing every header and fails the whole open on the first mismatch;
@@ -975,7 +975,7 @@ mod tests {
         );
     }
 
-    /// M-04 (round-4 audit): a part whose `type` this build does not
+    /// A part whose `type` this build does not
     /// recognise, and which carries no `chunkCount` attribute, must still
     /// open with 0 chunks -- C++ `OpenEXRCore/parse_header.c:2477-2491`
     /// returns `chunk_count > 0 ? chunk_count : 0` for `EXR_STORAGE_UNKNOWN`,
@@ -1003,7 +1003,7 @@ mod tests {
         );
     }
 
-    /// M-09 (round-4 audit): C++ rejects a typeless multipart header through
+    /// C++ rejects a typeless multipart header through
     /// `sanityCheck`'s OWN message ("Headers in a multipart file should have
     /// type attribute.", `ImfHeader.cpp:1019-1023`) -- run BEFORE
     /// `setChunkCount` (`ImfMultiPartOutputFile.cpp:108-113`) -- not a
@@ -1024,7 +1024,7 @@ mod tests {
         );
     }
 
-    /// M-10 (round-4 audit): `overrideSharedAttributesValues` looks each
+    /// `overrideSharedAttributesValues` looks each
     /// shared attribute up with `findTypedAttribute<...>`, which returns
     /// `None` both when `src` lacks the name AND when `src` holds it under a
     /// *different* attribute type -- either way the fallback is "erase from
@@ -1054,7 +1054,7 @@ mod tests {
         );
     }
 
-    /// M-07 (round-4 audit): a multipart SCANLINE part's own preview image
+    /// A multipart SCANLINE part's own preview image
     /// must be updatable through `output_part`, not just a standalone
     /// writer's -- C++ `ImfMultiPartOutputFile.cpp:474-477` captures every
     /// part's real `previewPosition` while writing the header list. Writes a
@@ -1121,7 +1121,7 @@ mod tests {
         }
     }
 
-    /// M-07 (round-4 audit), tiled sibling of the scanline test above: a
+    /// Tiled sibling of the scanline test above: a
     /// multipart TILED part's preview image must be updatable through
     /// `tiled_output_part`.
     #[test]
@@ -1209,7 +1209,7 @@ mod tests {
         );
     }
 
-    /// Queue item 2 (round-4, C-01): `MultiPartInputFile::new_owned` opens a
+    /// `MultiPartInputFile::new_owned` opens a
     /// file from an OWNED stream (no caller-side `&mut` to keep alive) and
     /// reads pixel-identical to the borrowed `new` path -- the read-side
     /// counterpart of `scanline::OutputFileOwned`'s own byte-identity
@@ -1246,8 +1246,8 @@ mod tests {
         }
     }
 
-    /// P2 (round-4 verifier, "interleaved-write coverage for the part-writer
-    /// cache"): the DEEP SCANLINE sibling of
+    /// Interleaved-write coverage for the part-writer
+    /// cache: the DEEP SCANLINE sibling of
     /// [`interleaved_writes_across_parts_resume_mid_block`] -- a deep
     /// scanline part's `current_scan_line`/`missing_scan_lines` counters
     /// (`deep::scanline_output::DeepScanLineOutputFileState`) are exactly
@@ -1339,7 +1339,7 @@ mod tests {
 
             // Part 0: row 0 only (leaves it mid-write, current_scan_line == 1).
             // Like the flat sibling test above, the SAME full-size buffers
-            // are passed every call (D-09's "per write call" convention
+            // are passed every call (the "per write call" convention
             // addresses by absolute row, not a per-call sub-slice); the
             // writer only gathers whichever row it is currently at.
             {
@@ -1407,14 +1407,14 @@ mod tests {
         }
     }
 
-    /// P2 (round-4 verifier, "interleaved-write coverage for the part-writer
-    /// cache"): the DEEP TILED sibling of
+    /// Interleaved-write coverage for the part-writer
+    /// cache: the DEEP TILED sibling of
     /// [`tiled_interleaved_writes_across_parts_flush_buffered_tile_on_resume`]
-    /// -- exercises D-11's out-of-order tile buffering
+    /// -- exercises the out-of-order tile buffering
     /// (`deep::tiled_output::DeepTiledOutputFileState::tile_map`/
     /// `next_tile_to_write`) surviving a `deep_tiled_output_part(n)` call
     /// interleaved with another part's writes, the deep-tiled analogue of
-    /// T-13's flat-tiled persistence.
+    /// the flat-tiled persistence.
     ///
     /// Sequence: part 0 writes tile `(1,0)` OUT OF ORDER (buffered, since
     /// `(0,0)` hasn't been written yet) -> part 1 writes all 4 tiles, fully
@@ -1469,7 +1469,7 @@ mod tests {
         // One sample per pixel over the WHOLE window, value = part*1000 +
         // pixel index -- like the flat tiled test's `tile_buf`, but the deep
         // writer's `write_tile` addresses the FULL data-window buffer by
-        // absolute pixel position (same D-09 "per write call" convention as
+        // absolute pixel position (same "per write call" convention as
         // the deep scanline test above), not a tile-local one.
         fn make_pixels(part: i32) -> (Vec<u8>, Vec<u8>, DeepFrameBuffer) {
             let n = (W * H) as usize;
@@ -1578,8 +1578,8 @@ mod tests {
         }
     }
 
-    /// M-07 follow-on (deep scanline sibling of
-    /// `multipart_output_part_preview_image_is_updatable`): a multipart
+    /// Deep scanline sibling of
+    /// `multipart_output_part_preview_image_is_updatable`: a multipart
     /// DEEP SCANLINE part's own preview image must be updatable through
     /// `deep_scanline_output_part`, now that
     /// `DeepScanLineOutputFileState::from_part_with_preview` threads the
@@ -1663,7 +1663,7 @@ mod tests {
         );
     }
 
-    /// M-07 follow-on, DEEP TILED sibling.
+    /// DEEP TILED sibling of the preview-image test above.
     #[test]
     fn multipart_deep_tiled_output_part_preview_image_is_updatable() {
         use crate::attr::tile_description::{LevelMode, LevelRoundingMode, TileDescription};

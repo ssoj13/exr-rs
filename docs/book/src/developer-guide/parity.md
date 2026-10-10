@@ -97,5 +97,3 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 This is a validation command, not a promise that every later working tree passes.
-Current frozen acceptance and remaining gates are recorded in the
-[roadmap](https://github.com/ssoj13/exr-rs/blob/main/plans/README.md).

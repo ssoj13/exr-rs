@@ -83,7 +83,7 @@ pub trait IStream {
 
     /// Whether this stream supports *stateless* reads via
     /// [`read_stateless`][IStream::read_stateless] — mirrors
-    /// `virtual bool IStream::isStatelessRead() const` (C-16 follow-up).
+    /// `virtual bool IStream::isStatelessRead() const`.
     ///
     /// A stateless-capable stream lets multiple threads read from different
     /// offsets concurrently, since the read does not depend on or move a

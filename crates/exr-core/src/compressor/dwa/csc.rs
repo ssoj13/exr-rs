@@ -4,8 +4,8 @@
 //!
 //! DWA decorrelates RGB triplets into luminance + chroma before the DCT so the
 //! chroma planes (which the eye is less sensitive to) can be quantised harder.
-//! The coefficients are the standard Rec.709 matrices.  SIMD is deferred to
-//! Phase 9 (no `unsafe` in this port); the scalar math is the source of truth
+//! The coefficients are the standard Rec.709 matrices.  There is no SIMD
+//! path (exr-core has no `unsafe`); the scalar math is the source of truth
 //! and byte-identical to the C++ SIMD path's output.
 //!
 //! Port target (pinned tag v3.3.11):

@@ -1,10 +1,8 @@
-//! Fast-path engagement probes (`.bughunt/engagement_audit.md`'s "Mechanism"
-//! section): a single, shared instrumentation mechanism so a test can assert
-//! a fast path was ACTUALLY taken, not just that its result matches a
-//! fallback (a fast path can silently degrade to the slow one while every
-//! byte-identity test still passes — see the audit's U1/U2 findings in
-//! exr-core for exactly this failure mode). Same shape as exr-core's own
-//! `probe.rs` (agreed with w39b-rayon): an `enum Probe` with `hit`/`get`/
+//! Fast-path engagement probes: a single, shared instrumentation mechanism so
+//! a test can assert a fast path was ACTUALLY taken, not just that its result
+//! matches a fallback (a fast path can silently degrade to the slow one while
+//! every byte-identity test still passes). Same shape as exr-core's own
+//! `probe.rs`: an `enum Probe` with `hit`/`get`/
 //! `reset` over ONE `thread_local` `[Cell<u64>; N]` array.
 //!
 //! deflate-rs's fast paths (the inflate fastloop, BMI2 dispatch, the
@@ -31,17 +29,17 @@ use std::cell::Cell;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Probe {
     /// One hit per `'fastloop` loop ITERATION inside
-    /// `deflate_decompress_impl` (U13): proves the fastloop's body actually
+    /// `deflate_decompress_impl`: proves the fastloop's body actually
     /// ran at least once, not just that `FASTLOOP_ENABLED` is `true`.
     FastloopIters,
     /// One hit per DEFLATE block header parsed (the `'next_block` loop's top)
-    /// inside `deflate_decompress_impl` (U13): proves a multi-block stream
+    /// inside `deflate_decompress_impl`: proves a multi-block stream
     /// really decoded more than one block, not just that the input CONTAINS
     /// more than one (a `fastloop_hit_eob` regression could silently stop
     /// after the first block while still "succeeding" on a truncated read).
     BlocksDecoded,
     /// One hit per `Compressor::new` call that builds the static (fixed)
-    /// Huffman code tables (T5): proves the static-codes cache is reused
+    /// Huffman code tables: proves the static-codes cache is reused
     /// across multiple blocks in one compress call, not rebuilt per block.
     StaticCodesBuild,
 }

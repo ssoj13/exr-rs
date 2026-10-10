@@ -206,12 +206,12 @@ pub fn write_string(out: &mut dyn OStream, s: &str) -> Result<()> {
 /// `Name::MAX_LENGTH` — the largest identifier `Name::operator=(const char*)`
 /// will keep before truncating. Kept as a plain constant for callers that
 /// still size fixed buffers against it; the truncation itself now lives on
-/// [`crate::attr::Name::new`] (C-08 — `truncate_name` used to back off to a
+/// [`crate::attr::Name::new`] (`truncate_name` used to back off to a
 /// UTF-8 character boundary instead of cutting at the exact byte C++ does).
 pub const NAME_TRUNCATE_LEN: usize = 255;
 
 /// `Xdr::write<S>(T& out, const char v[])` for a [`crate::attr::Name`] — a
-/// zero-terminated byte string, no encoding assumed (C-08). This is the wire
+/// zero-terminated byte string, no encoding assumed. This is the wire
 /// form every attribute/type/channel/part name uses; [`write_string`] stays
 /// for fixed ASCII literals (type-name tags, the end-of-list marker, …).
 pub fn write_name(out: &mut dyn OStream, name: &[u8]) -> Result<()> {
@@ -479,8 +479,8 @@ mod tests {
     use super::*;
     use crate::io::std_io::{MemIStream, MemOStream};
 
-    // C-09's truncate-at-first-NUL / cap-at-255-bytes coverage moved to
-    // `crate::attr::name::tests` (C-08 — `Name::new` is now the single
+    // The truncate-at-first-NUL / cap-at-255-bytes coverage lives in
+    // `crate::attr::name::tests` (`Name::new` is now the single
     // truncation point `truncate_name` used to be).
 
     /// Helper: write with a closure, get the bytes, read back.

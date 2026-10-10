@@ -166,7 +166,7 @@ pub(crate) fn matchfinder_tier() -> MatchfinderTier {
 }
 
 // ---------------------------------------------------------------------------
-// Decompressor BMI2 tier selection (F3, plan4)
+// Decompressor BMI2 tier selection
 // ---------------------------------------------------------------------------
 
 /// Whether the decompressor should use the BMI2-recompiled instantiation.
@@ -193,8 +193,8 @@ pub(crate) fn bmi2_decompress_available() -> bool {
 /// on THIS machine, right now (honours the live `DEFLATE_RS_SIMD` cap). Not
 /// used by any codec path -- exists so a benchmark or bug report can state
 /// "the zlib path used adler32 tier X / crc32 tier Y / bmi2=Z" instead of
-/// assuming it from reading the dispatch code (team-lead's BREAKDOWN
-/// request: verify which SIMD variant actually runs, don't infer it).
+/// assuming it from reading the dispatch code (verify which SIMD variant
+/// actually runs, don't infer it).
 pub fn active_tiers_report() -> String {
     format!(
         "adler32={:?} crc32={:?} matchfinder={:?} bmi2_decompress={} (DEFLATE_RS_SIMD cap={:?})",
@@ -210,7 +210,7 @@ pub fn active_tiers_report() -> String {
 mod tests {
     use super::*;
 
-    /// U14 (engagement audit): with no `DEFLATE_RS_SIMD` override, the BMI2
+    /// With no `DEFLATE_RS_SIMD` override, the BMI2
     /// dispatcher's decision must reduce to EXACTLY the raw CPU feature
     /// check. Without this, a bug in `cap()`'s "unset -> highest cap"
     /// default, or in `bmi2_decompress_available`'s own gating, could

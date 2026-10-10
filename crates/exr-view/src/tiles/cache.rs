@@ -1,11 +1,10 @@
-//! Least-recently-used map under a byte budget (`.bughunt/design_tiling.md` §3.3):
+//! Least-recently-used map under a byte budget:
 //! the RAM tile cache, and the slot bookkeeping of the GPU atlas.
 //!
 //! Every entry carries its byte size. Inserting past the budget evicts the least
 //! recently used unpinned entries; pinned entries (the overview levels, the
 //! tiles on screen) are never evicted, so pinned data alone can exceed the
-//! budget. (The test-only inspectors show that; the budget becomes a user
-//! setting with phase 2's controls.)
+//! budget. (The test-only inspectors show that.)
 
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;

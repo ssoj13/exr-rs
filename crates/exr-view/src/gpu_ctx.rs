@@ -94,7 +94,7 @@ impl GpuContext {
         // transform with LUTs needs it (`Rgba32Float` LUT textures sampled with a
         // filtering sampler); every such transform checks `device.features()` and
         // is refused with a message without it (`ocio::State`,
-        // `TilePipeline::set_colour`). Nothing else may assume it (V5: the old
+        // `TilePipeline::set_colour`). Nothing else may assume it (the old
         // colour pass requested it and then used it unconditionally, a validation
         // panic on adapters without it); the tiles are `Rgba16Float`, filterable
         // everywhere, and the scopes read with `textureLoad`.

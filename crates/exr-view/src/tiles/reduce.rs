@@ -1,5 +1,5 @@
-//! Tile pixels of any pyramid level from a level-0 RGBA image
-//! (`.bughunt/design_tiling.md` §3.2): the ONE reduction rule every tile
+//! Tile pixels of any pyramid level from a level-0 RGBA image:
+//! the ONE reduction rule every tile
 //! source uses.
 //!
 //! Level-`k` pixel `(x, y)` is the mean of the level-0 pixels in

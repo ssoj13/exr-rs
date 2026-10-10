@@ -119,7 +119,7 @@ pub fn decimate_chroma_horiz(yca_in: &[Rgba], yca_out: &mut [Rgba]) {
         if j & 1 == 0 {
             // Seed the accumulator with the FIRST tap (not `0.0`) so an
             // all-negative-zero sum yields `-0.0`, matching the C++ single
-            // expression (`0.0 + (-0.0) = +0.0` would flip the sign; see M-15).
+            // expression (`0.0 + (-0.0) = +0.0` would flip the sign).
             let (off0, c0) = DECIMATE[0];
             let p0 = yca_in[(i + off0) as usize];
             let mut sr = p0.r.to_f32() * c0;
@@ -142,7 +142,7 @@ pub fn decimate_chroma_vert(yca_in: &[&[Rgba]], yca_out: &mut [Rgba]) {
     let n = yca_out.len();
     for i in 0..n {
         if i & 1 == 0 {
-            // See `decimate_chroma_horiz` — seed with the first tap (M-15).
+            // See `decimate_chroma_horiz` — seed with the first tap.
             let (off0, c0) = DECIMATE[0];
             let row0 = (13 + off0) as usize;
             let mut sr = yca_in[row0][i].r.to_f32() * c0;
@@ -178,7 +178,7 @@ pub fn reconstruct_chroma_horiz(yca_in: &[Rgba], yca_out: &mut [Rgba]) {
     for j in 0..n {
         let i = (N2 + j) as i32;
         if j & 1 != 0 {
-            // See `decimate_chroma_horiz` — seed with the first tap (M-15).
+            // See `decimate_chroma_horiz` — seed with the first tap.
             let (off0, c0) = RECONSTRUCT[0];
             let p0 = yca_in[(i + off0) as usize];
             let mut sr = p0.r.to_f32() * c0;
@@ -204,7 +204,7 @@ pub fn reconstruct_chroma_horiz(yca_in: &[Rgba], yca_out: &mut [Rgba]) {
 pub fn reconstruct_chroma_vert(yca_in: &[&[Rgba]], yca_out: &mut [Rgba]) {
     let n = yca_out.len();
     for i in 0..n {
-        // See `decimate_chroma_horiz` — seed with the first tap (M-15).
+        // See `decimate_chroma_horiz` — seed with the first tap.
         let (off0, c0) = RECONSTRUCT[0];
         let row0 = (13 + off0) as usize;
         let mut sr = yca_in[row0][i].r.to_f32() * c0;
@@ -246,7 +246,7 @@ pub fn yca_to_rgba(yw: &[f32; 3], yca_in: &[Rgba], rgba_out: &mut [Rgba]) {
 
 /// `std::max(a, b)` == `(a < b) ? b : a` — NaN-positional (returns `a` whenever
 /// the comparison is false, including when either operand is NaN), unlike
-/// `f32::max`'s IEEE `maxNum` (which returns the non-NaN operand). M-16: the
+/// `f32::max`'s IEEE `maxNum` (which returns the non-NaN operand). The
 /// saturation/desaturation math ports C++ `std::max`/`std::min` literally so
 /// any future NaN input propagates identically.
 fn cmax(a: f32, b: f32) -> f32 {
@@ -310,7 +310,7 @@ fn desaturate(p: &Rgba, f: f32, yw: &[f32; 3], out: &mut Rgba) {
 /// using three adjacent input lines `rgba_in[0..3]`; writes the middle line.
 pub fn fix_saturation(yw: &[f32; 3], rgba_in: &[&[Rgba]; 3], rgba_out: &mut [Rgba]) {
     let n = rgba_out.len();
-    // No-panic rule (M-17): a zero-width line, or any input row shorter than
+    // No-panic rule: a zero-width line, or any input row shorter than
     // `n`, would otherwise index out of bounds below. Neither is reachable
     // through `RgbaInputFile` (width is always >= 1 and every row is sized
     // `n`), but this is a library function, so the invariant is checked
@@ -392,11 +392,10 @@ mod tests {
         }
     }
 
-    /// M-14: `rgba_to_yca` must divide by the HALF-ROUNDED luminance, not the
-    /// f32 one — regression using the audit's concrete example
-    /// (`.bughunt/r4_audit_multipart.md` M-14).
+    /// `rgba_to_yca` must divide by the HALF-ROUNDED luminance, not the
+    /// f32 one — regression using a concrete example.
     #[test]
-    // The literals are exact half values from the audit repro (dyadic, exactly
+    // The literals are exact half values from the repro (dyadic, exactly
     // representable in f32); the extra digits are the point, not noise.
     #[allow(clippy::excessive_precision)]
     fn rgba_to_yca_uses_half_rounded_luminance() {
@@ -430,7 +429,7 @@ mod tests {
         assert_ne!(yca[0].r, wrong_ry, "regression: must not divide by the unrounded Y");
     }
 
-    /// M-15: seeding the accumulator with `0.0` instead of the first tap flips
+    /// Seeding the accumulator with `0.0` instead of the first tap flips
     /// the sign of an all-negative-zero sum (`0.0 + (-0.0) = +0.0`).
     #[test]
     fn decimate_chroma_horiz_seeds_accumulator_with_first_tap() {
@@ -453,7 +452,7 @@ mod tests {
         );
     }
 
-    /// M-16: `cmax`/`cmin` must match C++ `std::max`/`std::min`'s NaN-positional
+    /// `cmax`/`cmin` must match C++ `std::max`/`std::min`'s NaN-positional
     /// semantics (`(a < b) ? b : a`), not `f32::max`'s IEEE `maxNum` (which
     /// always prefers the non-NaN operand).
     #[test]
@@ -466,7 +465,7 @@ mod tests {
         assert_eq!(cmin(1.0, f32::NAN), 1.0);
     }
 
-    /// M-17: a zero-width (or otherwise malformed) call must not panic.
+    /// A zero-width (or otherwise malformed) call must not panic.
     #[test]
     fn fix_saturation_does_not_panic_on_empty_input() {
         let yw = Chromaticities::default().compute_yw().unwrap();

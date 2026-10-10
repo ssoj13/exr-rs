@@ -363,7 +363,7 @@ fn command_line_matches_exrcheck() {
 /// composite it and throw "missing a Z channel" / "missing an alpha channel" unless the part has channels
 /// named `Z` and `A` (`ImfCompositeDeepScanLine.cpp:103-123`); `ImfCheckFile.cpp:898`, `:1176`, `:1189`
 /// take that exception for damage ("only DeepTiled parts are expected to throw"). Valid deep data without
-/// `Z` or `A` is reported bad; its core path (`-c`) and ours say OK (`openexr_bug.md`). Files with both
+/// `Z` or `A` is reported bad; its core path (`-c`) and ours say OK. Files with both
 /// channels must agree in every mode.
 #[test]
 #[ignore = "needs the C++ tools (cargo xtask parity-tools)"]
@@ -426,8 +426,8 @@ fn deep_scanline_without_z_or_alpha_is_the_only_flatten_divergence_from_exrcheck
 /// Deep tiled files `exr-rs check` calls OK and `exrcheck` calls bad: the one known, deliberate
 /// divergence. `readDeepTile` (`ImfCheckFile.cpp:698`) passes `(x, y, x, y)` for `(dx1, dx2, dy1, dy2)` and
 /// so asks for tiles that do not exist whenever `max (x, y)` reaches the number of tile columns or rows of
-/// a level; `exrcheck`'s library path rejects such valid files, its core path (`-c`) and ours do not
-/// (reported upstream, `.bughunt/upstream_openexr.md` section 4). Every other verdict must be equal.
+/// a level; `exrcheck`'s library path rejects such valid files, its core path (`-c`) and ours do not.
+/// Every other verdict must be equal.
 #[test]
 #[ignore = "needs the C++ tools (cargo xtask parity-tools)"]
 fn deep_tile_request_bug_is_the_only_divergence_from_exrcheck() {

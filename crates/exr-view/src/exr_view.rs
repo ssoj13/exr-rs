@@ -59,8 +59,8 @@ use winit::event_loop::{ControlFlow, EventLoop};
 /// Launch the viewer: build the winit event loop and run the app to exit.
 ///
 /// `initial` is an optional path to open on launch (a single EXR file, a
-/// directory, or a `name.####.exr` frame pattern). VW-1 shows it in the status
-/// bar; the VW-2 load seam reads it on the first frame. Blocks until the window
+/// directory, or a `name.####.exr` frame pattern). The status bar shows it;
+/// the load seam reads it on the first frame. Blocks until the window
 /// is closed; propagates init/loop errors so the caller (CLI / bin) can report
 /// them (it prints + exits non-zero on failure — the lib never panics on setup).
 /// `auto` (CLI `--auto`) toggles `name.####.exr` sequence auto-detection. When
@@ -98,7 +98,7 @@ pub fn run(initial: Option<PathBuf>, auto: bool) -> Result<()> {
     let event_loop = EventLoop::<app::UserEvent>::with_user_event()
         .build()
         .context("failed to create winit event loop")?;
-    // On-demand redraw (B1 — kills the old 100% idle-CPU spin). Start parked on
+    // On-demand redraw (kills the old 100% idle-CPU spin). Start parked on
     // `Wait`; `App::about_to_wait` re-decides the control flow every iteration:
     // `WaitUntil(fps)` while playing, ~60 Hz while decodes land, egui's
     // `repaint_delay` for animations, otherwise `Wait` (sleep at ~0% CPU).

@@ -1,4 +1,4 @@
-//! Mutation-testing blind-spot fix (tiled/ audit prep, per team-lead):
+//! Mutation-testing blind-spot coverage:
 //! combines every blind spot that has already produced real gaps
 //! elsewhere in this audit, INSIDE a multipart file specifically --
 //! `crates/exr-core/tests/multipart_mixed.rs`'s tiled part uses

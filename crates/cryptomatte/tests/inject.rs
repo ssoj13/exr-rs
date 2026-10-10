@@ -1,8 +1,8 @@
-//! Inject / encode regressions (bug-hunt round 3, W4.3: S1, S2, S3 + manifest).
+//! Inject / encode regressions.
 //!
-//! S2: inject must produce the ORIGINAL file with only the Cryptomatte type it
-//! touches re-encoded. S1: the `conversion` metadata must be the spec value.
-//! S3: the HALF path must not be quadratic.
+//! Inject must produce the ORIGINAL file with only the Cryptomatte type it
+//! touches re-encoded. The `conversion` metadata must be the spec value.
+//! The HALF path must not be quadratic.
 
 use std::fs;
 use std::path::PathBuf;
@@ -124,7 +124,7 @@ fn inject_preserves_channels_attrs_and_windows() {
     assert!((cube.coverage[0] - 0.75).abs() < 1e-6);
 }
 
-/// S1: the only conformant `conversion` value is `uint32_to_float32` (spec
+/// The only conformant `conversion` value is `uint32_to_float32` (spec
 /// 1.2.0 p.3), on both the encode and the inject path.
 #[test]
 fn writes_spec_conversion_value() {
@@ -182,7 +182,7 @@ fn extracts_by_name_without_manifest() {
     assert!((matte.sum() - N as f32).abs() < 1e-5);
 }
 
-/// S3: inject over HALF channels must be linear in the pixel count.
+/// Inject over HALF channels must be linear in the pixel count.
 ///
 /// The structural guarantee (one plane conversion per channel) is asserted in
 /// `rank::tests::ranked_planes_convert_each_channel_once`; this is the
@@ -202,8 +202,8 @@ fn extracts_by_name_without_manifest() {
 /// fix in place, `inject_named_matte` calls it exactly `2 * pairs` times
 /// (one ID plane + one coverage plane per rank PAIR -- each RGBA
 /// `CryptoObjectNN` channel packs 2 pairs, `channels::RankedLayer::pairs`)
-/// REGARDLESS of pixel count; the same fix pattern as exr-core's D-10
-/// (`sample_count_at_calls`), which is build-mode and load INDEPENDENT --
+/// REGARDLESS of pixel count; the same fix pattern as exr-core's
+/// `sample_count_at_calls`, which is build-mode and load INDEPENDENT --
 /// same machine, same debug/release choice, same result every time.
 #[test]
 fn inject_half_channels_scales_linearly() {
@@ -218,7 +218,7 @@ fn inject_half_channels_scales_linearly() {
                 .unwrap();
 
         // Same image with HALF coverage (G/A); IDs stay FLOAT, the only
-        // storage that can hold a 32-bit ID (HALF IDs are an error, C9).
+        // storage that can hold a 32-bit ID (HALF IDs are an error).
         let mut image = Image::new(base.image.data_window);
         for (name, data) in base.image.channels() {
             if name.ends_with(".R") || name.ends_with(".B") {
@@ -285,7 +285,7 @@ fn inject_half_channels_scales_linearly() {
     assert_eq!(small, 4, "expected exactly 2 rank pairs x (ID + coverage) plane conversions");
 }
 
-/// C9: HALF ID channels are an error for extraction and inject, not a silent
+/// HALF ID channels are an error for extraction and inject, not a silent
 /// all-zero matte (a HALF keeps 16 of an ID's 32 bits and never matches).
 #[test]
 fn half_id_channels_are_an_error() {

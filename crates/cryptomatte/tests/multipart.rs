@@ -1,6 +1,6 @@
-//! Multipart Cryptomatte files (bug-hunt r3 §4 C7): a Cryptomatte type in its
+//! Multipart Cryptomatte files: a Cryptomatte type in its
 //! own part is found, opened and extracted; its metadata may sit in another
-//! part's header; inject re-encodes one part and raw-copies every other (phase 6).
+//! part's header; inject re-encodes one part and raw-copies every other.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -261,7 +261,7 @@ fn unknown_layers_error_on_a_multipart_file() {
     assert!(file.select_layer(Some("Nope")).is_err());
 }
 
-// ---- inject into a multipart file (phase 6) --------------------------------
+// ---- inject into a multipart file ------------------------------------------
 
 fn string_attr(v: &str) -> Box<dyn exr_core::Attribute> {
     Box::new(StringAttribute::new(ExrString::from(v)))
@@ -460,7 +460,7 @@ fn inject_raw_copies_deep_and_tiled_parts_byte_for_byte() {
     assert_eq!(file.extract_names(layer, &["cube"]).expect("cube").sum(), N as f32);
 }
 
-// ---- tiled parts (phase 6, Q2) ---------------------------------------------
+// ---- tiled parts -----------------------------------------------------------
 
 #[test]
 fn inject_keeps_a_one_level_tiling_of_the_injected_part() {
@@ -611,7 +611,7 @@ fn stream_write_refuses_a_sidecar_with_a_clean_message() {
 }
 
 
-// ---- channel spelling (phase 6 fix round) -----------------------------------
+// ---- channel spelling -------------------------------------------------------
 
 /// `CryptoObject` with the suffixes of `spelling`, as a single-part file with its metadata.
 fn write_spelled_source(path: &Path, spelling: cryptomatte::Spelling) {

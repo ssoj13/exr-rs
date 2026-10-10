@@ -20,7 +20,7 @@ Missing frame numbers remain gaps in the detected sequence.
 
 ![EXR viewer with the 32-point checker, metadata, histogram and HDR10 settings](../assets/viewer-pq.png)
 
-Actual native-window capture from source `57b1062`, showing `Desk.exr` on a
+Actual native-window capture, showing `Desk.exr` on a
 Windows Vulkan HDR10 PQ surface. The image is from
 [openexr-images](https://github.com/AcademySoftwareFoundation/openexr-images);
 its [license and screenshot provenance](../assets/sources.md) accompany the book.
@@ -136,7 +136,3 @@ Deep and multipart files report an unsupported-input error; use the correspondin
 low-level readers for those file shapes. Subsampled channels are decoded whole and
 scaled to the data window; luminance/chroma inputs also provide reconstructed RGB.
 Window geometry, docks, controls, recents and budgets persist between runs.
-
-Current implementation and acceptance tasks have one
-[execution plan](https://github.com/ssoj13/exr-rs/blob/main/plans/20261001-viewer-tiles-openfx.md)
-and [roadmap](https://github.com/ssoj13/exr-rs/blob/main/plans/README.md).

@@ -1,5 +1,5 @@
 //! Port of OpenEXR `ImfFramesPerSecond.h/.cpp` — convenience functions
-//! related to the `framesPerSecond` standard attribute (C-16).
+//! related to the `framesPerSecond` standard attribute.
 //!
 //! Ten pre-defined exact frame rates plus `guess_exact_fps`, which snaps an
 //! inexact rate to the nearest of the four "drop-frame" rates
@@ -54,7 +54,7 @@ pub fn fps_60() -> Rational {
 
 /// `Rational guessExactFps(double fps)` — snap a `double` frame rate to the
 /// nearest pre-defined drop-frame rate if it is within `0.002`, else return
-/// `Rational(fps)` (the best rational approximation, C-16's `Rational::from_f64`).
+/// `Rational(fps)` (the best rational approximation, `Rational::from_f64`).
 pub fn guess_exact_fps(fps: f64) -> Rational {
     guess_exact_fps_rational(Rational::from_f64(fps))
 }

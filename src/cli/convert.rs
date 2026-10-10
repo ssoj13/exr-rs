@@ -74,7 +74,7 @@ mod tests {
     }
 
     /// Every codec name of `Compression::ALL` parses to itself, in any case; the help lists
-    /// every one (the original S6 bug: HTJ2K writable but not accepted by the CLI).
+    /// every one (the original bug: HTJ2K writable but not accepted by the CLI).
     #[test]
     fn every_codec_parses_and_is_listed() {
         use clap::CommandFactory;

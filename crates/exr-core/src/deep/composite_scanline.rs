@@ -27,8 +27,8 @@
 //!
 //! # Threading
 //! C++ spawns one `LineCompositeTask` per scanline on the global
-//! `ThreadPool`. This crate is single-threaded throughout (see the repo
-//! `CLAUDE.md`); `read_pixels` here is a plain per-scanline loop, which is
+//! `ThreadPool`. This compositor is single-threaded; `read_pixels` here is a
+//! plain per-scanline loop, which is
 //! observationally identical for the pixels it produces.
 //!
 //! # Safe-Rust adaptation of the per-pixel pointer arrays
@@ -39,14 +39,14 @@
 //! raw pointer to the FIRST source's block for a pixel is also valid as the
 //! start of the COMBINED multi-source block for that pixel (pure pointer
 //! arithmetic, `ImfCompositeDeepScanLine.cpp:555-566`). This crate has no
-//! raw pointers (see the repo `CLAUDE.md` "minimal isolated `unsafe`" rule)
+//! raw pointers (exr-core contains no `unsafe` code)
 //! and, more fundamentally, every OTHER deep reader in this crate already
 //! addresses samples via ONE reader's OWN flat per-channel heap with
 //! per-reader cumulative-count addressing (`sample_table::RowPrefixCache`) --
 //! there is no existing primitive for INTERLEAVING several readers' outputs
-//! into one shared heap the way C++'s pointer trick does (this is the same
-//! "Flat-heap addressing" limitation `deep/CLAUDE.md` already documents for
-//! `DeepSlice::x_stride`/`y_stride`).
+//! into one shared heap the way C++'s pointer trick does (the same flat-heap
+//! addressing model is why `DeepSlice::x_stride`/`y_stride` are not used as
+//! per-pixel pointer-slot strides).
 //!
 //! The adaptation here keeps each source's samples in its OWN separate flat
 //! heap (exactly like every other deep reader `read_pixels` call in this
@@ -102,7 +102,7 @@ pub trait DeepScanLineCompositeSource {
     ) -> Result<()>;
 }
 
-// W3.4: generic over the stream holder `S` (not just the default `&'a mut
+// Generic over the stream holder `S` (not just the default `&'a mut
 // dyn IStream`) so `scanline::InputFile<'a, S>` can add its OWNED
 // `DeepScanLineInputFile<'a, S>` as a compositor source too, not only the
 // borrowed-stream one — mirrors the crate-wide owned-stream genericization
@@ -331,7 +331,7 @@ impl<'a> CompositeDeepScanLine<'a> {
                 Some("A") => buffer_map.push(2),
                 _ => {
                     buffer_map.push(channels.len());
-                    // C-08 follow-up: `self.channels` stays `Vec<String>` and
+                    // `self.channels` stays `Vec<String>` and
                     // is later used to look the source channel back up by
                     // name; a non-UTF-8 extra channel name round-trips only
                     // through its escaped `Display` form here, which will not
@@ -355,8 +355,8 @@ impl<'a> CompositeDeepScanLine<'a> {
     /// single-threaded -- see the module docs).
     ///
     /// `out` is the caller-owned flat output buffer the frame buffer set via
-    /// [`Self::set_frame_buffer`] addresses (round4.md "pixel data is passed
-    /// PER WRITE CALL": this crate's `FrameBuffer`/`Slice` only ever record
+    /// [`Self::set_frame_buffer`] addresses (pixel data is passed per call:
+    /// this crate's `FrameBuffer`/`Slice` only ever record
     /// LAYOUT -- byte offsets/strides/types -- the same convention every
     /// other reader/writer in the crate uses, e.g.
     /// `scanline::input::ScanLineInputFile::read_pixels(.., out: &mut
@@ -758,7 +758,7 @@ mod tests {
         (out, fb)
     }
 
-    /// D-12: a single deep source's samples must be composited front-to-back
+    /// A single deep source's samples must be composited front-to-back
     /// WITHOUT re-sorting (`sources <= 1`) -- two half-opaque samples already
     /// in front-to-back order accumulate to `0.75` (hand-derived: `0.5 +
     /// (1-0.5)*0.5`), and the empty second pixel composites to `0`.
@@ -789,7 +789,7 @@ mod tests {
         assert_eq!(a1, 0.0, "an empty pixel must composite to 0");
     }
 
-    /// D-12: two sources with overlapping, out-of-depth-order samples at the
+    /// Two sources with overlapping, out-of-depth-order samples at the
     /// same pixel must be re-sorted front-to-back before compositing -- the
     /// front (nearer) opaque sample must win regardless of source order,
     /// verified via a THIRD channel ("R") whose value differs per source.

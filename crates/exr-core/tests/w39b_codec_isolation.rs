@@ -1,6 +1,6 @@
-//! W3.9 phase B — codec-in-isolation comparison (team-lead priority: "the
-//! cleanest answer to codec or pipeline" for ZIP/PIZ/DWAA, where the
-//! whole-file comparisons show the biggest remaining gap, 2.8x-4.2x).
+//! Codec-in-isolation comparison: the cleanest answer to "codec or
+//! pipeline?" for ZIP/PIZ/DWAA, where the whole-file comparisons show the
+//! biggest remaining gap, 2.8x-4.2x.
 //!
 //! Times ONLY `Compressor::compress`/`uncompress` directly — no stream I/O,
 //! no `OutputFile`/`InputFile`, no frame-buffer gather/scatter at all — on
@@ -35,7 +35,7 @@ const WIDTH: i32 = 16384;
 const HEIGHT: i32 = 8192;
 
 /// How many lines' worth of chunks to actually compress/decompress per
-/// codec per repeat — team-lead follow-up: the original full-height
+/// codec per repeat — the original full-height
 /// (`HEIGHT`=8192) run took over an hour with `REPEATS=9` and no visible
 /// progress, an unacceptable "silent" long-running benchmark. `TOTAL_LINES`
 /// is chosen once per codec as `n_chunks * lines_per_chunk` for the
@@ -162,8 +162,8 @@ fn time_ours(comp: Compression) -> (f64, f64) {
     (compress_ms, uncompress_ms)
 }
 
-/// `ABOVE_NORMAL_PRIORITY_CLASS` (`0x00008000`, `winbase.h`) — team-lead
-/// follow-up ("run both sides with the same process priority"): the C++
+/// `ABOVE_NORMAL_PRIORITY_CLASS` (`0x00008000`, `winbase.h`) — both sides
+/// run with the same process priority: the C++
 /// oracle subprocess is bumped to this via `CommandExt::creation_flags`
 /// (std, no extra dependency); our own side runs in-process, bumped the
 /// same way by whatever launched THIS test binary (see the module doc for
@@ -209,7 +209,7 @@ fn time_cpp(oracle: &std::path::Path, comp_name: &str, actual_lines: i32) -> (f6
 }
 
 /// Best-effort current total CPU load (%), via PowerShell's
-/// `Get-Counter` — team-lead's mandatory per-repeat logging requirement.
+/// `Get-Counter`, logged once per repeat.
 /// One PowerShell process spawn per call (tens of ms) is negligible next to
 /// a single compress/uncompress repeat; `None` (never fatal — this is
 /// diagnostic logging, not a correctness input) when PowerShell isn't
@@ -229,8 +229,8 @@ fn cpu_load_pct() -> Option<f64> {
     String::from_utf8_lossy(&output.stdout).trim().parse::<f64>().ok()
 }
 
-/// Mandatory logging (team-lead follow-up: the first run had no visible
-/// progress for over an hour and had to be killed blind) — appends a
+/// Mandatory logging (a run without it had no visible progress for over an
+/// hour and had to be killed blind) — appends a
 /// timestamped line to BOTH stdout (`--nocapture` shows it live) and
 /// `.bughunt/bench/codec_isolation.log` (so progress is visible even
 /// without an attached terminal), one line per codec-start and per repeat.
@@ -275,7 +275,7 @@ fn min_of(v: &[f64]) -> f64 {
     v.iter().cloned().fold(f64::INFINITY, f64::min)
 }
 
-/// `(max - min) / median` as a percentage — team-lead's stability check: a
+/// `(max - min) / median` as a percentage — the stability check: a
 /// ratio computed from a series whose spread exceeds 15% is flagged
 /// unreliable rather than reported as a clean number.
 fn spread_pct(v: &[f64]) -> f64 {
@@ -285,7 +285,7 @@ fn spread_pct(v: &[f64]) -> f64 {
     100.0 * (max - min) / med
 }
 
-/// Repeats per codec/side. Team-lead follow-up: the first attempt at this
+/// Repeats per codec/side. The first attempt at this
 /// harness used `REPEATS=9` at the FULL `HEIGHT` (8192 lines, 1.34 GB per
 /// pass) and produced no visible progress for over an hour before being
 /// killed blind. `TOTAL_LINES` (above) now bounds the WORK per pass; `5`
@@ -293,15 +293,14 @@ fn spread_pct(v: &[f64]) -> f64 {
 /// visible within minutes instead of being invisible for an hour.
 const REPEATS: usize = 5;
 
-/// Spread threshold (team-lead's rule): a ratio from a series whose
+/// Spread threshold: a ratio from a series whose
 /// `(max-min)/median` exceeds this is marked unreliable rather than
 /// reported as settled.
 const UNRELIABLE_SPREAD_PCT: f64 = 15.0;
 
 /// If the up-front time estimate (one real repeat of the first codec,
 /// extrapolated to every codec/repeat) exceeds this, the log records the
-/// overrun explicitly rather than silently running long — team-lead's
-/// mandatory estimate-and-flag step.
+/// overrun explicitly rather than silently running long.
 const ESTIMATE_WARN: Duration = Duration::from_secs(15 * 60);
 
 #[test]
@@ -314,8 +313,8 @@ fn codec_only_ours_vs_cpp() {
     // `cargo test` runs with CWD set to the CRATE's manifest directory
     // (`crates/exr-core`), not the workspace root -- a relative path here
     // landed the log at `crates/exr-core/.bughunt/bench/...` instead of the
-    // repo-root `.bughunt/bench/...` every other progress log in this round
-    // lives in (team-lead follow-up). Anchor it explicitly off
+    // repo-root `.bughunt/bench/...` where the other bench logs live.
+    // Anchor it explicitly off
     // `CARGO_MANIFEST_DIR` instead.
     let log_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../.bughunt/bench/codec_isolation.log");
@@ -338,8 +337,8 @@ fn codec_only_ours_vs_cpp() {
     // just a narrow gap in this legacy per-chunk API's HT support that this
     // synthetic harness happens to exercise. `oracle.cpp` now trusts the
     // known expected size for HT when `outSize==0` rather than failing.
-    // HTJ2K32 is NOT included below (only HTJ2K256): matches team-lead's
-    // priority (ZIP/PIZ/DWAA/HTJ2K -- one representative HTJ2K variant),
+    // HTJ2K32 is NOT included below (only HTJ2K256): the codec set is
+    // ZIP/PIZ/DWAA/HTJ2K with one representative HTJ2K variant,
     // and HTJ2K32 would add meaningfully more wall time for the same
     // qualitative answer.
     let all_codecs: &[(&str, Compression)] = &[
@@ -349,11 +348,8 @@ fn codec_only_ours_vs_cpp() {
         ("htj2k256", Compression::Htj2k256),
     ];
     // `BENCH_CODEC_FILTER=piz,dwaa` (comma-separated, case-insensitive) runs
-    // only the named codec(s) instead of the whole list -- team-lead
-    // follow-up: re-running everything just to get one codec's numbers
-    // wastes shared-machine time and risks colliding with another agent's
-    // own benchmark run (see `bench.lock`, checked by whoever launches this
-    // test, not by the test itself).
+    // only the named codec(s) instead of the whole list -- re-running
+    // everything just to get one codec's numbers wastes machine time.
     let filter: Option<Vec<String>> = std::env::var("BENCH_CODEC_FILTER")
         .ok()
         .map(|v| v.split(',').map(|s| s.trim().to_lowercase()).collect());
@@ -363,7 +359,7 @@ fn codec_only_ours_vs_cpp() {
     };
     let codecs: &[(&str, Compression)] = &codecs;
 
-    // Up-front time estimate (team-lead's mandatory step): time ONE full
+    // Up-front time estimate: time ONE full
     // repeat (ours + cpp, compress + uncompress) of the FIRST codec, then
     // extrapolate to every codec's repeats. Codecs differ enough in cost
     // (ZIP is cheap, PIZ/DWAA/HTJ2K much less so) that this is a rough

@@ -421,16 +421,15 @@ mod tests {
 
     // ---- deep addressing math (real production code, independently checked) ----
     //
-    // W2.5 / plan3.md finding: these two tests used to RE-IMPLEMENT the
-    // address formula inline (`base_offset + (x/xSampling)*xStride +
-    // (y/ySampling)*yStride`) and compare it to a literal that was ITSELF
-    // computed with that same inline formula -- a wrong formula in the test
-    // would never be caught, since the test and the "expected value" were
-    // the same code. Worse, that formula (`DeepSlice::x_stride`/`y_stride`)
-    // is not even the one any real deep I/O path in this crate uses --
+    // These tests deliberately do NOT re-implement the address formula
+    // inline (`base_offset + (x/xSampling)*xStride + (y/ySampling)*yStride`)
+    // and compare it to a literal computed with that same formula -- a wrong
+    // formula would never be caught, since the test and the "expected value"
+    // would be the same code. That formula (`DeepSlice::x_stride`/`y_stride`)
+    // is also not the one any real deep I/O path in this crate uses --
     // `DeepSlice`'s pointer-slot addressing is a documented, intentional
     // deviation that is structurally ported but functionally UNUSED (see
-    // this module's "Flat-heap addressing" doc and `deep/CLAUDE.md`); every
+    // the module docs: the flat-heap readers do not dereference it); every
     // actual reader/writer instead calls `sample_table::count_byte_offset`/
     // `sample_count_at` on the SAMPLE-COUNT slice. These tests now call
     // THAT real production function, with the expected byte offset computed
@@ -438,7 +437,7 @@ mod tests {
     // under test) and cross-checked by planting a known value at that exact
     // byte position and reading it back through the SAME production
     // function -- a wrong formula (swapped x/y, wrong sign, off-by-one
-    // stride) would fail both the offset assertion and the round-trip read.
+    // stride) fails both the offset assertion and the round-trip read.
 
     #[test]
     fn count_byte_offset_matches_independently_computed_address() {
@@ -475,9 +474,9 @@ mod tests {
         use crate::deep::sample_table::{count_byte_offset, sample_count_at};
 
         // A LOCAL count raster whose low corner is absolute pixel
-        // (minX=5, minY=10) must map to byte 0 -- the convention
-        // `deep/CLAUDE.md` "Sample-count slice addressing" documents for a
-        // non-origin window: base_offset = -(minY*yStride + minX*xStride).
+        // (minX=5, minY=10) must map to byte 0 -- the sample-count slice
+        // convention for a non-origin window:
+        // base_offset = -(minY*yStride + minX*xStride).
         let x_stride = 4i32;
         let y_stride = 40i32;
         let base_offset = -(10i64 * y_stride as i64 + 5i64 * x_stride as i64); // -420
@@ -502,7 +501,7 @@ mod tests {
         assert_eq!(sample_count_at(&buf, base_offset, x_stride, y_stride, 7, 11).unwrap(), 222);
 
         // A pixel BEFORE the raster's low corner (4, 10) must be a hard
-        // negative-address error (F3 hard-error policy), not a panic or a
+        // negative-address error (hard-error policy), not a panic or a
         // silent wrap: -420 + 10*40 + 4*4 = -420 + 400 + 16 = -4.
         assert!(count_byte_offset(base_offset, x_stride, y_stride, 4, 10).is_none());
         assert!(sample_count_at(&buf, base_offset, x_stride, y_stride, 4, 10).is_err());

@@ -254,8 +254,8 @@ mod tests {
         }
     }
 
-    /// T7 (engagement audit): "the zlib header tests must distinguish which
-    /// check fired". `zlib_decompress_ex` collapses 5 distinct header
+    /// The zlib header tests must distinguish which
+    /// check fired. `zlib_decompress_ex` collapses 5 distinct header
     /// failures (too-short input, bad FCHECK, bad CM, CINFO too large,
     /// FDICT set) into the SAME `BadHeader` variant, so `assert_eq!(r,
     /// Err(BadHeader))` alone can't tell a passing test from one whose
@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(r, Err(ZlibDecompressError::BadHeader));
     }
 
-    /// F5: a valid zlib stream followed by trailing bytes still decodes, and
+    /// A valid zlib stream followed by trailing bytes still decodes, and
     /// `_ex` reports the first stream's exact consumption (not the whole slice).
     #[test]
     fn test_trailing_bytes_after_stream() {
@@ -394,7 +394,7 @@ mod tests {
         assert_eq!(actual_in, stream_len);
     }
 
-    /// F5: the trailer is validated immediately after the consumed DEFLATE data,
+    /// The trailer is validated immediately after the consumed DEFLATE data,
     /// so a corrupt Adler-32 right after the stream is caught even with trailing bytes.
     #[test]
     fn test_trailer_validated_after_consumed() {

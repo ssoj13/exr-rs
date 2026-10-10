@@ -1,5 +1,5 @@
 //! End-to-end C++ OpenEXR parity gate for `exr-core`'s uncompressed scanline
-//! read/write path (Phase 4, Wave 5).
+//! read/write path.
 //!
 //! This integration test proves our reader/writer interoperate with a *real*
 //! C++ OpenEXR (the vcpkg `OpenEXR-3_4` library) byte/pixel-exactly, in BOTH
@@ -55,11 +55,11 @@ mod support;
 /// (`WIDTH`/`HEIGHT`/`is_flat`/`*_val` there) — the two definitions are the one
 /// contract this whole file rests on and are deliberately textually identical.
 ///
-/// It was 7x5 until round 3. That is a SINGLE chunk for every codec and too
+/// It used to be 7x5. That is a SINGLE chunk for every codec and too
 /// small for PIZ / DWAA / DWAB / HTJ2K to shrink, so C++ stored those chunks
 /// raw (490 of 490 bytes) and their "byte-identical to C++" goldens proved only
 /// the header and the raw-store rule — the codecs themselves had never been
-/// compared with C++ at all (.bughunt/r3_tests.md §4.1). 67x43 is multi-chunk
+/// compared with C++ at all. 67x43 is multi-chunk
 /// for ZIP (16 lines), B44 (4), DWA (32) and PIZ, is not a multiple of
 /// 4/8/16/32, and compresses.
 const WIDTH: i32 = 67;
@@ -464,7 +464,7 @@ fn ours_zips_bytes_byte_identical_to_cpp_golden() {
     ours_zip_bytes_match_cpp_golden("golden_zips.exr", Compression::Zips);
 }
 
-/// K-06: same check as [`ours_zip_bytes_match_cpp_golden`], but with the
+/// Same check as [`ours_zip_bytes_match_cpp_golden`], but with the
 /// header's `zip_level` overridden to a NON-default value (the shared default
 /// both sides otherwise use is 4). C++'s golden was produced by
 /// `oracle write-zip-level <path> <zip|zips> <level>`, which sets
@@ -1262,7 +1262,7 @@ const DUMP_CHANNELS: [(&str, usize); NUM_CHANNELS as usize] =
 /// A lossy codec has no source formula to check a decode against, so the only
 /// exact reference is what a real C++ OpenEXR reader produced. Committing that
 /// is what turns 11 formerly count-only tests into bit-exact ones that need no
-/// oracle binary at all (.bughunt/r3_tests.md §2.2).
+/// oracle binary at all.
 fn cpp_decode_dump(golden: &Path, name: &str) -> Option<Vec<u8>> {
     let dump = PathBuf::from(format!("{}.dump", golden.display()));
     let path = support::fixture_or_skip(
@@ -1547,9 +1547,8 @@ fn cpp_dwab_golden_decode_matches_ours_pixel_exact() {
 }
 
 // ===========================================================================
-// W-06: subsampled-channel DWA cross-check (`.bughunt/r4_audit_dwa_htj2k.md`;
-// `crates/exr-core/CLAUDE.md`'s DWA section used to say this was "not yet
-// oracle-verified" -- these tests are the oracle verification).  `oracle.cpp`'s
+// Subsampled-channel DWA cross-check (these tests are the oracle verification
+// of DWA with subsampled channels).  `oracle.cpp`'s
 // `write-dwa-sub` / `dump-dwa-sub` modes (additive; do not touch the KNOWN
 // 67x43 image) write a 64x64 scanline DWAA/DWAB file with channels A (HALF,
 // x2/y1 -> RLE), B/G/R (HALF, unsampled -> the CSC group), BY (HALF, x2/y2 ->
@@ -2070,7 +2069,7 @@ fn ours_write_htj2k32_read_by_cpp_oracle_pixel_exact() {
 }
 
 // ###########################################################################
-// TILED parity (Phase 6, Wave W6-4b) — TiledOutputFile / TiledInputFile vs the
+// TILED parity — TiledOutputFile / TiledInputFile vs the
 // real C++ OpenEXR (Imf::TiledOutputFile / Imf::TiledInputFile), BOTH directions,
 // ONE_LEVEL + MIPMAP, lossless exact + lossy within-threshold / cross-decode.
 //
@@ -2525,15 +2524,14 @@ fn cpp_tiled_zip_one_randomy_read_by_ours() {
     );
 }
 
-/// `TiledInputFile::raw_tile_data` (round 4 continuation re-audit of C++
-/// `rawTileData`'s in/out coordinate contract) must be an exact
+/// `TiledInputFile::raw_tile_data` (C++ `rawTileData`'s in/out coordinate
+/// contract) must be an exact
 /// `(dx,dy,lx,ly) -> chunk` table lookup, addressed strictly by the
 /// coordinates the caller passes -- NOT a physical read cursor that returns
 /// "whatever chunk comes next" regardless of the requested coordinate
 /// (`OpenEXRCore/chunk.c::validate_and_compute_tile_chunk_off` computes the
 /// chunk-table slot purely from the exact input coordinates; there is no
-/// cursor branch, confirmed by reading the source -- see
-/// `.bughunt/progress_fix_tiled.md`'s "raw_tile_data cursor form (re-audit)").
+/// cursor branch, confirmed by reading the source).
 ///
 /// Uses a REAL C++-written RANDOM_Y golden (`golden_tiled_zip_one_randomy.exr`)
 /// specifically because RANDOM_Y is the line order where "on-disk order"
@@ -2664,7 +2662,7 @@ fn roundup_and_rounddown_mipmaps_differ() {
     );
 }
 
-/// W2.7 "header wire bytes": the base attribute set (owner/parityTag/
+/// "Header wire bytes": the base attribute set (owner/parityTag/
 /// channels/compression/dataWindow/displayWindow/lineOrder/
 /// pixelAspectRatio/screenWindowCenter/screenWindowWidth) is already proven
 /// byte-exact as a side effect of every `*_bytes_byte_identical_to_cpp_golden`
@@ -2746,7 +2744,7 @@ fn cpp_tiled_none_one_offset_read_by_ours() {
 }
 
 // ---------------------------------------------------------------------------
-// (a-ripmap) RIPMAP -- independent (lx, ly) level grid (W2.7). Self-contained:
+// (a-ripmap) RIPMAP -- independent (lx, ly) level grid. Self-contained:
 // unlike `ours_decode_tiled`/`tiled_levels`, which key everything by a single
 // `i32` level (fine for ONE_LEVEL/MIPMAP where lx == ly, but RIPMAP has MANY
 // levels sharing the same lx, e.g. (0,1) and (0,2)), this walks the real 2D
@@ -2889,7 +2887,7 @@ fn ours_write_tiled(out_path: &Path, comp: Compression, mode: LevelMode, min_x: 
     let mut tof = TiledOutputFile::new(&mut os.0, &header).unwrap();
     let num_levels = tof.num_levels().unwrap();
     let levels = tiled_levels(mode, num_levels);
-    // T-14 (final design): `set_frame_buffer` installs only the LAYOUT;
+    // `set_frame_buffer` installs only the LAYOUT;
     // pixel bytes are passed to `write_tiles` per call, so a fresh
     // per-level buffer is simply a local per iteration — no cross-iteration
     // binding needed.
@@ -3062,7 +3060,7 @@ fn ours_write_tiled_pxr24_one_read_by_cpp() {
 // Tiled DWAA is the ONLY path that uses the DEFLATE AC-compression strategy
 // (scanline DWAA + all DWAB use STATIC_HUFFMAN — internal_dwa.c:139-142), so it
 // is also the only path that exercises a *shrinking* tiled DWA chunk here.  The
-// W6-4b gate surfaced a real bug: our v2 channel-rules section wrote the wrong
+// tiled gate surfaced a real bug: our v2 channel-rules section wrote the wrong
 // `CompressorScheme` wire codes (LossyDct/Rle/Unknown vs the C++ enum order
 // UNKNOWN=0/LOSSY_DCT=1/RLE=2), so genuine C++ OpenEXR mis-classified R/G/B as
 // UNKNOWN and rejected the chunk with `EXR_ERR_CORRUPT_CHUNK`.  Fixed in
@@ -3078,10 +3076,10 @@ fn ours_write_tiled_dwab_one_read_by_cpp() {
 }
 
 // ###########################################################################
-// DEEP parity gate (Phase 7, Wave W7-5)
+// DEEP parity gate
 // ###########################################################################
 //
-// The authoritative Phase 7 verification: proves our DeepScanLine + DeepTiled
+// The authoritative deep verification: proves our DeepScanLine + DeepTiled
 // read/write interoperate with a real C++ OpenEXR (vcpkg OpenEXR-3_4) in BOTH
 // directions, pixel(sample)-exact AND count-exact.  Deep is all-lossless
 // (NONE/RLE/ZIPS), so every count and every sample bit must match exactly.
@@ -3100,18 +3098,14 @@ fn ours_write_tiled_dwab_one_read_by_cpp() {
 //     origin and off-origin variants (same property the tiled gate relies on).
 //
 // Scope: the C++ cross-read covers deep scanline (incl. off-origin) + deep
-// tiled ONE_LEVEL, for every valid deep codec (NONE/RLE/ZIPS), in BOTH
-// directions.  Deep TILED MIPMAP is intentionally NOT cross-checked against
-// C++ here: our deep flat-heap is a safe-Rust adaptation of C++'s `char**`,
-// addressed in WHOLE-(level-0)-WINDOW raster order for every level (the writer
-// gathers and the reader scatters every MIPMAP level from the SAME full-window
-// count buffer — see `deep/CLAUDE.md` "MIPMAP gotcha").  That whole-window
-// contract is an API property, not an on-disk one, so a per-level C++ KNOWN
-// image cannot be addressed by our reader without an artificial level-0-
-// subsample construction that proves nothing the ONE_LEVEL gate doesn't.  Deep
-// MIPMAP read/write is exhaustively covered (count+sample-exact, all levels)
-// by the W7-4b in-crate round-trip tests; the tiling level math itself is
-// C++-verified by the Phase 6 NON-deep tiled MIPMAP gate (both directions).
+// tiled ONE_LEVEL for every valid deep codec (NONE/RLE/ZIPS), and deep tiled
+// MIPMAP (the `*_mipmap_*` tests below), in BOTH directions.  Our deep
+// flat-heap is a safe-Rust adaptation of C++'s `char**`, addressed in
+// WHOLE-(level-0)-WINDOW raster order for every level (the writer gathers and
+// the reader scatters every MIPMAP level from the SAME full-window count
+// buffer); that contract is an API property, not an on-disk one.  Deep MIPMAP
+// read/write is additionally covered (count+sample-exact, all levels) by the
+// in-crate round-trip tests.
 
 use exr_core::deep::{
     CompositeDeepScanLine, DeepFrameBuffer, DeepScanLineInputFile, DeepScanLineOutputFile,
@@ -3233,8 +3227,8 @@ fn deep_count_buffer(w: i32, h: i32, min_x: i32, min_y: i32) -> (Vec<u8>, i32, i
 
 /// Build a sample-count buffer for ONE MIPMAP level addressed in the
 /// **level-0 (grid) raster order** that our deep tiled reader/writer use for
-/// EVERY level (the "whole-window flat-heap" contract — see
-/// `src/deep/CLAUDE.md` "MIPMAP gotcha").  The buffer is `grid_w` wide (so its
+/// EVERY level (the "whole-window flat-heap" contract: the writer gathers and
+/// the reader scatters every level from the same level-0 count buffer).  The buffer is `grid_w` wide (so its
 /// strides match `samples_before_pixel`'s `max_x = grid_w - 1` addressing) but
 /// only the level's `lw x lh` top-left corner carries counts; every pixel
 /// outside the level rect is left at 0.  Because those out-of-level cells are
@@ -3484,7 +3478,7 @@ fn cpp_deep_scanline_none_offset_read_by_ours() {
 }
 
 // ---------------------------------------------------------------------------
-// D-12: CompositeDeepScanLine oracle gate.
+// CompositeDeepScanLine oracle gate.
 //
 // `golden_deep_composite_a.exr` / `_b.exr` are TWO real C++-written deep
 // scanline sources (`oracle.cpp::do_write_deep_composite`) with overlapping,
@@ -3604,21 +3598,20 @@ fn cpp_composite_deep_scanline_bit_exact() {
 }
 
 // ---------------------------------------------------------------------------
-// W3.4: the GENERIC, real `Imf::InputFile` flattening a deep-scanline source
+// The GENERIC, real `Imf::InputFile` flattening a deep-scanline source
 // oracle gate.
 //
 // `golden_deep_composite_a.exr.dump` is the real, GENERIC `Imf::InputFile`
 // (not `DeepScanLineInputFile` directly) opening `golden_deep_composite_a.exr`
-// (the single-source deep scanline fixture from the D-12 gate above, reused
+// (the single-source deep scanline fixture from the composite gate above, reused
 // here), setting a flat Z/A/R `FrameBuffer`, calling `readPixels`, and
 // dumping the flattened result as hex float bits
 // (`oracle.cpp::do_read_deep_via_inputfile`). C++'s generic `InputFile`
 // internally builds exactly the `DeepScanLineInputFile` +
-// `CompositeDeepScanLine` pair the D-12 gate drives directly
+// `CompositeDeepScanLine` pair the composite gate drives directly
 // (`ImfInputFile.cpp:300-305`) -- this test instead goes through OUR
-// `scanline::InputFile` (W3.4's `Reader::Deep` flatten path) and asserts the
-// result is bit-exact against the real C++ generic-reader dump, closing the
-// oracle-verification gap the W3.4 implementation pass disclosed (internal
+// `scanline::InputFile` (its `Reader::Deep` flatten path) and asserts the
+// result is bit-exact against the real C++ generic-reader dump (internal
 // consistency against `CompositeDeepScanLine` was already proven by a unit
 // test; this is the missing literal comparison against C++'s `InputFile`).
 #[test]
@@ -3662,7 +3655,7 @@ fn cpp_input_file_flattens_deep_scanline_bit_exact() {
         expected.insert((x, y, chan), bits);
     }
 
-    // Read with OUR generic `InputFile` (W3.4's deep-scanline flatten path),
+    // Read with OUR generic `InputFile` (its deep-scanline flatten path),
     // not `DeepScanLineInputFile` directly -- this is the whole point of the
     // gate.
     let mut is = StdIfStream::open(golden.to_str().unwrap()).expect("open deep composite source a");
@@ -3736,8 +3729,7 @@ fn cpp_deep_tiled_read_by_ours(file: &str, comp: Compression, mode: LevelMode) {
 
     // Level-0 (grid) width: our deep tiled reader addresses the flat heap of
     // EVERY level in this whole-(level-0)-window raster order (`samples_before
-    // _pixel` is always called with the level-0 window bounds — see
-    // `src/deep/CLAUDE.md` "MIPMAP gotcha").  So the per-level count buffer is
+    // _pixel` is always called with the level-0 window bounds).  So the per-level count buffer is
     // DW wide with counts only in the level's `lw x lh` corner; the zero cells
     // outside the level collapse `samples_before_pixel` to the level-LOCAL
     // cumulative count, keeping it consistent with `deep_sample_heap(lw, lh)`.
@@ -3928,7 +3920,8 @@ fn ours_write_deep_scanline_none_offset_read_by_cpp() {
 /// MIPMAP).  For MIPMAP we set a fresh per-level frame buffer (DW-wide count
 /// buffer with counts only in the level's corner + a level-local sample heap)
 /// and write that level's tiles, exactly mirroring the oracle's per-level
-/// `do_write_deep_tiled` loop — see the "MIPMAP gotcha" in `src/deep/CLAUDE.md`.
+/// `do_write_deep_tiled` loop (our writer gathers every level from a level-0
+/// strided count buffer, so the level's counts sit in its top-left corner).
 fn ours_write_deep_tiled_read_by_cpp(tmp: &str, comp: Compression, mode: LevelMode) {
     let Some(oracle) = support::oracle_or_skip(tmp) else { return };
 
@@ -3939,7 +3932,7 @@ fn ours_write_deep_tiled_read_by_cpp(tmp: &str, comp: Compression, mode: LevelMo
         let mut df = DeepTiledOutputFile::new(&mut os.0, &header).unwrap();
         let grid_w = df.level_width(0).unwrap(); // level-0 width = whole-window stride
         let num_levels = df.num_levels().unwrap();
-        // round4.md "pixel data is passed PER WRITE CALL": `set_frame_buffer`
+        // Pixel data is passed PER WRITE CALL: `set_frame_buffer`
         // stores only the layout; each level's fresh count/sample bytes are
         // passed straight to that level's `write_tiles` call.
         for (lx_lvl, ly_lvl) in tiled_levels(mode, num_levels) {
@@ -4002,7 +3995,7 @@ fn ours_write_deep_tiled_zips_mipmap_read_by_cpp() {
 }
 
 // ###########################################################################
-// # MULTIPART parity gate (Phase 8, Wave W8-4)
+// # MULTIPART parity gate
 // #
 // # Proves our MultiPart read/write + the typed Part wrappers interoperate
 // # with a real C++ OpenEXR (vcpkg OpenEXR-3_4) in BOTH directions, on ONE
@@ -4577,8 +4570,7 @@ mod multipart_gate {
 /// This is the guard for the defect this whole round of work started from: the
 /// 7x5 KNOWN image was so small that C++ stored PIZ, DWAA, DWAB and both HTJ2K
 /// chunks RAW, so five codecs' "byte-identical to C++" and "decode matches C++"
-/// tests passed while never running the codec at all
-/// (`.bughunt/r3_tests.md` §4.1). Scanning the directory rather than listing
+/// tests passed while never running the codec at all. Scanning the directory rather than listing
 /// file names means a new golden is covered the moment `xtask` writes it — the
 /// check cannot be forgotten for the next codec.
 #[test]
@@ -4605,8 +4597,7 @@ fn every_compressed_golden_actually_compresses() {
             skipped.push(format!("{name} (deep/multipart)"));
             continue;
         }
-        // Sub-sampling matrix goldens (`golden_sub_*`, `.bughunt/
-        // progress_htj2k_ysub.md`): 64x64 is sized for chunk-boundary
+        // Sub-sampling matrix goldens (`golden_sub_*`): 64x64 is sized for chunk-boundary
         // coverage across every codec's scan-line count (1/16/32/256), not
         // for this test's "enough raw bytes to prove a codec ran" heuristic
         // -- an RLE/ZIPS chunk here is a single 64-pixel scanline (well under
@@ -4660,8 +4651,7 @@ fn every_compressed_golden_actually_compresses() {
 
 /// Truncating a real C++-written file at many points must never panic.
 ///
-/// `.bughunt/r3_tests.md` §8 lists "incomplete files / offset reconstruction"
-/// as having no honest test: the only corrupt fixtures lived in the corpus,
+/// "Incomplete files / offset reconstruction" used to have no honest test: the only corrupt fixtures lived in the corpus,
 /// which itself never ran. A truncated file is the commonest real-world
 /// corruption (an interrupted render), and the read path is the one that faces
 /// untrusted bytes, so the invariant is asserted here against genuine C++
@@ -4714,8 +4704,7 @@ fn truncated_goldens_never_panic() {
 }
 
 // ===========================================================================
-// Sub-sampling matrix: 12 codecs x 4 samplings (`.bughunt/progress_htj2k_ysub.md`
-// follow-up). The HTJ2K y-subsampling bug slipped through because no test
+// Sub-sampling matrix: 12 codecs x 4 samplings. An HTJ2K y-subsampling bug slipped through because no test
 // exercised channel sub-sampling for 11 of the 12 codecs; this matrix closes
 // that gap for every codec, both directions, plus our own round trip.
 //
@@ -5032,8 +5021,7 @@ fn sub_matrix_ours_round_trip() {
 fn sub_matrix_cpp_golden_matches_ours() {
     // Canary: the whole matrix is regenerated together by `xtask`, so if the
     // first golden is missing, treat it the same way every other fixture-gated
-    // test here does (FAIL unless `EXR_ALLOW_SKIP=1` -- see this crate's
-    // CLAUDE.md, "missing fixtures/oracle FAIL unless EXR_ALLOW_SKIP=1").
+    // test here does (FAIL unless `EXR_ALLOW_SKIP=1`).
     if support::fixture_or_skip(
         "sub_matrix_cpp_golden_matches_ours",
         parity_file(&sub_golden_name("none", 1, 1)),
@@ -5059,7 +5047,7 @@ fn sub_matrix_ours_written_read_by_cpp_oracle() {
 }
 
 // ===========================================================================
-// C-08: byte-exact `Name` — a channel name with an invalid-UTF-8 byte, an
+// Byte-exact `Name` — a channel name with an invalid-UTF-8 byte, an
 // attribute name starting with an invalid-UTF-8 lead byte, and an attribute
 // name at exactly `Name::MAX_LENGTH` (255 bytes, which also forces
 // `LONG_NAMES_FLAG`). `oracle.cpp`'s `write-nonutf8-names` /

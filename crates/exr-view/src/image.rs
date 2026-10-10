@@ -169,7 +169,7 @@ pub struct DecodedFrame {
     /// (`SourceDesc`): a new frame starts a new tile generation;
     /// a monotonic id never aliases, unlike an `Arc` pointer reused after eviction.
     pub id: u64,
-    /// `Some` for a FILE-BACKED frame (`.bughunt/design_tiling.md` phase 2): too
+    /// `Some` for a FILE-BACKED frame (out-of-core tiling): too
     /// large to hold, so `channels` is empty and tiles/readout decode from the
     /// file on demand. The types of `channel_names`, in the same order.
     pub file_types: Option<Vec<PixelType>>,
@@ -362,7 +362,7 @@ impl DecodedFrame {
         let data_window = img.data_window;
         let display_window = img.display_window;
 
-        // V1: take ownership of the channels instead of cloning every pixel
+        // Take ownership of the channels instead of cloning every pixel
         // buffer (`img` is a freshly-read, about-to-be-dropped Image, so
         // `into_channels` moving its BTreeMap entries out directly is free
         // where the old `img.channels().map(|(n, c)| (n.to_owned(),
@@ -507,7 +507,7 @@ pub struct Windows {
 
 // ── Display state ─────────────────────────────────────────────────────────────
 
-/// Most pixels a scope scatters from (`.bughunt/design_tiling.md` §3.6): the
+/// Most pixels a scope scatters from: the
 /// scopes read the finest pyramid level within this many pixels. 16 M keeps a
 /// 4K x 4K image exact at level 0.
 const SCOPE_MAX_PIXELS: u64 = 16 << 20;
@@ -791,7 +791,7 @@ pub struct ImageBackend {
     /// A selection whose coverage extraction FAILED for this frame. Without it,
     /// the failure path cleared `coverage_sel`, so the next UI frame saw
     /// `want != sel`, retried, re-materialized and re-uploaded the whole image
-    /// (~132 MB at 4K) — every repaint, forever (V7).
+    /// (~132 MB at 4K) — every repaint, forever.
     coverage_failed: Option<(String, String)>,
     /// Bumped whenever baked `pixels` content may change without a layer rename
     /// (coverage overlay set/clear). Part of the tile source identity ([`SourceDesc`]).
@@ -1060,7 +1060,7 @@ impl ImageBackend {
     ///
     /// # Errors
     /// [`ExrError::Logic`] if a channel's sample count does not cover the
-    /// data window (design_r5.md §4.1 — this used to silently paint 0.0/1.0
+    /// data window (this used to silently paint 0.0/1.0
     /// for the mismatched pixels instead of surfacing the corrupt frame).
     /// `self.pixels` is left at whatever `materialize_into` wrote before the
     /// failure (a valid-length, partially-filled buffer; still safe to read).
@@ -1614,14 +1614,14 @@ impl ScopeTex {
 ///
 /// Half promotes losslessly; Float passes through; Uint is normalized to
 /// `[0,1]` by `u32::MAX` so integer (e.g. id) channels are at least viewable
-/// (a display policy — the W4.6 SSOT `ChannelData::sample_f32` itself gives
+/// (a display policy — the canonical `ChannelData::sample_f32` itself gives
 /// the raw UINT cast, matching C++'s `uintToFloat`).
 ///
 /// # Errors
 /// [`ExrError::Logic`] if `i` is out of range for `ch` — a length mismatch
 /// between channels of the same materialized frame is a genuine decode bug
 /// (all channels of a layer share the data window), so this is a hard error
-/// (design_r5.md §4.1) instead of the previous silent `unwrap_or(0.0)`.
+/// instead of the previous silent `unwrap_or(0.0)`.
 fn sample(ch: &ChannelData, i: usize) -> Result<f32, ExrError> {
     let v = ch.sample_f32(i).ok_or_else(|| {
         ExrError::Logic(format!(
@@ -1750,7 +1750,7 @@ impl Mapping {
     ///
     /// # Errors
     /// [`ExrError::Logic`] for a channel index outside `channels` or a channel
-    /// shorter than the pixel count (design_r5.md §4.1: a corrupt frame is
+    /// shorter than the pixel count (a corrupt frame is
     /// reported, not painted as 0.0/1.0).
     pub(crate) fn fill(
         &self,
@@ -1907,7 +1907,7 @@ fn needs_file_backing(header: &Header, budget: u64) -> bool {
 // ── Load error ─────────────────────────────────────────────────────────────────
 
 /// Why an EXR failed to load — distinguishes "unsupported by the facade"
-/// (deep / multipart — point the user at VW-3) from a genuine read error.
+/// (deep / multipart — point the user at a specific part) from a genuine read error.
 #[derive(Debug)]
 pub enum LoadError {
     /// Deep / multipart / subsampled: the `api::read` escape hatch.
@@ -2289,7 +2289,7 @@ mod tests {
         assert_eq!(img.readout_at(0, 0), Some(vec![("coverage".to_string(), 0.25)]));
     }
 
-    /// Grow-only reuse (W5.4/W5.6): the scope source texture must survive a data
+    /// Grow-only reuse: the scope source texture must survive a data
     /// window that wobbles frame to frame, but not hold a 16K allocation for a
     /// 1K image for the rest of the session.
     #[test]
@@ -2385,7 +2385,7 @@ mod tests {
         assert_eq!(w.display_size, (8, 4));
     }
 
-    /// W5.9: a sequence step must REUSE the materialized buffer, not re-allocate
+    /// A sequence step must REUSE the materialized buffer, not re-allocate
     /// ~132 MB per displayed frame.
     #[test]
     fn set_frame_reuses_the_materialized_buffer() {
@@ -2613,7 +2613,7 @@ mod tests {
         }
     }
 
-    /// Phase 2 through the viewer: a file-backed frame (budget too small to
+    /// Out-of-core tiling through the viewer: a file-backed frame (budget too small to
     /// hold it) shows the same tiles and the same readout as the same file
     /// decoded whole, for the main layer and a named one.
     #[test]

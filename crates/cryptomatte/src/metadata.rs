@@ -66,7 +66,7 @@ impl LayerInfo {
     /// Key prefix owned by this layer (`cryptomatte/<id>/`) — every header key
     /// starting with it belongs to this Cryptomatte type.
     ///
-    /// W4.6 (design_r5.md §4.4): expressed via the canonical [`metadata_key`]
+    /// Expressed via the canonical [`metadata_key`]
     /// with an empty `field` (`"{prefix}{id}/"`) instead of a second
     /// hand-written format string for the same shape.
     pub fn key_prefix(&self) -> String {
@@ -117,7 +117,7 @@ pub fn discover_layers(header: &Header, channel_names: &[&str]) -> Result<Vec<La
     let mut raw: BTreeMap<String, (String, BTreeMap<String, String>)> = BTreeMap::new();
 
     for (key, _) in header.iter() {
-        // C-08 follow-up: Cryptomatte metadata keys are always ASCII in
+        // Cryptomatte metadata keys are always ASCII in
         // practice; a non-UTF-8 attribute name simply cannot match one of
         // the `METADATA_PREFIXES` and is skipped.
         let Some(key) = key.to_str() else {

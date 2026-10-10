@@ -4,7 +4,7 @@ members = ["crates/imath-rs", "crates/deflate-rs", "crates/exr-core", "crates/ex
 # `openexr-py` is a PyO3 cdylib built ONLY by maturin (`bootstrap.py b p`), NOT by
 # cargo: its `extension-module` feature does not link libpython, which would break
 # `cargo test --workspace` (a test binary needs libpython). It still path-depends on
-# the workspace crates, so it tracks them. See crates/openexr-py/CLAUDE.md.
+# the workspace crates, so it tracks them.
 exclude = ["crates/openexr-py"]
 
 # Shared metadata inherited by member crates via `<field>.workspace = true`.
@@ -23,16 +23,14 @@ smallvec = "1"
 # Logging facade (libraries) + env_logger backend (binaries only). The `log`
 # crate is a zero-cost facade: members emit `log::{info,debug,trace,warn,error}`
 # and pick NO backend; only the two binaries (`exr-rs` CLI + `exr-view`) init
-# `env_logger`. This keeps the libraries (exr-core, scanseq) lean. See the
-# logging design in CLAUDE.md.
+# `env_logger`. This keeps the libraries (exr-core, scanseq) lean.
 log = "0.4"
 env_logger = "0.11"
 # MurmurHash3: x64_128 (Alembic) + x86_32 (Cryptomatte).
 murmur3 = { git = "ssh://git@github.com/ssoj13/murmur3.git", branch = "main" }
 # Cross-arch SIMD primitives (safe API, unsafe stays inside that crate) --
-# the ONE place SIMD-accelerated codec kernels live outside deflate-rs; see
-# CLAUDE.md's "Key invariants" for why (this crate never writes its own
-# core::arch/unsafe).
+# the ONE place SIMD-accelerated codec kernels live outside deflate-rs, so
+# exr-core never writes its own core::arch/unsafe.
 codec-simd = { git = "ssh://git@github.com/ssoj13/codec-simd-rs.git", branch = "main" }
 # Locates the private test image set (EXR_TEST_DATA / ../exr-rs-tests); the tests that read it
 # are behind each crate's `test-data` feature, off by default.
@@ -49,7 +47,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# The CLI drives the verified exr-core readers/writers + the W10-1 `api` facade.
+# The CLI drives the verified exr-core readers/writers + the `api` facade.
 exr-core = { path = "crates/exr-core" }
 # Cryptomatte inspect / extract / encode subcommand.
 cryptomatte = { path = "crates/cryptomatte" }

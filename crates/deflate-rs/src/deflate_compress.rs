@@ -2,7 +2,7 @@
 //! https://github.com/ebiggers/libdeflate/blob/v1.26/lib/deflate_compress.c
 //!
 //! Pure-Rust, dependency-free, safe (no `unsafe`, no FFI) 1:1 port of the
-//! libdeflate DEFLATE compressor.  This wave (Phase 2, Wave 4) ports the entire
+//! libdeflate DEFLATE compressor.  This module ports the entire
 //! compressor: all 12 compression levels and their strategy mapping, the
 //! `none`/`greedy`/`lazy`/`lazy2`/`near-optimal` parsers, the cost model and
 //! optimal parser, the block-splitting heuristic, length-limited canonical
@@ -15,7 +15,7 @@
 //!   `&mut [u8]` cursor (`OutputBitstream`) and a `u64` bit buffer, flushing whole
 //!   words via `to_le_bytes` and a byte-at-a-time tail.  Output is byte-identical.
 //! - C uses `const u8 *in_base` + pointer arithmetic for the matchfinders.  The
-//!   Wave-3 matchfinders already expose an index-based API (`in_buf: &[u8]`,
+//!   matchfinders already expose an index-based API (`in_buf: &[u8]`,
 //!   `in_base_pos: usize`); we drive them exactly as the C compressor does, just
 //!   with indices instead of pointers.
 //! - `bitbuf_t` is fixed at `u64` here (libdeflate uses `machine_word_t`, which is
@@ -27,8 +27,6 @@
 //! - Tie-breaking in `deflate_flush_block` (uncompressed > static > dynamic when
 //!   equal cost), the block-split thresholds, the cost model and the optimal
 //!   parser are all reproduced exactly so the byte output matches libdeflate.
-//!
-//! See this crate's `CLAUDE.md`.
 //!
 //! # Clippy: faithful-port allowances
 //! This module ports C `for`/`while` loops that walk integer indices over fixed tables
@@ -507,7 +505,7 @@ macro_rules! add_bits {
 /// recomputed here, mirroring C's `deflate_flush_block`: there it's a `u8 * const`
 /// local computed ONCE from the block's starting `out_next`, and every `FLUSH_BITS()`
 /// call in that block (there can be dozens per literal/match) reads the same value.
-/// F5 (plan4): this macro used to recompute `end`/`out_fast_end` from `$out.len()`
+/// This macro used to recompute `end`/`out_fast_end` from `$out.len()`
 /// on every single call — redundant work in the hottest loop in the compressor,
 /// executed once per literal, once or more per match, and once per RLE/precode item.
 /// Byte-identical output either way (both branches produce the exact same bytes,
@@ -585,7 +583,7 @@ fn heap_sort(a: &mut [u32], length: usize) {
     if length < 2 {
         return;
     }
-    // F7 (plan4): C declares `A--` and reuses the caller's array in place (no
+    // C declares `A--` and reuses the caller's array in place (no
     // allocation at all -- see the module doc comment on `sort_symbols`'s
     // scratch array for why we can't safely do that same pointer trick).
     // Fixed-size stack array instead of a per-call `Vec` -- `length` is
@@ -621,7 +619,7 @@ fn get_num_counters(num_syms: usize) -> usize {
 /// Packs `sym | (freq << NUM_SYMBOL_BITS)` into `symout`.  Returns number used.
 fn sort_symbols(num_syms: usize, freqs: &[u32], lens: &mut [u8], symout: &mut [u32]) -> usize {
     let num_counters = get_num_counters(num_syms);
-    // F7 (plan4): fixed-size stack array, mirroring C's `unsigned
+    // Fixed-size stack array, mirroring C's `unsigned
     // counters[GET_NUM_COUNTERS(DEFLATE_MAX_NUM_SYMS)]` -- `num_counters ==
     // num_syms <= DEFLATE_MAX_NUM_SYMS` for every caller (litlen: 288,
     // offset: 32, precode: 19). This runs 3+ times per block (once per code
@@ -904,7 +902,7 @@ struct NearOptimalState {
     max_len_to_optimize_static_block: u32,
 }
 
-/// D1: parser-specific state, one arm per `Strategy` family, built ONLY for
+/// Parser-specific state, one arm per `Strategy` family, built ONLY for
 /// the arm the chosen level actually uses.
 ///
 /// Mirrors C's `union { hc_matchfinder... ; ht_matchfinder... ; bt_matchfinder... }`
@@ -933,7 +931,7 @@ enum StrategyState {
     Near(Box<NearOptimalState>),
 }
 
-// D1: these are FREE functions taking `&(mut) Option<StrategyState>`, not
+// These are FREE functions taking `&(mut) Option<StrategyState>`, not
 // `&(mut) self` methods, and are always called as `xxx(&mut self.state)` at
 // the use site. That is load-bearing, not stylistic: a method taking
 // `&mut self` reborrows ALL of `self` for as long as its returned reference
@@ -950,7 +948,7 @@ enum StrategyState {
 /// (i.e. `strategy == Strategy::NearOptimal`, levels 10-12). `None` on any
 /// other level -- callers on the near-optimal-only code paths treat that as
 /// "can't happen" (see the many "self.n is Some by construction" comments
-/// below, from before D1 folded `n`/`hc_mf`/`ht_mf` into one `StrategyState`).
+/// below, from before `n`/`hc_mf`/`ht_mf` were folded into one `StrategyState`).
 #[inline]
 fn near(state: &Option<StrategyState>) -> Option<&NearOptimalState> {
     match state {
@@ -993,7 +991,7 @@ fn greedy_mut(state: &mut Option<StrategyState>) -> Option<(&mut HcMatchfinder, 
     }
 }
 
-/// D3: `deflate_set_costs_from_codes` — set the near-optimal cost model from
+/// `deflate_set_costs_from_codes` — set the near-optimal cost model from
 /// codeword lengths. Free function (not a `&mut self` method, for the same
 /// disjoint-borrow reason as `near`/`near_mut`/etc. above): every call site
 /// reads `lens` from a field of `self` (`self.codes.lens` or
@@ -1170,7 +1168,7 @@ impl Compressor {
             }
         }
 
-        // D1: build ONLY the StrategyState arm this level actually uses --
+        // Build ONLY the StrategyState arm this level actually uses --
         // mirrors C's union allocation (deflate_compress.c L3877-3913), which
         // sizes/inits only the member the level needs. `new_uninit()` skips
         // the matchfinder's own `init()` sweep because `compress_fastest`/
@@ -1300,7 +1298,7 @@ impl Compressor {
 
     /// `deflate_init_static_codes` — build `static_codes` from the DEFLATE fixed code.
     fn init_static_codes(&mut self) {
-        // T5 (engagement audit): the fixed-Huffman code tables must be built
+        // The fixed-Huffman code tables must be built
         // ONCE per `Compressor` (at construction, `Compressor::new` calls
         // this exactly once) and REUSED for every fixed-Huffman block a
         // later `compress`/`deflate_compress` call emits -- proves the
@@ -1563,7 +1561,7 @@ impl Compressor {
         let mut bitbuf = os.bitbuf;
         let mut bitcount = os.bitcount;
         let mut out_next = os.next;
-        // F5: computed ONCE per block, like C's `u8 * const out_fast_end` in
+        // Computed ONCE per block, like C's `u8 * const out_fast_end` in
         // `deflate_flush_block` — see `flush_bits!`'s doc comment.
         let out_fast_end = os.end() - core::cmp::min(WORDBYTES - 1, os.end() - out_next);
 
@@ -2299,7 +2297,8 @@ impl Compressor {
             self.reset_symbol_frequencies();
             // Re-borrow each iteration: `finish_block` below needs `&mut self`
             // as a whole, so `ht_mf`/`f_sequences` (borrowed from `self.state`)
-            // must not still be live across that call -- see D1 in CLAUDE.md.
+            // must not still be live across that call -- see the free-function
+            // accessors' comment above `near`.
             let Some((ht_mf, f_sequences)) = fastest_mut(&mut self.state) else { return; };
             let mut seq_idx = 0usize;
             f_sequences[0].litrunlen_and_length = 0;
@@ -3295,7 +3294,7 @@ impl Compressor {
 
                 let matches_start = cache_idx;
                 if max_len >= BT_MATCHFINDER_REQUIRED_NBYTES as u32 {
-                    // F8 (plan4): write directly into the caller-owned match
+                    // Write directly into the caller-owned match
                     // cache (disjoint field borrow of `n.bt_mf` and
                     // `n.match_cache[cache_idx..]` -- no intermediate `Vec`).
                     // This used to allocate a fresh `Vec` here and copy out
@@ -3617,8 +3616,7 @@ mod tests {
         assert_eq!(&out_a[..n_a], &out_b[..n_b]);
     }
 
-    /// T5 (engagement audit): "count static-codes table builds (1 build on
-    /// two fixed-Huffman blocks)". `pangram_short` (a 3x-repeated pangram,
+    /// Count static-codes table builds (1 build on two fixed-Huffman blocks). `pangram_short` (a 3x-repeated pangram,
     /// small enough that a dynamic Huffman header's own overhead isn't worth
     /// it) reliably makes `flush_block`'s own cost comparison pick the
     /// STATIC/fixed Huffman block type at levels 1-6 (confirmed via a

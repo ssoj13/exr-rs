@@ -1,7 +1,7 @@
 # Screenshot provenance
 
 These are actual Windows native-window/region captures made with filesystem-mcp-rs
-from exr-rs source commit `57b1062390b5e5c400cc120330970ae59be415cf`.
+from a pre-release exr-rs source tree.
 The CLI/viewer was built from a clean isolated checkout with the checked-in lockfile.
 No image generation or pixel editing was used.
 

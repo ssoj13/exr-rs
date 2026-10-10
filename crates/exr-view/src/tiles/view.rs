@@ -1,4 +1,4 @@
-//! Per-frame tile orchestration (`.bughunt/design_tiling.md` §3): which tiles
+//! Per-frame tile orchestration: which tiles
 //! the view needs, producing them off the UI thread, the RAM cache, the atlas
 //! uploads, and the draw list with coarser-level fallback.
 //!

@@ -20,7 +20,7 @@
 //!
 //! HTJ2K is LOSSLESS. C++ `ImfCompression.cpp` registers `htj2k256`/`htj2k32`
 //! with `lossy = false`, and `internal_ht.cpp` calls `cod.set_reversible(true)`
-//! -- the round-3 audit found we classified it lossy and let every HTJ2K test
+//! -- an audit found we classified it lossy and let every HTJ2K test
 //! tolerate an absolute error of 1.0, which is large enough to hide a genuinely
 //! broken reversible transform.
 

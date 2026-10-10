@@ -336,7 +336,7 @@ mod tests {
         assert_eq!(actual_in, compressed.len()); // single member: all bytes consumed
     }
 
-    /// F5: a valid gzip member followed by trailing bytes still decodes, and
+    /// A valid gzip member followed by trailing bytes still decodes, and
     /// `_ex` reports the first member's exact consumption (not the whole slice).
     #[test]
     fn test_trailing_bytes_after_member() {
@@ -354,7 +354,7 @@ mod tests {
         assert_eq!(actual_in, member_len); // trailing bytes ignored
     }
 
-    /// F5: two concatenated gzip members are iterated by advancing over the
+    /// Two concatenated gzip members are iterated by advancing over the
     /// returned `actual_in` offset of each member.
     #[test]
     fn test_two_concatenated_members() {

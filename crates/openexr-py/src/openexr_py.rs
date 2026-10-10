@@ -9,14 +9,13 @@
 //!   `Compression.ZIP_COMPRESSION`, and `== 3`) — the reference's `export_values()`.
 //! - **P2/P3 (done):** the numpy `File` + `Channel` classes — read (`channels()`
 //!   numpy arrays + `header()`, `separate_channels`, RGB/RGBA grouping) and write
-//!   (round-trip) of single-part scanline images. See the `file` module + CLAUDE.md
+//!   (round-trip) of single-part scanline images. See the `file` module
 //!   for the covered surface and the deferred attributes.
 //!
 //! ## Parity contract
 //! Every public name / method / parameter / constant value must match the reference
 //! at `openexr/src/wrappers/python/` (PyOpenEXR.cpp = new numpy API,
 //! PyOpenEXR_old.cpp = legacy API). The reference `tests/` are the acceptance gate.
-//! Full requirements + roadmap: this crate's `CLAUDE.md`.
 
 // The crate / module / fn are deliberately named `OpenEXR` (not snake_case), and the
 // enum variants keep their OpenEXR names (`ZIP_COMPRESSION`, `scanlineimage`, …) —

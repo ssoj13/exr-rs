@@ -5,14 +5,14 @@
 //!
 //! ZIP, PXR24, DWA (its AC-deflate/DC/RLE sub-streams), and `IDManifest` all
 //! deflate/inflate raw byte buffers through this ONE pair of functions
-//! (plan4 F10, extended) instead of each having its own
+//! instead of each having its own
 //! `deflate_rs::Compressor::new(level)`/`.zlib_compress(..)` call site and its
 //! own re-derivation of the `level < 0` fallback and the corrupt-chunk error
 //! text. One error kind ([`ExrError::Input`]) and one message format per
 //! function, tagged with the caller's `codec` name.
 //!
-//! # Persistent codec state (team-lead perf follow-up, 2026-09-24)
-//! deflate-fast's deflate-only-vs-libdeflate breakdown found the FACADE this
+//! # Persistent codec state
+//! A deflate-only-vs-libdeflate breakdown found the FACADE this
 //! module used to call (`deflate_rs::Compressor::zlib_compress`) allocating a
 //! fresh, zero-filled `~1.5 MiB` `Vec` per call regardless of the caller's own
 //! persistent output buffer, and this module's own `uncompress_into` doing an
@@ -34,7 +34,7 @@
 //!   left over from a PRIOR call are never observed mid-decode. The final
 //!   `out.truncate(actual_out)` still runs regardless, so
 //!   [`ShortOutputPolicy::TolerateShort`]'s deterministic-zero-tail guarantee
-//!   (`.bughunt/upstream_openexr.md` defect #3) is unaffected: it never came
+//!   is unaffected: it never came
 //!   from THIS buffer holding zeroes past `actual_out` (which is truncated
 //!   away either way) — it comes from `DwaCompressor::decompress_dwa`'s own
 //!   `output` buffer being zero-resized before its assembly loop reads the
@@ -112,7 +112,7 @@ pub(crate) enum ShortOutputPolicy {
     /// Non-NULL `actual_out_nbytes_ret` in C — used by ZIP, PXR24, DWA's
     /// AC-deflate/DC/RLE sub-streams, and `IDManifest`. `LIBDEFLATE_SUCCESS`
     /// is the only possible non-error outcome (`SHORT_OUTPUT` only exists in
-    /// the NULL branch), so the consume-all-input check (K-01) ALWAYS
+    /// the NULL branch), so the consume-all-input check ALWAYS
     /// applies, regardless of how many bytes were actually decoded.
     RequireExact,
     /// NULL `actual_out_nbytes_ret` in C — used ONLY by DWA's UNKNOWN
@@ -120,8 +120,7 @@ pub(crate) enum ShortOutputPolicy {
     /// produces FEWER than `cap` bytes hits `LIBDEFLATE_SHORT_OUTPUT`, which
     /// `exr_uncompress_buffer` (`compression.c:144-208`) converts to
     /// `EXR_ERR_SUCCESS` UNCONDITIONALLY — no consume-all check, no
-    /// exact-size requirement (`.bughunt/upstream_openexr.md` defect #3: C's
-    /// undecoded tail is left as stale heap memory; ours is deterministic
+    /// exact-size requirement (our undecoded tail is a deterministic
     /// zero — see the module doc for where that guarantee actually lives).
     TolerateShort,
 }
@@ -142,7 +141,7 @@ pub(crate) enum ShortOutputPolicy {
 /// observed mid-decode — and the final `out.truncate(actual_out)` discards
 /// that tail (real or stale) either way.
 ///
-/// # The consume-all-input check (K-01)
+/// # The consume-all-input check
 /// Under [`ShortOutputPolicy::RequireExact`] this always applies (see the
 /// variant's doc — it is exactly what C does for ZIP/PXR24/AC/DC/RLE/
 /// IDManifest, not an approximation). Under [`ShortOutputPolicy::TolerateShort`]
@@ -150,11 +149,11 @@ pub(crate) enum ShortOutputPolicy {
 /// path); a genuinely short decode skips it entirely, matching C's
 /// unconditional `SHORT_OUTPUT -> EXR_ERR_SUCCESS` conversion.
 ///
-/// Round-4 finding K-01: the old code called the *counted* form
+/// The old code called the *counted* form
 /// (`Decompressor::zlib_decompress`), which silently discarded
 /// `actual_in_bytes`, so trailing bytes after a valid zlib stream were
 /// accepted instead of rejected as `CORRUPT_CHUNK`. DWA's own duplicate
-/// `zlib_decompress` (pre-plan4-F10) had the same gap for its AC/DC/RLE
+/// `zlib_decompress` (since removed) had the same gap for its AC/DC/RLE
 /// sub-streams — closed by routing them through here.
 ///
 /// A caller that needs EXACTLY `cap` bytes under `RequireExact` (not just "at

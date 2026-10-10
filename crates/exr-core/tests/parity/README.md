@@ -10,9 +10,9 @@ consume the exact same bytes/pixels/samples as a real C++ OpenEXR (the vcpkg
 `parity_exr.rs` has **102 tests; all pass** against OpenEXR 3.4.15 (vcpkg
 `x64-windows-static-release`, which links OpenJPH 0.31.0 and libdeflate 1.26).
 
-Round 3 enlarged the KNOWN image (67x43, tiled 68x44) and eight tests went red: DWAA/DWAB
+Enlarging the KNOWN image (67x43, tiled 68x44) turned eight tests red: DWAA/DWAB
 encode and tiled decode, and HTJ2K256/32 encode. None of them were regressions. The old 7x5
-image stored those codecs' chunks raw, so the codecs had never run. Round 4 closed all eight:
+image stored those codecs' chunks raw, so the codecs had never run. All eight are closed:
 
 - **DWA**: the MSVC-x64 oracle compiles OpenEXR's **SSE2** DCT bodies and runs them (AVX is
   never detected without GCC inline asm). They sum floats in a different order than the scalar
@@ -126,7 +126,7 @@ directions.
     the 16-bit patterns match on both sides.
 * Header extras: `owner` (string) = `"exr-rs"`, `parityTag` (int) = `31337`.
 
-### Why it is not 7×5 any more (round 3)
+### Why it is not 7×5 any more
 
 The original image was 7×5 with no UINT channel and no flat region. That is a
 **single chunk** for every codec and so small that PIZ, DWAA, DWAB and both
@@ -162,7 +162,7 @@ header parsing, lazy chunk tables, codec details such as `wdec14_4` or DWA `vali
 the port follows 3.4.15. The on-disk format itself did not change between them. So any
 mismatch this gate reports is a **real port bug**, never something to mask.
 
-## TILED gate (Phase 6, Wave W6-4b)
+## TILED gate
 
 The oracle also speaks `Imf::TiledOutputFile` / `Imf::TiledInputFile`:
 
@@ -243,7 +243,7 @@ Like the scanline goldens they are committed so
   (ours→C++ pixel-exact, part of the 84) and the end-to-end
   `tiled::input::tests::dwaa_tile_taller_than_dwa_block` (tile 64 > block 32).
 
-## DEEP gate (Phase 7, Wave W7-5)
+## DEEP gate
 
 The oracle also speaks `Imf::DeepScanLineOutputFile`/`InputFile` and
 `Imf::DeepTiledOutputFile`/`InputFile` (via `Imf::DeepFrameBuffer` +
@@ -309,18 +309,17 @@ cumulative count, so the whole-window addressing and the per-level
 oracle's per-level `do_write_deep_tiled`/`do_read_deep_tiled` loop, asserting
 every level's counts + samples bit-exact (DW=8,DH=6,tile 4 ⇒ levels 8×6, 4×3,
 2×1, 1×1). Deep MIPMAP read/write is ALSO covered (count+sample-exact, ALL
-levels) by the **W7-4b in-crate round-trip tests**; the tiling level math is
-additionally C++-verified by the Phase 6 NON-deep tiled MIPMAP gate.
+levels) by the **in-crate round-trip tests**; the tiling level math is
+additionally C++-verified by the NON-deep tiled MIPMAP gate.
 
 ### Bugs this gate surfaced
 
-None — the deep scanline + deep tiled read/write paths (W7-2/3/4a/4b) were
+None — the deep scanline + deep tiled read/write paths were
 already count+sample-exact against real C++ OpenEXR 3.4 in BOTH directions for
 NONE/RLE/ZIPS, **ONE_LEVEL and MIPMAP (all levels)**, on the first run of this
-gate. Extending the deep-tiled cross-read from ONE_LEVEL to MIPMAP (closing the
-W7-5 gap) surfaced no port bug: every level round-trips bit-exact vs real C++.
+gate. Extending the deep-tiled cross-read from ONE_LEVEL to MIPMAP surfaced no port bug: every level round-trips bit-exact vs real C++.
 
-## MULTIPART gate (Phase 8, Wave W8-4)
+## MULTIPART gate
 
 The oracle also speaks `Imf::MultiPartOutputFile` / `Imf::MultiPartInputFile`
 plus the typed per-part wrappers (`Imf::OutputPart` / `TiledOutputPart` /
@@ -381,8 +380,8 @@ committed so direction (a) runs standalone.
 
 ### Bugs this gate surfaced
 
-None — the multipart container (W8-1), the `partNumber`-prefixed chunk seam, the
-typed Part wrappers (W8-2), and multiView (W8-3) were already byte-correct: the
+None — the multipart container, the `partNumber`-prefixed chunk seam, the
+typed Part wrappers, and multiView were already byte-correct: the
 MULTI_PART version flag, the empty-header terminator, the per-part chunk offset
 tables, and the leading `partNumber (i32)` chunk prefix all interoperate exactly
 with real C++ OpenEXR 3.4 in BOTH directions on the first run of this gate.

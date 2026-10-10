@@ -56,7 +56,7 @@ fn goldens_the_cpp_calls_bad_are_bad() {
     assert!(check_file(path_str(&path), opts(false, false, false)));
 }
 
-/// Better than the C++ (`openexr_bug.md`): the flat readers of `exrcheck` composite a deep scanline part
+/// Better than the C++: the flat readers of `exrcheck` composite a deep scanline part
 /// and throw when it has no `Z` or no `A` channel (`ImfCompositeDeepScanLine.cpp:103-123`), which
 /// `ImfCheckFile.cpp:898/1176/1189` take for damage, so the C++ calls these valid goldens bad. Here they
 /// are OK in every mode, while damage to one of them is still found (`flipped_payload_bytes`).
@@ -289,7 +289,7 @@ fn deep_limits_sit_at_their_c_values() {
     assert_eq!((bought(100, MAX_BYTES_PER_DEEP_PIXEL, false), bought(101, MAX_BYTES_PER_DEEP_PIXEL, false)), (100, 0));
 }
 
-/// Better than the C++ (`.bughunt/upstream_openexr.md` section 4): `readDeepTile` asks for the tiles
+/// Better than the C++: `readDeepTile` asks for the tiles
 /// `[min (x, y), max (x, y)]` squared (`ImfCheckFile.cpp:698`) and so calls a valid deep tiled file with more
 /// tile columns than rows bad; here the single tile is requested and the file is OK, in the API and the
 /// core path. Pinned on a saved file: 40 x 8 pixels in 8 x 4 tiles is 5 x 2 tiles.

@@ -673,7 +673,7 @@ fn tiled_goldens_hold_the_cpp_oracles_formula_on_every_level() {
 /// `EXR_TOOLS_DIR`.
 ///
 /// Deep RIPMAP and deep scanline files are checked with `-c` (the OpenEXRCore path) only: the
-/// library path of `exrcheck` calls deep scanline files without `Z` or `A` bad (not reproduced, `openexr_bug.md` L7) and has a bug for deep tiled
+/// library path of `exrcheck` calls deep scanline files without `Z` or `A` bad (not reproduced, see `check_file::cannot_flatten`) and has a bug for deep tiled
 /// ones (`ImfCheckFile.cpp:698`, not reproduced, see `check_accepts_valid_wide_deep_tiled_and_ripmap_files`).
 #[test]
 #[ignore = "needs the C++ tools: cargo xtask parity-tools (EXR_TOOLS_DIR)"]

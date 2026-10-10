@@ -177,7 +177,7 @@ impl Storage {
 }
 
 /// One part's parsed state — port of `MultiPartInputFile::Data::Part`
-/// (the `InputPartData` payload W8-1 needs).
+/// (the `InputPartData` payload this reader needs).
 pub(crate) struct PartData {
     /// The part header, as read from the file (validated + defaulted).
     pub(crate) header: Header,
@@ -191,7 +191,7 @@ pub(crate) struct PartData {
     /// `extract_chunk_table`, i.e. reconstruction, then re-checks every entry).
     pub(crate) complete: bool,
 
-    /// S-16 (round-4 continuation): persisted reader state for
+    /// Persisted reader state for
     /// [`MultiPartInputFile::input_part`] — built lazily, kept across every
     /// later call, mirrors C++'s per-part `_data->parts[n].file` cache.
     /// Covers scanline AND tiled-as-scanlines storage in one slot via
@@ -210,16 +210,16 @@ pub(crate) struct PartData {
 }
 
 // ---------------------------------------------------------------------------
-// Deep part-reader S-16 views (round 4 continuation) — mirror
+// Deep part-reader views — mirror
 // `scanline::InputFilePartReader` / `tiled::TiledInputPartReader`'s shape.
 // Defined here rather than in `deep/` since `DeepScanLineInputFileState` /
 // `DeepTiledInputFileState`'s accessor methods are already `pub(crate)`/`pub`
-// (fix-deep's own S-16 split), so no cross-file visibility bump was needed —
+// (split out for exactly this use), so no cross-file visibility bump was needed —
 // only the container-side caching wiring itself was missing.
 // ---------------------------------------------------------------------------
 
 /// A borrowing view over one multipart deep-scanline part's persisted reader
-/// state, the read-side S-16 mirror of `DeepScanLineOutputPartWriter`.
+/// state, the read-side mirror of `DeepScanLineOutputPartWriter`.
 /// Exposes the same public surface as [`DeepScanLineInputFile`] (`header`,
 /// `frame_buffer`, `is_complete`, `version`, `set_frame_buffer`,
 /// `read_pixel_sample_counts`, `read_pixels`).
@@ -266,9 +266,9 @@ impl<'p> DeepScanLineInputPartReader<'p> {
         self.state.read_pixels(self.stream, scan_line1, scan_line2, sample_counts, sample_data)
     }
 
-    /// This part's `DeepScanLineCopySource` support (D-13's `copy_pixels`,
-    /// redesigned to a duck-typed shape mid-round-4 to mirror
-    /// `TiledCopySource` — see `deep/CLAUDE.md`'s "Trait redesign mid-pass").
+    /// This part's `DeepScanLineCopySource` support (`copy_pixels`,
+    /// a duck-typed shape mirroring
+    /// `TiledCopySource` so a borrowing view can implement it).
     /// Scanline `first_scan_line`'s chunk RAW (still-packed count table +
     /// sample data, no decompression).
     pub fn raw_pixel_data(
@@ -280,7 +280,7 @@ impl<'p> DeepScanLineInputPartReader<'p> {
 }
 
 /// A borrowing view over one multipart deep-tiled part's persisted reader
-/// state, the read-side S-16 mirror of `DeepTiledOutputPartWriter`. Exposes
+/// state, the read-side mirror of `DeepTiledOutputPartWriter`. Exposes
 /// the same public surface as [`DeepTiledInputFile`] needed by this crate's
 /// own callers (`header`, `frame_buffer`, `is_complete`, `version`,
 /// `set_frame_buffer`, `num_x_tiles`/`num_y_tiles`, `read_pixel_sample_counts`,
@@ -373,9 +373,9 @@ impl<'p> DeepTiledInputPartReader<'p> {
     }
 
     // -----------------------------------------------------------------------
-    // `DeepTiledCopySource` support (D-13's `copy_pixels`, redesigned to a
-    // duck-typed shape mid-round-4 to mirror `TiledCopySource` — see
-    // `deep/CLAUDE.md`'s "Trait redesign mid-pass"). Added here so
+    // `DeepTiledCopySource` support (`copy_pixels`, a
+    // duck-typed shape mirroring `TiledCopySource` so a borrowing view can
+    // implement it). Added here so
     // `multipart::part::DeepTiledInputPart` (which now wraps this view
     // instead of an owned `DeepTiledInputFile`) can implement it again.
     // -----------------------------------------------------------------------
@@ -511,7 +511,7 @@ pub(crate) fn read_prologue(
         )?);
     }
 
-    // M-03 (round-4 audit): every part after the first must agree with part 0
+    // Every part after the first must agree with part 0
     // on the SHARED attributes (`displayWindow`, `pixelAspectRatio` bitwise;
     // `timecode`, `chromaticities` by value when the LATER part has one) —
     // C++ `parse_header.c:2855-2887` runs `internal_exr_validate_shared_attrs`
@@ -539,7 +539,7 @@ pub(crate) fn read_prologue(
     }
 
     // --- read each part's chunk offset table ------------------------------
-    // S-08 (round-4 audit, team-lead policy (b), 2026-09-22): table
+    // Table
     // positions are computed ANALYTICALLY from each part's header-derived
     // `chunkCount` -- pure arithmetic, no stream access -- mirroring C++
     // `parse_header.c`'s `chunk_table_offset` computation, which runs for
@@ -565,7 +565,7 @@ pub(crate) fn read_prologue(
         // `InputFile` opens with `autoAddType == false`, so a single-part tiled
         // file legitimately has no `type` attribute and only the version flags
         // say it is tiled (C++ sizes from `part->storage_mode` likewise).
-        // M-04: the read-side variant never errors on an unknown storage type
+        // The read-side variant never errors on an unknown storage type
         // (0 chunks when no `chunkCount` is present) -- see its doc comment.
         let chunk_count = get_chunk_offset_table_size_for_read(&header, storage)?;
 
@@ -623,7 +623,7 @@ pub(crate) fn read_prologue(
         let stream_size = stream.size();
         for p in &mut parts {
             // A part whose table was invalidated at the LENGTH-validation
-            // stage (S-08's `read_offset_table_lenient` -- `chunk_count`
+            // stage (`read_offset_table_lenient` -- `chunk_count`
             // itself was <= 0, over the 2^20 cap, or the table couldn't
             // possibly fit the file) has `chunk_offsets` deliberately empty:
             // never allocated in the first place, and never a candidate for
@@ -657,7 +657,7 @@ fn validate_read_part(
     non_image: bool,
     auto_add_type: bool,
 ) -> Result<(Header, Storage)> {
-    // C-02: required-attribute defaulting + name/type/version handling is
+    // Required-attribute defaulting + name/type/version handling is
     // now the single shared `Header::validate_for_read` (also used by
     // `Header::read_checked`, which used to skip this entirely). This
     // function still owns the `Storage` derivation and the `validate_part_type`
@@ -719,8 +719,8 @@ fn validate_read_part(
 /// [`input_part`](MultiPartInputFile::input_part).
 pub struct MultiPartInputFile<'a, S = &'a mut dyn IStream> {
     /// The input stream, addressed through `DerefMut<Target = dyn IStream>`
-    /// (the C++ `_ctxt`'s stream) — C-01 (queue item 2, round-4 multipart
-    /// audit): generic over the stream HOLDER, mirroring
+    /// (the C++ `_ctxt`'s stream),
+    /// generic over the stream HOLDER, mirroring
     /// `scanline::OutputFile`'s `OutputFile<'a, S>`/`OutputFileOwned` split
     /// on the write side, so a reader can OWN a path-opened stream (needed
     /// by [`crate::rgba::RgbaInputFile::open`]) instead of only ever
@@ -731,15 +731,13 @@ pub struct MultiPartInputFile<'a, S = &'a mut dyn IStream> {
     /// Per-part state in part order — C++ `Data::parts`.
     parts: Vec<PartData>,
     /// Whether the file's version word carries `MULTI_PART_FILE_FLAG`. A
-    /// single-part file opened through this reader (S-04 fix) has NO
+    /// single-part file opened through this reader has NO
     /// `partNumber` chunk prefix — only a genuinely multipart file does
     /// (`OpenEXRCore/chunk.c:955-983`, `rdcnt = ctxt->is_multipart ? 2 : 1`).
     multipart: bool,
-    /// W3.9 phase B: captured once at construction (C++ `numThreads`),
+    /// Captured once at construction (C++ `numThreads`),
     /// forwarded to each part's `*_mt` constructor when its reader state is
-    /// first built. Effective on scanline and tiled parts; deep parts still
-    /// read serially regardless (tracked, not silent —
-    /// `.bughunt/progress_w39b.md`).
+    /// first built (scanline, tiled and deep parts alike).
     num_threads: Option<i32>,
     /// Ties `'a` to the struct even when `S` (e.g. `Box<dyn IStream + 'a>`)
     /// is the only field that mentions it — same purpose as
@@ -773,7 +771,7 @@ impl<'a> MultiPartInputFile<'a, &'a mut dyn IStream> {
     }
 
     /// Same as [`Self::new`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::new`]).
+    /// override (`None` behaves exactly like [`Self::new`]).
     pub fn with_num_threads(stream: &'a mut dyn IStream, num_threads: Option<i32>) -> Result<Self> {
         Self::build(stream, num_threads)
     }
@@ -867,7 +865,7 @@ where
     /// `MultiPartInputFile::getInputPart<InputFile>(int)`.
     ///
     /// Returns an [`InputFilePartReader`] — a **borrowing view** over this
-    /// part's PERSISTED reader state (S-16, round 4 continuation: built once,
+    /// part's PERSISTED reader state (built once,
     /// on first access, and kept across every later call, mirroring
     /// `MultiPartOutputFile::output_part`'s write-side caching exactly).
     /// Drive it with `set_frame_buffer` + `read_pixels` exactly like a
@@ -880,7 +878,7 @@ where
     /// # Errors
     /// * [`ExrError::Arg`] when `n` is out of range.
     /// * Propagates the reader-state construction error (including the
-    ///   `Unsupported::Deep` a deep part still yields — see W3.6).
+    ///   `Unsupported::Deep` a deep part still yields).
     pub fn input_part(&mut self, n: i32) -> Result<InputFilePartReader<'_>> {
         let idx = self.part_index(n)?;
         let complete = self.parts[idx].complete;
@@ -909,7 +907,7 @@ where
                 )?)),
                 // C++ `InputFile::initialize`'s deep branch: mirrors
                 // `scanline::input_file::InputFile::build`'s `Reader::Deep`
-                // variant (W3.4 follow-up) — a deep-SCANLINE part is
+                // variant — a deep-SCANLINE part is
                 // flattened through `CompositeDeepScanLine`, persisted here
                 // as a `PartReaderState::Deep` the same way `ScanLine`/
                 // `Tiled` are. Deep-TILED stays `Unsupported::Deep`: C++'s
@@ -948,7 +946,7 @@ where
     /// `MultiPartInputFile::getInputPart<TiledInputFile>(int)`.
     ///
     /// Returns a [`TiledInputPartReader`] — a borrowing view over this part's
-    /// PERSISTED tiled reader state (S-16, round 4 continuation: built once,
+    /// PERSISTED tiled reader state (built once,
     /// on first access, and kept across every later call — a fresh
     /// `tiled_input_part(0)` no longer rebuilds the whole read state, matching
     /// `MultiPartOutputFile::tiled_output_part`'s write-side caching).  Each
@@ -982,9 +980,9 @@ where
     /// `MultiPartInputFile::getInputPart<DeepScanLineInputFile>(int)`.
     ///
     /// Returns a [`DeepScanLineInputPartReader`] — a borrowing view over this
-    /// part's PERSISTED deep-scanline reader state (S-16, round 4
-    /// continuation, completing fix-deep's `DeepScanLineInputFileState`
-    /// split): built once, on first access, and kept across every later call.
+    /// part's PERSISTED deep-scanline reader state (a
+    /// `DeepScanLineInputFileState`
+    /// view): built once, on first access, and kept across every later call.
     ///
     /// # Errors
     /// [`ExrError::Arg`] when `n` is out of range or the part is not a
@@ -1017,8 +1015,8 @@ where
     /// `MultiPartInputFile::getInputPart<DeepTiledInputFile>(int)`.
     ///
     /// Returns a [`DeepTiledInputPartReader`] — a borrowing view over this
-    /// part's PERSISTED deep-tiled reader state (S-16, round 4 continuation,
-    /// completing fix-deep's `DeepTiledInputFileState` split): built once, on
+    /// part's PERSISTED deep-tiled reader state (backed by
+    /// `DeepTiledInputFileState`): built once, on
     /// first access, and kept across every later call.
     ///
     /// # Errors
@@ -1106,7 +1104,7 @@ where
 
     /// Bounds-checked part index — same check as [`part`](Self::part), but
     /// returns the index instead of a borrow, so a caller can immediately
-    /// follow up with a MUTABLE `&mut self.parts[idx]` access (S-16 caching)
+    /// follow up with a MUTABLE `&mut self.parts[idx]` access (per-part state caching)
     /// without holding this method's `&self` borrow alive across it.
     fn part_index(&self, n: i32) -> Result<usize> {
         self.part(n)?;

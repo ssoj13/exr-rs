@@ -1,4 +1,4 @@
-//! Phase 8 W8-2 — mixed-type multi-part round-trip through the Part wrappers.
+//! Mixed-type multi-part round-trip through the Part wrappers.
 //!
 //! Builds ONE multipart EXR holding four parts of different types:
 //!
@@ -15,7 +15,7 @@
 //! correct leading `partNumber` (the unified seam threaded through the tiled +
 //! deep chunk paths), and that the version word has the MULTI_PART flag.
 //!
-//! This is the W8-2 correctness gate: it exercises the partNumber seam in the
+//! This is the multipart correctness gate: it exercises the partNumber seam in the
 //! scanline, tiled, deep-scanline AND deep-tiled chunk writers/readers via the
 //! thin Part wrappers, with NONE + ZIP/ZIPS codecs.
 
@@ -516,7 +516,7 @@ fn multipart_input_file_reads_single_part_deep_tiled() {
 }
 
 // ---------------------------------------------------------------------------
-// Read-side S-16 container caching (round 4 continuation): each of
+// Read-side container caching: each of
 // `MultiPartInputFile::{input_part, tiled_input_part, deep_scanline_input_part,
 // deep_tiled_input_part}` must persist its part's reader state (in particular
 // the frame buffer set via `set_frame_buffer`) across SEPARATE calls, exactly
@@ -530,7 +530,7 @@ fn multipart_input_file_reads_single_part_deep_tiled() {
 // `set_frame_buffer` a second time, and read its OTHER half. This only
 // succeeds if the frame buffer set on the first access survived in the
 // persisted state: a container that rebuilt a fresh reader state per call
-// (the S-16 bug) would come back with no frame buffer set and reject the
+// would come back with no frame buffer set and reject the
 // read outright (exactly the failure mode
 // `tiled::input::tests::tiled_input_part_reader_reuses_persisted_state_across_interleaved_access`'s
 // own "fresh_state" control case demonstrates directly).

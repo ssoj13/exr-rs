@@ -89,7 +89,7 @@ impl NamedMatte {
 
 /// Header string attributes for Cryptomatte metadata keys.
 ///
-/// C-08 (closed): [`Name`] keys, not `String` — this list also carries
+/// [`Name`] keys, not `String` — this list also carries
 /// attributes copied verbatim from a SOURCE header
 /// ([`carried_header_attrs`]), which may have a non-UTF-8 name (the
 /// underlying `exr_core::Header` never checks encoding); byte-exact carry-
@@ -301,7 +301,7 @@ pub fn carried_header_attrs(src: &Header, drop_key_prefix: Option<&str>) -> Head
         "name",
         "view",
     ];
-    // C-08 (closed): byte-exact throughout — REBUILT/drop_key_prefix are
+    // Byte-exact throughout — REBUILT/drop_key_prefix are
     // ASCII, so comparing raw bytes correctly leaves a non-UTF-8 attribute
     // name untouched by either filter (it can never match one), and the
     // carried key/value are copied byte-exact rather than skipped.
@@ -598,7 +598,7 @@ mod tests {
         assert!((mc.coverage[0] - 0.75).abs() < 1e-6);
     }
 
-    /// C4: an offset data window and its display window survive encode.
+    /// An offset data window and its display window survive encode.
     #[test]
     fn encode_keeps_both_windows() {
         let data = imath_rs::Box2i {
@@ -619,7 +619,7 @@ mod tests {
         assert_eq!(image.display_window, display);
     }
 
-    /// C12: a stream write must not emit a `manif_file` it cannot back.
+    /// A stream write must not emit a `manif_file` it cannot back.
     #[test]
     fn stream_write_refuses_a_sidecar_manifest() {
         let opts = EncodeOptions {
@@ -632,7 +632,7 @@ mod tests {
         assert!(matches!(err, Error::Manifest(_)), "{err:?}");
     }
 
-    /// C11: the encoder only writes spec-conformant sidecar paths.
+    /// The encoder only writes spec-conformant sidecar paths.
     #[test]
     fn encode_rejects_a_nonconformant_sidecar_path() {
         let bunny = NamedMatte::new("bunny", &[1.0]);
@@ -647,7 +647,7 @@ mod tests {
         }
     }
 
-    /// C14: more ranked layers than two-digit names allow is an error.
+    /// More ranked layers than two-digit names allow is an error.
     #[test]
     fn encode_rejects_more_than_100_ranked_layers() {
         let opts = EncodeOptions { ranked_layers: 101, ..EncodeOptions::new("CryptoObject") };

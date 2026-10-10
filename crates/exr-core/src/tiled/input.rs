@@ -1,5 +1,5 @@
 //! Port of OpenEXR `ImfTiledInputFile.cpp` — `class TiledInputFile`, the
-//! single-part tiled reader.  It is the exact inverse of this crate's W6-2
+//! single-part tiled reader.  It is the exact inverse of this crate's
 //! [`TiledOutputFile`][crate::tiled::TiledOutputFile] writer.
 //!
 //! Port target (pinned tag v3.3.11):
@@ -12,10 +12,10 @@
 //! OpenEXRCore C API (`exr_read_tile_chunk_info`, `exr_decoding_run`, …) — the
 //! manual offset-table read, chunk seek and scatter live deep inside the core
 //! library.  A literal token-for-token port of the v3.3.11 `.cpp` would have to
-//! port the entire C core first, which is out of scope for this wave.
+//! port the entire C core first, which is out of scope here.
 //!
 //! The **on-disk byte format** consumed here is fixed across OpenEXR versions
-//! and is exactly the format produced by this crate's W6-2
+//! and is exactly the format produced by this crate's
 //! [`TiledOutputFile`][crate::tiled::TiledOutputFile].  The algorithm ported
 //! here therefore mirrors the *legacy* IlmImf `TiledInputFile`
 //! (`readTiles` → `readTileData` → `TileBufferTask` scatter), i.e. the inverse
@@ -41,13 +41,12 @@
 //!   tile's pixels into the user frame buffer over
 //!   [`crate::tiled::misc::data_window_for_tile`].
 //!
-//! # What this Wave intentionally does NOT cover (tracked, not faked)
+//! # What this module intentionally does NOT cover
 //!
-//! * **Deep** tiled input and threading (`ThreadPool` / `TileBufferTask`).
-//!   The single-threaded scatter here produces identical pixels.
-//! * `rawTileData`'s sequence-cursor form (used only by `copyPixels`, itself
-//!   not ported — see the tiled `output.rs` module doc); the exact-coordinate
-//!   form is [`TiledInputFile::raw_tile_data`] (T-15).
+//! * **Deep** tiled input — that is [`crate::deep::tiled_input`].
+//! * `rawTileData`'s sequence-cursor form (C++ uses it inside `copyPixels`;
+//!   this port's `copy_pixels` asks for each tile by coordinates instead); the
+//!   exact-coordinate form is [`TiledInputFile::raw_tile_data`].
 
 use std::marker::PhantomData;
 use std::ops::DerefMut;
@@ -71,7 +70,7 @@ use crate::tiled::tile_offsets::TileOffsets;
 use imath_rs::Box2i;
 
 /// Per-tile `(dx, dy, lx, ly)` coordinate lists, one entry per tile — the
-/// return type of [`TiledInputFile::tile_order`] (T-15).
+/// return type of [`TiledInputFile::tile_order`].
 pub type TileOrder = (Vec<i32>, Vec<i32>, Vec<i32>, Vec<i32>);
 
 // ---------------------------------------------------------------------------
@@ -129,13 +128,12 @@ struct TInSliceInfo {
 /// [`TiledInputFile::read_tile`] / [`TiledInputFile::read_tiles`].
 ///
 /// The reader borrows the caller's [`IStream`] for its whole lifetime.  Its
-/// structure mirrors the W6-2 [`TiledOutputFile`][crate::tiled::TiledOutputFile]
+/// structure mirrors the [`TiledOutputFile`][crate::tiled::TiledOutputFile]
 /// writer field-for-field so the read path is the exact inverse of the write
 /// path.
 pub struct TiledInputFile<'a, S = &'a mut dyn IStream> {
     /// The input stream, addressed through `DerefMut<Target = dyn IStream>`
-    /// (the C++ `_streamData->is`) -- queue item 5 (round-4, "not optional",
-    /// team-lead): generic over the stream HOLDER, mirroring
+    /// (the C++ `_streamData->is`) -- generic over the stream HOLDER, mirroring
     /// `multipart::MultiPartInputFile<'a, S>` / `scanline::OutputFile<'a,
     /// S>`, so [`TiledInputFile::open`] can OWN a path-opened stream — C++'s
     /// real, public `TiledInputFile(const char*, int)` constructor
@@ -143,14 +141,12 @@ pub struct TiledInputFile<'a, S = &'a mut dyn IStream> {
     /// before.
     stream: S,
 
-    /// Everything else this reader owns -- the S-16 mirror (round 4
-    /// continuation, `.bughunt/round4.md`): factored into its own,
+    /// Everything else this reader owns: factored into its own,
     /// non-generic, stream-free struct so `crate::multipart::MultiPartInputFile`
     /// can persist it across separate part-reader accessor calls instead of
     /// rebuilding a fresh `TiledInputFile` every time (v3.4.15
     /// `ImfMultiPartInputFile.cpp::getInputPart<T>` caches one reader object
-    /// per part -- confirmed byte-identical to v3.3.11, see
-    /// `progress_fix_scanline.md`'s "Read-side S-16"). See
+    /// per part -- byte-identical to v3.3.11). See
     /// [`TiledInputFileState`].
     state: TiledInputFileState,
 
@@ -171,8 +167,8 @@ pub struct TiledInputFile<'a, S = &'a mut dyn IStream> {
 pub type TiledInputFileOwned<'a> = TiledInputFile<'a, Box<dyn IStream + 'a>>;
 
 /// Everything a [`TiledInputFile`] owns except its stream -- the read-state
-/// object a future `MultiPartInputFile` part-reader cache would persist per
-/// tiled part (S-16 mirror, read side). Has NO lifetime of its own: every
+/// object the `MultiPartInputFile` part-reader cache persists per
+/// tiled part. Has NO lifetime of its own: every
 /// method that needs to read takes `stream: &mut dyn IStream` explicitly
 /// (mirrors `crate::scanline::input::ScanLineInputFileState`).
 pub(crate) struct TiledInputFileState {
@@ -228,7 +224,7 @@ pub(crate) struct TiledInputFileState {
     /// single-part reads are byte-identical to the pre-multipart reader.
     part_number: Option<i32>,
 
-    /// W3.9 phase B: this file's captured thread count — see
+    /// This file's captured thread count — see
     /// [`crate::threading::ThreadCount`] and the scanline reader's identical
     /// field (`scanline/input.rs`).
     num_threads: crate::threading::ThreadCount,
@@ -268,13 +264,13 @@ impl<'a> TiledInputFile<'a, &'a mut dyn IStream> {
     }
 
     /// Same as [`Self::new`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::new`]).
+    /// override (`None` behaves exactly like [`Self::new`]).
     pub fn with_num_threads(stream: &'a mut dyn IStream, num_threads: Option<i32>) -> Result<Self> {
         // ONE prologue reader for the whole crate: magic + version word + the
         // header + the chunk offset table (with reconstruction).  C++ likewise
         // has a single `internal_exr_parse_header` behind every reader class.
         //
-        // T-19 (round 4 tiled audit, P3): `auto_add_type = false`, matching
+        // `auto_add_type = false`, matching
         // C++ `TiledInputFile::header()` (v3.4.15 `ImfTiledInputFile.cpp:218-230`),
         // which returns the context header WITHOUT an invented `type`
         // attribute (mirrors `scanline::InputFile::new`, `input_file.rs:91`).
@@ -308,7 +304,7 @@ impl<'a> TiledInputFile<'a, &'a mut dyn IStream> {
             }
         }
 
-        // T-08 (round 4 tiled audit): C++ `TiledInputFile(const char*)`
+        // C++ `TiledInputFile(const char*)`
         // (v3.4.15 `ImfTiledInputFile.cpp:87-91`) opens a multipart file's
         // part 0 as long as its storage is EXR_STORAGE_TILED — it does not
         // reject multipart files outright. A multipart file's chunks carry a
@@ -316,7 +312,7 @@ impl<'a> TiledInputFile<'a, &'a mut dyn IStream> {
         // (mirrors `scanline::InputFile::new`, `input_file.rs:98`).
         let part_number = if multipart { Some(0) } else { None };
 
-        // T-04 (round 4 tiled audit): the prologue already computed the
+        // The prologue already computed the
         // correct completeness verdict for this part
         // (`multipart::input::read_prologue`'s `table_complete` after
         // reconstruction, matching C++ `exr_validate_chunk_table` /
@@ -340,7 +336,7 @@ impl<'a> TiledInputFile<'a, &'a mut dyn IStream> {
 
 }
 
-// Owned-stream constructor (`S = Box<dyn IStream + 'a>`) -- queue item 5.
+// Owned-stream constructor (`S = Box<dyn IStream + 'a>`).
 impl<'a> TiledInputFile<'a, Box<dyn IStream + 'a>> {
     /// Open `path`, OWNING the decoded stream — port of C++'s real, public
     /// `TiledInputFile(const char filename[], int numThreads)` constructor
@@ -428,7 +424,7 @@ where
     }
 
     /// Same as [`Self::from_part`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::from_part`]).
+    /// override (`None` behaves exactly like [`Self::from_part`]).
     pub fn from_part_mt(
         stream: S,
         header: Header,
@@ -450,8 +446,8 @@ where
     /// Reassemble a `TiledInputFile` view from an already-owned
     /// [`TiledInputFileState`] and a freshly (re)borrowed stream — the
     /// tiled-as-scanlines counterpart of [`from_part`](Self::from_part) for
-    /// callers that persist the state SEPARATELY from the stream (S-16, read
-    /// side): `scanline::input_file::TiledReader` (the tiled-as-scanlines
+    /// callers that persist the state SEPARATELY from the stream:
+    /// `scanline::input_file::TiledReader` (the tiled-as-scanlines
     /// wrapper `InputFile::as_tiled_input` hands out a `TiledInputFile` view
     /// of) needs to keep its own extra tile-row cache fields alongside a
     /// PERSISTED `TiledInputFileState` across `MultiPartInputFile::input_part`
@@ -482,7 +478,7 @@ where
     }
 
     /// Name of the underlying file or stream — port of `const char*
-    /// fileName() const` (T-15, round 4 tiled audit; C++
+    /// fileName() const` (C++
     /// `ImfTiledInputFile.cpp:212-215`, `_ctxt.fileName()`).
     pub fn file_name(&self) -> &str {
         self.stream.file_name()
@@ -490,7 +486,7 @@ where
 
     /// The order every tile appears in on disk, sorted by file offset — port
     /// of `void tileOrder(int dx[], int dy[], int lx[], int ly[]) const`
-    /// (T-15, round 4 tiled audit). See [`TiledInputFileState::tile_order`].
+    /// See [`TiledInputFileState::tile_order`].
     pub fn tile_order(&self) -> Result<TileOrder> {
         self.state.tile_order()
     }
@@ -655,8 +651,7 @@ where
     /// (compressed, or already-raw for `NONE`/no-shrink) — without
     /// decompressing or scattering into a frame buffer. Port of `void
     /// rawTileData(int& dx, int& dy, int& lx, int& ly, const char*&
-    /// pixelData, int& pixelDataSize)` (T-15, round 4 tiled audit +
-    /// continuation; `ImfTiledInputFile.cpp:345-396`). See
+    /// pixelData, int& pixelDataSize)` (`ImfTiledInputFile.cpp:345-396`). See
     /// [`TiledInputFileState::raw_tile_data`] for the in/out-reference
     /// contract this signature preserves.
     pub fn raw_tile_data(
@@ -671,40 +666,26 @@ where
 }
 
 /// A borrowing view over a tiled input part's PERSISTED read state -- the
-/// S-16 mirror (round 4 continuation) analogue of
-/// `crate::scanline::input::ScanLineInputPartReader` for tiled parts. A
-/// future `crate::multipart::MultiPartInputFile` part-reader cache would
-/// return this instead of rebuilding a fresh [`TiledInputFile`] on every
+/// tiled-part analogue of `crate::scanline::input::ScanLineInputPartReader`.
+/// `crate::multipart::MultiPartInputFile`'s part-reader cache returns this
+/// instead of rebuilding a fresh [`TiledInputFile`] on every
 /// `tiled_input_part` call, the read-side counterpart of
 /// [`crate::tiled::TiledOutputPartWriter`] -- v3.4.15's
 /// `ImfMultiPartInputFile.cpp::getInputPart<T>` caches one reader object per
-/// part (confirmed byte-identical to v3.3.11; see
-/// `progress_fix_scanline.md`'s "Read-side S-16"). Exposes the identical
+/// part (byte-identical to v3.3.11). Exposes the identical
 /// public method set as [`TiledInputFile`] by delegating to the same
 /// [`TiledInputFileState`] methods, driven by the SAME
 /// `stream: &mut dyn IStream` reborrowed from the container each call.
 ///
-/// NOT YET wired into `multipart::input::MultiPartInputFile::
-/// tiled_input_part` (fix-scanline, round 4 continuation): that accessor's
-/// return type must stay a real, owned `TiledInputFile<'_>` so
-/// `multipart::part::TiledInputPart`'s `TiledCopySource` impl keeps
-/// satisfying that trait's literal `&mut TiledInputFile<'a>` return type
-/// (`tiled/output.rs`) — wiring THIS view in instead would need that trait
-/// redesigned first. `scanline::input_file::TiledReaderState` (the
-/// tiled-as-scanlines S-16 wiring, also not yet connected to
-/// `MultiPartInputFile::input_part` for the same reason) calls
-/// `TiledInputFileState`'s own `pub(crate)` methods directly instead of
-/// through this view — see that struct's docs. Exercised directly by
+/// `scanline::input_file::TiledReaderState` (the tiled-as-scanlines
+/// reader) calls `TiledInputFileState`'s own `pub(crate)` methods directly
+/// instead of through this view — see that struct's docs. Exercised directly by
 /// `tests::tiled_input_part_reader_reuses_persisted_state_across_interleaved_access`
-/// below (its own regression test, proving the state/view split resumes
-/// reads correctly independent of the still-pending container wiring). See
-/// `.bughunt/progress_fix_scanline.md`'s "Read-side S-16" for the full
-/// writeup of what is and isn't wired and why.
+/// below, proving the state/view split resumes interleaved reads correctly.
 ///
-/// Bumped to `pub` (from `pub(crate)`): `multipart::input::MultiPartInputFile
-/// ::tiled_input_part` (fix-scanline's container-wiring pass) now returns
-/// this type directly, so it must be nameable outside the crate the same way
-/// `TiledInputFile` itself is.
+/// `pub` (not `pub(crate)`): `multipart::input::MultiPartInputFile
+/// ::tiled_input_part` returns this type directly, so it must be nameable
+/// outside the crate the same way `TiledInputFile` itself is.
 pub struct TiledInputPartReader<'p> {
     stream: &'p mut dyn IStream,
     state: &'p mut TiledInputFileState,
@@ -822,7 +803,7 @@ impl<'p> TiledInputPartReader<'p> {
 
     /// Number of resolution levels along X — needed by
     /// `tests/corpus.rs`'s `decode_flat_tiled_part`, generic over any tiled
-    /// reader (round 4 continuation container wiring).
+    /// reader.
     pub fn num_x_levels(&self) -> i32 {
         self.state.num_x_levels()
     }
@@ -847,8 +828,8 @@ impl<'p> TiledInputPartReader<'p> {
 /// `api::Image::from_tiled_input_file` — the tiled counterpart of
 /// [`crate::scanline::GenericInputReader`]. Lets that one facade function
 /// drive either a standalone [`TiledInputFile`] or a multipart-cached
-/// [`TiledInputPartReader`] (round 4 continuation: the container's
-/// `tiled_input_part` now returns the latter, not the former).
+/// [`TiledInputPartReader`] (the container's `tiled_input_part` returns
+/// the latter).
 pub trait GenericTiledReader {
     fn header(&self) -> &Header;
     fn set_frame_buffer(&mut self, frame_buffer: &FrameBuffer) -> Result<()>;
@@ -931,10 +912,10 @@ impl TiledInputFileState {
     /// C++ cite: <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.3.11/src/lib/OpenEXR/ImfTiledInputFile.cpp> (`TiledInputFile(InputPartData*)`) + `OpenEXRCore/chunk.c`.
     ///
     /// `pub(crate)` (not private): `multipart::input::MultiPartInputFile` and
-    /// `scanline::input_file::TiledReaderState` (the tiled-as-scanlines S-16
-    /// wiring) both build/cache this state directly, the same reason
+    /// `scanline::input_file::TiledReaderState` (the tiled-as-scanlines
+    /// reader) both build/cache this state directly, the same reason
     /// `TiledOutputFileState::from_part` is `pub` on the write side.
-    /// `num_threads` is the W3.9 phase B per-file override (`None` = capture
+    /// `num_threads` is the per-file override (`None` = capture
     /// the current process-wide default).
     pub(crate) fn from_part_mt(
         header: Header,
@@ -973,7 +954,7 @@ impl TiledInputFileState {
         let max_bytes_per_tile_line =
             calculate_bytes_per_pixel(&header)?.saturating_mul(tile_desc.x_size as usize);
         let tile_buffer_size = max_bytes_per_tile_line.saturating_mul(tile_desc.y_size as usize);
-        // T-05 (round 4 tiled audit, P1): C++ 3.4.15 rejects a nominal tile
+        // C++ 3.4.15 rejects a nominal tile
         // whose x_size/y_size exceeds INT_MAX/4
         // (`OpenEXRCore/validation.c:593-603`); legacy `ImfHeader.cpp:1057-1058`
         // (what this crate ported) only checked `> INT_MAX`, letting a header
@@ -1003,16 +984,14 @@ impl TiledInputFileState {
         let mut file_is_complete = false;
         tile_offsets.read_from_vec(&chunk_offsets, &mut file_is_complete)?;
 
-        // T-05: never allocate the nominal `tile_buffer_size` up front — it is
+        // Never allocate the nominal `tile_buffer_size` up front — it is
         // driven by the header's `tiles` attribute alone (before any chunk is
         // read) and can be gigabytes for a tiny data window with a huge
         // nominal tile (e.g. `tiles = 32768 x 32767` over a 1x1 window). C++
         // never allocates more than the CLIPPED tile it is about to decode
-        // (`OpenEXRCore/chunk.c:1181-1224`); W3.9 phase B's `fetch_tile`
+        // (`OpenEXRCore/chunk.c:1181-1224`); `fetch_tile`
         // allocates each tile's own scratch buffer sized to exactly its
-        // (clipped) `dataSize`, so there is no persisted scratch field at all
-        // (the pre-W3.9 `tile_buffer` field, grown lazily by the old
-        // single-threaded `read_single_tile`, is gone).
+        // (clipped) `dataSize`, so there is no persisted scratch field at all.
 
         Ok(Self {
             header,
@@ -1040,13 +1019,13 @@ impl TiledInputFileState {
     }
 
     // -----------------------------------------------------------------------
-    // Accessors — thin wrappers (mirror the W6-2 writer + scanline reader)
+    // Accessors — thin wrappers (mirror the tiled writer + scanline reader)
     // -----------------------------------------------------------------------
     //
     // `header`/`version`/`tile_y_size`/`level_width`/`num_x_tiles`/
     // `data_window_for_tile`/`set_frame_buffer` are `pub(crate)` (not just
     // reachable via `TiledInputPartReader`) so `scanline::input_file`'s
-    // `TiledReaderState` (the tiled-as-scanlines S-16 wiring, fix-scanline)
+    // `TiledReaderState` (the tiled-as-scanlines reader)
     // can hold a `TiledInputFileState` field and call these DIRECTLY:
     // several return `&Self`-lifetime references (`header`, `frame_buffer`)
     // that a transient `TiledInputPartReader` view (whose own `&self`
@@ -1060,7 +1039,7 @@ impl TiledInputFileState {
 
     /// The order every tile appears in on disk, sorted by file offset — port
     /// of `void tileOrder(int dx[], int dy[], int lx[], int ly[]) const`
-    /// (T-15, round 4 tiled audit). Returns `(dx, dy, lx, ly)`, one entry per
+    /// Returns `(dx, dy, lx, ly)`, one entry per
     /// tile, in ascending file-offset order — the legacy `TileOffsets`
     /// algorithm this crate already ports for `RANDOM_Y`
     /// ([`TileOffsets::get_tile_order`]) applied unconditionally.
@@ -1167,7 +1146,7 @@ impl TiledInputFileState {
 
     /// Width of level `lx` — port of `int levelWidth(int lx) const`.
     ///
-    /// T-10 (round 4 tiled audit, P1): range-checks `lx` against the file's
+    /// Range-checks `lx` against the file's
     /// actual level count first. C++ 3.4.15 routes this through
     /// `exr_get_level_sizes` (`OpenEXRCore/part.c:347-383`), which throws
     /// `ArgExc` (`EXR_ERR_ARGUMENT_OUT_OF_RANGE`) for `levelx >=
@@ -1182,7 +1161,7 @@ impl TiledInputFileState {
 
     /// Height of level `ly` — port of `int levelHeight(int ly) const`.
     ///
-    /// T-10: see [`Self::level_width`].
+    /// Range-checked like [`Self::level_width`].
     pub(crate) fn level_height(&self, ly: i32) -> Result<i32> {
         if ly < 0 || ly >= self.num_y_levels {
             return Err(ExrError::Arg("levelHeight(): argument is not in valid range".into()));
@@ -1217,7 +1196,7 @@ impl TiledInputFileState {
     /// Data window of level `(lx, ly)` — port of
     /// `Box2i dataWindowForLevel(int lx, int ly) const`.
     ///
-    /// T-10: range-checks `lx`/`ly` first (see [`Self::level_width`]).
+    /// Range-checks `lx`/`ly` first (see [`Self::level_width`]).
     pub(crate) fn data_window_for_level(&self, lx: i32, ly: i32) -> Result<Box2i> {
         if lx < 0 || lx >= self.num_x_levels || ly < 0 || ly >= self.num_y_levels {
             return Err(ExrError::Arg(
@@ -1331,7 +1310,7 @@ impl TiledInputFileState {
                     )));
                 }
             } else if slice.x_sampling != 1 || slice.y_sampling != 1 {
-                // T-09 (round 4 tiled audit, P1): a FILL slice (no matching
+                // A FILL slice (no matching
                 // file channel) must also be unsampled — C++ 3.4.15
                 // `ImfTiledInputFile.cpp` `run_fill` (:971-972) throws
                 // `ArgExc("Tiled data should not have subsampling.")` for
@@ -1428,7 +1407,7 @@ impl TiledInputFileState {
     /// * Propagates codec / scatter / stream errors.
     ///
     /// `pub(crate)`: `scanline::input_file::TiledReaderState` (the
-    /// tiled-as-scanlines S-16 wiring) calls this directly, threading its own
+    /// tiled-as-scanlines reader) calls this directly, threading its own
     /// `stream: &mut dyn IStream` through -- same reasoning as the group of
     /// accessors bumped above.
     #[allow(clippy::too_many_arguments)]
@@ -1478,7 +1457,7 @@ impl TiledInputFileState {
             }
         }
 
-        // W3.9 phase B gate: parallel only when there is more than one tile
+        // Parallel only when there is more than one tile
         // AND the captured thread count is `> 1` — 1:1 with C++'s
         // `nTiles > 1 && numThreads > 1` (`ImfTiledInputFile.cpp:768`).
         if coords.len() > 1 && self.num_threads.is_parallel()
@@ -1491,9 +1470,9 @@ impl TiledInputFileState {
         // aliased/broadcast frame buffer) — fall back to the serial loop
         // below so the result is identical either way.
 
-        // Alloc audit C3 (remainder): a local pool gives the serial loop the
+        // A local pool gives the serial loop the
         // same allocation-free-after-warmup behavior as scanline's
-        // `fetch_chunk_into_line_buffer`, WITHOUT reintroducing the T-05
+        // `fetch_chunk_into_line_buffer`, WITHOUT reintroducing the
         // anti-pattern (a persistent `tile_buffer` field sized to the
         // header's nominal tile size, which can be gigabytes for a tiny
         // data window -- see this function's earlier comment). The pool
@@ -1520,9 +1499,9 @@ impl TiledInputFileState {
     /// Fetch one tile's leader-validated, still-possibly-compressed bytes
     /// from `stream` (calling thread only — the sole function in the read
     /// pipeline that touches the stream). Port of the leader-read +
-    /// validation half of the old monolithic `read_single_tile`.
+    /// validation half of the legacy per-tile read.
     ///
-    /// Alloc audit C3: `data`'s buffer comes from `pool` (a
+    /// `data`'s buffer comes from `pool` (a
     /// [`crate::buf::BufPool`]) instead of a fresh `try_filled_vec` per
     /// call — same mechanism as `scanline::input`'s `fetch_chunk`. The
     /// SERIAL caller (this file's `read_pixels` loop) and the PARALLEL
@@ -1641,8 +1620,7 @@ impl TiledInputFileState {
                 lx,
                 ly,
             )?;
-            // (alloc audit follow-up, 2026-09-24 -- team-lead/deflate-fast
-            // finding) One range PER ROW of the tile, not one merged span
+            // One range PER ROW of the tile, not one merged span
             // for the whole tile -- see `tile_write_interval`'s doc for why
             // merging rows falsely "overlaps" with neighbouring tiles.
             intervals.push(tile_write_interval(&self.slices, &tile_range)?);
@@ -1685,19 +1663,18 @@ impl TiledInputFileState {
         type WindowJob<'a, 'b> = (usize, Vec<RawTile>, &'b mut [crate::misc::DestSet<'a>]);
         type WindowDone = (usize, Result<()>);
 
-        // Alloc audit C3: one pool shared (by reference) between the
+        // One pool shared (by reference) between the
         // producer and worker, same mechanism as
         // `scanline::input::read_pixels_parallel`.
         let pool = crate::buf::BufPool::new();
-        // (alloc audit follow-up, 2026-09-25) Same starvation fix as the
+        // Same starvation fix as the
         // flat scanline reader -- see `crate::buf::BufPool::prewarm_for_pipeline`'s
         // doc and `scanline::input::read_pixels_parallel`'s identical call
-        // for the measured cost this eliminates (deflate-fast independently
-        // confirmed the same fetch-time inflation for tiled read, see
-        // `.bughunt/bench/scaling.log`).
+        // for the measured cost this eliminates (the same fetch-time inflation
+        // was measured for tiled read).
         pool.prewarm_for_pipeline(crate::buf::READ_WINDOWS_IN_FLIGHT, window, bytes_per_chunk, coords.len());
         let pool = &pool;
-        // (alloc audit follow-up, 2026-09-25) Same `CodecPool` fix as
+        // Same `CodecPool` fix as
         // `scanline::input::read_pixels_parallel` -- see `Compressor`'s
         // trait doc and `crate::compressor::CodecPool`'s own doc.
         let codec_pool = crate::compressor::CodecPool::new();
@@ -1713,7 +1690,7 @@ impl TiledInputFileState {
                         let results: Vec<Result<()>> =
                             crate::threading::run_on_global_pool(count, move || {
                                 use rayon::prelude::*;
-                                // Alloc audit C3: `into_par_iter()` so each
+                                // `into_par_iter()` so each
                                 // closure invocation owns its `RawTile` and
                                 // can give its buffer back to `pool` once
                                 // decode+scatter are done with it -- see
@@ -1896,10 +1873,9 @@ impl TiledInputFileState {
     /// (compressed, or already-raw for `NONE`/no-shrink) — without
     /// decompressing or scattering into a frame buffer. Port of `void
     /// rawTileData(int& dx, int& dy, int& lx, int& ly, const char*&
-    /// pixelData, int& pixelDataSize)` (T-15, round 4 tiled audit +
-    /// continuation; `ImfTiledInputFile.cpp:345-396`).
+    /// pixelData, int& pixelDataSize)` (`ImfTiledInputFile.cpp:345-396`).
     ///
-    /// # The in/out coordinate contract (round 4 continuation re-audit)
+    /// # The in/out coordinate contract
     ///
     /// C++'s signature takes `dx`/`dy`/`lx`/`ly` **by reference**. Its
     /// header comment claims "for single part files, reads the next tile in
@@ -1915,9 +1891,7 @@ impl TiledInputFileState {
     /// into the out-parameters. The header comment is therefore stale
     /// documentation (most likely inherited from a pre-OpenEXRCore
     /// implementation where tiles genuinely were addressed by an internal
-    /// read cursor) — confirmed by reading the source, not assumed; see
-    /// `.bughunt/progress_fix_tiled.md`'s "raw_tile_data cursor form
-    /// (re-audit)" for the full derivation.
+    /// read cursor) — confirmed by reading the source, not assumed.
     ///
     /// This port therefore takes `dx`/`dy`/`lx`/`ly` by value (Rust has no
     /// in/out reference parameters) and returns `(dx, dy, lx, ly, data)` —
@@ -1926,7 +1900,7 @@ impl TiledInputFileState {
     /// public API's tuple shape exactly rather than silently dropping the
     /// out-parameters because they happen to be redundant today. Any caller
     /// that genuinely needs "iterate every tile in file order" should use
-    /// [`Self::tile_order`] (T-15) to get the coordinate list and call this
+    /// [`Self::tile_order`] to get the coordinate list and call this
     /// once per entry — exactly what [`crate::tiled::TiledOutputFile::copy_pixels`]
     /// already does.
     ///
@@ -1991,8 +1965,8 @@ impl TiledInputFileState {
             )));
         }
 
-        // T-06-style bound: the packed size can never exceed this tile's
-        // (clipped) uncompressed size — see `read_single_tile`.
+        // Bound: the packed size can never exceed this tile's
+        // (clipped) uncompressed size — the same check `fetch_tile` applies.
         let tile_w = (tile_range.max.x - tile_range.min.x + 1) as usize;
         let tile_h = (tile_range.max.y - tile_range.min.y + 1) as usize;
         let bytes_per_pixel = calculate_bytes_per_pixel(&self.header)?;
@@ -2019,7 +1993,7 @@ impl TiledInputFileState {
 }
 
 // ---------------------------------------------------------------------------
-// W3.9 phase B -- pure per-tile pipeline functions
+// Pure per-tile pipeline functions
 // ---------------------------------------------------------------------------
 //
 // fetch_tile (stream-only, above) / decode_tile / scatter_tile are the
@@ -2040,9 +2014,9 @@ struct RawTile {
 /// Decode one RawTile into its uncompressed XDR bytes -- pure function, no
 /// stream access, safe to run on any thread (each caller passes its own
 /// compressor). Mirrors the C core's decompress_data raw-vs-compressed
-/// rule, using the tile-rectangle-aware uncompress_tile (W6-4a).
+/// rule, using the tile-rectangle-aware uncompress_tile.
 fn decode_tile<'r>(
-    // `&'r mut` (audit C1, same fix as `scanline/input.rs::decode_chunk`):
+    // `&'r mut` (same as `scanline/input.rs::decode_chunk`):
     // unifying `compressor`'s borrow with `raw`'s lets the compressed-tile
     // path return `Cow::Borrowed(decoded)` instead of `decoded.to_vec()` --
     // `Compressor::uncompress_tile(&mut self, ..) -> Result<&[u8]>`'s output
@@ -2082,7 +2056,7 @@ fn decode_tile<'r>(
             decoded.len()
         )));
     }
-    // (audit C1) Borrow the codec's own output buffer instead of
+    // Borrow the codec's own output buffer instead of
     // `decoded.to_vec()`.
     Ok(std::borrow::Cow::Borrowed(decoded))
 }
@@ -2208,10 +2182,9 @@ fn scatter_fill_line(
     dest: &mut [u8],
     dest_base: usize,
 ) -> Result<()> {
-    // T-01 (round 4 tiled audit, P0): the offset must be the TILE's min.y
-    // (constant across the tile), not the current row y -- see the
-    // original doc comment (preserved from the pre-W3.9 method) for the
-    // full derivation against C++ run_fill.
+    // The offset must be the TILE's min.y (constant across the tile), not
+    // the current row y: C++ `run_fill` computes it once per tile and then
+    // advances one `yStride` per row.
     let x_offset = if slice.x_tile_coords { tile_min_x } else { 0 };
     let y_offset = if slice.y_tile_coords { tile_min_y } else { 0 };
 
@@ -2246,18 +2219,17 @@ fn scatter_fill_line(
 /// address formulas as scatter_tile_row/scatter_fill_line so the two can
 /// never disagree.
 ///
-/// (alloc audit follow-up, 2026-09-24 -- team-lead's deflate-fast-sourced
-/// finding, `.bughunt/bench/scaling.log`) A tile's rows are addressed in
+/// A tile's rows are addressed in
 /// whole-IMAGE raster order (`y_stride` is the full scanline stride, not
 /// the tile's own width), so a multi-row tile's own rows sit FAR apart in
 /// the frame buffer -- the gap between them holds every OTHER tile in the
 /// same tile-row band. Merging every row into ONE `lo..hi` span (the
-/// pre-fix shape) therefore covers those neighbouring tiles' bytes too,
+/// naive shape) therefore covers those neighbouring tiles' bytes too,
 /// so `plan_disjoint` sees two tiles' spans "overlap" even though their
 /// real writes never touch, and the parallel path silently, permanently
-/// falls back to serial (proved 10/10 by deflate-fast's instrumented
-/// count at 64x64 AND 256x256: this is the same cross-row-merging bug
-/// class fixed for deep tiled reads, `deep_tile_write_interval`, just in
+/// falls back to serial (confirmed by an instrumented count at 64x64 AND
+/// 256x256: this is the same cross-row-merging bug class handled for deep
+/// tiled reads, `deep_tile_write_interval`, just in
 /// the flat reader). One range PER ROW keeps each row's span tight to
 /// that row's own tile-width slice of the buffer, so two tiles in the
 /// same row band no longer look aliased.
@@ -2319,7 +2291,7 @@ fn tile_write_interval(
 }
 
 // ---------------------------------------------------------------------------
-// Tests — write→read round-trip vs the W6-2 writer (the key correctness gate)
+// Tests — write→read round-trip vs the tiled writer (the key correctness gate)
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -2432,7 +2404,7 @@ mod tests {
         let header = make_header(min_x, min_y, width, height, line_order, comp, td);
         let (pixels, fb) = make_pixels(min_x, min_y, width, height);
 
-        // --- write every tile of every level via the W6-2 writer -----------
+        // --- write every tile of every level via the tiled writer ---------
         let mut out = MemOStream::new();
         let levels: Vec<(i32, i32)> = match td.mode {
             LevelMode::OneLevel => vec![(0, 0)],
@@ -2539,7 +2511,7 @@ mod tests {
         }
     }
 
-    /// W3.9 phase B: read the SAME multi-tile (one-level) file with
+    /// Read the SAME multi-tile (one-level) file with
     /// `num_threads` in {0, 1, 2, 3, 8, 17} and assert every thread count
     /// produces byte-identical `out` — the tiled-reader analogue of
     /// `scanline::input::tests::parallel_read_is_byte_identical_to_serial_across_thread_counts`.
@@ -2577,7 +2549,7 @@ mod tests {
             let (nx, ny) = (tif.num_x_tiles(0).unwrap(), tif.num_y_tiles(0).unwrap());
             crate::probe::reset(crate::probe::Probe::PlanDisjointAccepted);
             tif.read_tiles(0, nx - 1, 0, ny - 1, 0, 0, &mut readback).unwrap();
-            // (alloc audit follow-up, 2026-09-24) With `n > 1` and 8 tile
+            // With `n > 1` and 8 tile
             // columns, the parallel path must actually ENGAGE, not silently
             // fall back to serial -- see `tile_write_interval`'s doc for the
             // cross-row-merging bug this proves is fixed (pre-fix,
@@ -2600,7 +2572,7 @@ mod tests {
         }
     }
 
-    /// Alloc audit C3 proof of reuse (tiled INPUT, SERIAL path) -- the fully
+    /// Proof of buffer-pool reuse (tiled INPUT, SERIAL path) -- the fully
     /// deterministic counterpart to
     /// `scanline::input::tests::parallel_read_reuses_some_pool_buffers_across_windows`.
     ///
@@ -2624,8 +2596,7 @@ mod tests {
     /// real serial loop in `TiledInputFileState::read_tiles` calls, in the
     /// exact same take-then-give sequence. A locally-owned pool has zero
     /// cross-test contamination by construction (nothing outside this
-    /// function ever touches it) -- this is a "stable capacity" proof (the
-    /// other option team-lead offered alongside a counter), not a global
+    /// function ever touches it) -- this is a "stable capacity" proof, not a global
     /// counter, and needs no margin at all: every one of the 16 tiles is
     /// the same size, so a working pool returns the exact same allocation
     /// (same capacity) every time after the first.
@@ -2735,8 +2706,7 @@ mod tests {
         }
     }
 
-    /// (alloc audit follow-up, 2026-09-25, team-lead's CodecPool request)
-    /// deflate-fast measured `map_init` constructing ~8192/8192 codecs for
+    /// A measurement showed `map_init` constructing ~8192/8192 codecs for
     /// an 8192-tile read, at every thread count. With a real `CodecPool`,
     /// the number of codecs actually CONSTRUCTED must be bounded by
     /// roughly the thread count, not the tile count -- 1024 small tiles at
@@ -2823,9 +2793,7 @@ mod tests {
         }
     }
 
-    /// (alloc audit follow-up, 2026-09-24 -- team-lead/deflate-fast finding,
-    /// `.bughunt/bench/scaling.log`) The EXACT tile sizes deflate-fast's
-    /// thread-scaling bench used to prove the bug (64x64, `tiled read 1.0x`
+    /// The EXACT tile sizes the thread-scaling bench used to expose the bug (64x64, `tiled read 1.0x`
     /// at 24 threads): a multi-column, multi-row tiled image at both 64x64
     /// and 256x256 tiles must show `plan_disjoint` actually engaging the
     /// parallel path for every `n > 1` -- before the `tile_write_interval`
@@ -2889,7 +2857,7 @@ mod tests {
         }
     }
 
-    /// (alloc audit follow-up, 2026-09-24) Negative test: a frame buffer
+    /// Negative test: a frame buffer
     /// where DIFFERENT TILES genuinely alias -- `x_tile_coords`/
     /// `y_tile_coords` both `true` with `base_offset = 0` addresses every
     /// tile relative to its OWN origin, so if the caller (mistakenly)
@@ -2958,7 +2926,7 @@ mod tests {
         );
     }
 
-    /// W1.2: a tiled file whose offset table was never written must still read.
+    /// A tiled file whose offset table was never written must still read.
     /// The reconstruction now runs through the SHARED chunk sweep
     /// (`chunk::offsets::reconstruct`), so this also guards that refactor.
     #[test]
@@ -3042,7 +3010,7 @@ mod tests {
         round_trip_all(0, 0, 4, 4, LineOrder::IncreasingY, Compression::NoCompression, td);
     }
 
-    /// W2.5: the `LevelMode::RipmapLevels` branch of `round_trip_all` was never
+    /// The `LevelMode::RipmapLevels` branch of `round_trip_all` was never
     /// exercised by any `#[test]` -- a non-square image forces `numXLevels !=
     /// numYLevels`, proving a genuine 2D grid is written/read, not a diagonal
     /// mipmap-shaped one.
@@ -3093,7 +3061,7 @@ mod tests {
         round_trip_all(11, 7, 5, 5, LineOrder::IncreasingY, Compression::NoCompression, td);
     }
 
-    /// Mutation-testing blind-spot fix (tiled/ audit prep, static review):
+    /// Mutation-testing blind-spot fix:
     /// every OTHER mipmap/ripmap test in this module (see
     /// `mipmap_none_pixel_exact`/`ripmap_none_pixel_exact` below) uses a
     /// data window at the origin, and the only off-origin test
@@ -3232,7 +3200,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // W6-4a compressTile/uncompressTile seam: rectangle-sensitive codec tiles.
+    // compressTile/uncompressTile seam: rectangle-sensitive codec tiles.
     //
     // Before the seam the writer reused `compress(data, min_y)`, which derives
     // the chunk rectangle from the data-window X extent.  When the tile width
@@ -3479,7 +3447,7 @@ mod tests {
         assert!(matches!(err, Err(ExrError::Arg(_))));
     }
 
-    /// T-01 (round 4 tiled audit) — a fill slice with `yTileCoords = true`
+    /// A fill slice with `yTileCoords = true`
     /// must write every row of the tile, not just row 0.  Rust's
     /// `scatter_fill_line` recomputed `y_offset` as the CURRENT row `y`
     /// instead of the tile's `min.y` (`input.rs::scatter_fill_line`), so
@@ -3567,7 +3535,7 @@ mod tests {
         }
     }
 
-    /// T-09 (round 4 tiled audit) — a fill slice (no matching file channel)
+    /// A fill slice (no matching file channel)
     /// with subsampling must be rejected by `set_frame_buffer`, matching C++
     /// 3.4.15 `ImfTiledInputFile.cpp` `run_fill` (:971-972,
     /// `ArgExc("Tiled data should not have subsampling.")`). Before the fix,
@@ -3614,7 +3582,7 @@ mod tests {
         assert!(matches!(err, Err(ExrError::Arg(_))), "expected Arg error, got {err:?}");
     }
 
-    /// T-10 (round 4 tiled audit) — `level_width`/`level_height`/
+    /// `level_width`/`level_height`/
     /// `data_window_for_level` must reject an out-of-range level instead of
     /// silently returning a value (e.g. 1) computed from the level formula
     /// alone. C++ 3.4.15 routes these through `exr_get_level_sizes`
@@ -3656,7 +3624,7 @@ mod tests {
         assert!(tif.data_window_for_level(0, 0).is_ok());
     }
 
-    /// T-15 (round 4 tiled audit) — `file_name`, `tile_order`, and
+    /// `file_name`, `tile_order`, and
     /// `raw_tile_data` accessors added to the reader.
     #[test]
     fn t15_reader_accessors() {
@@ -3692,7 +3660,7 @@ mod tests {
 
         // `raw_tile_data`: NONE compression, so the raw bytes ARE the
         // uncompressed XDR tile data — pixel-exact against the expected plane.
-        // Also asserts the in/out coordinate echo (round 4 continuation).
+        // Also asserts the in/out coordinate echo.
         let (r_dx, r_dy, r_lx, r_ly, raw) = tif.raw_tile_data(0, 0, 0, 0).unwrap();
         assert_eq!((r_dx, r_dy, r_lx, r_ly), (0, 0, 0, 0));
         assert_eq!(raw, expected_tile_xdr_for_test(0, 0, 1, 1));
@@ -3700,15 +3668,15 @@ mod tests {
         assert!(matches!(err, Err(ExrError::Arg(_))));
     }
 
-    /// Read-side S-16 mirror (round 4 continuation): interleaved reads
+    /// Persisted read state: interleaved reads
     /// across two tiled "parts" must reuse the SAME persisted
     /// [`TiledInputFileState`] rather than losing it between accesses — the
     /// object-level property [`TiledInputPartReader`] exists to provide,
-    /// which `MultiPartInputFile::tiled_input_part` (fix-scanline's wiring,
-    /// not attempted here) will build a container around. Simulated here at
+    /// which `MultiPartInputFile::tiled_input_part` builds a container
+    /// around. Simulated here at
     /// the `tiled/input.rs`-owned level (two independent tiled files stand
-    /// in for two container parts) since the actual `MultiPartInputFile`
-    /// caching wire-up is explicitly out of this task's ownership.
+    /// in for two container parts), independent of the `MultiPartInputFile`
+    /// caching wire-up.
     ///
     /// Sequence: open part A, set its frame buffer, read tile (0,0) — drop
     /// that view, keeping only its `TiledInputFileState` (`into_state`,
@@ -3718,7 +3686,7 @@ mod tests {
     /// `set_frame_buffer` again — read tile (1,0). This only succeeds if
     /// `slices`/`frame_buffer` survived in the state; a container that
     /// rebuilt a fresh `TiledInputFileState::from_part` for "part A" on this
-    /// second access (the S-16 bug) would come back with empty `slices` and
+    /// second access would come back with empty `slices` and
     /// `read_tile` would reject it with "No frame buffer specified", exactly
     /// as the control case below (`fresh_state`) demonstrates.
     #[test]
@@ -3823,7 +3791,7 @@ mod tests {
             assert_eq!(buf, expected_tile_xdr_for_test(2, 0, 3, 1));
         }
 
-        // Load-bearing control: a state REBUILT from scratch (the S-16 bug
+        // Load-bearing control: a state REBUILT from scratch (the bug
         // this test guards against) has empty `slices` and must reject a
         // read with no frame buffer set, proving the assertions above are
         // actually exercising persisted (not incidentally-still-working)
@@ -3864,7 +3832,7 @@ mod tests {
         out
     }
 
-    /// Queue item 5 (round-4, "not optional"): `TiledInputFile::open` OWNS a
+    /// `TiledInputFile::open` OWNS a
     /// path-opened stream (no caller-side `&mut` to keep alive) -- port of
     /// C++'s real, public `TiledInputFile(const char*, int)` constructor.
     /// Asserts it reads pixel-identical to the borrowed `new` path on the

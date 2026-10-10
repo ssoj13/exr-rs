@@ -57,7 +57,7 @@
 //! # Safe-Rust adaptation of the `char**` deep addressing
 //!
 //! The C++ deep `base` is a pointer-to-pointers (`char**`) that we cannot model
-//! with raw pointers (zero `unsafe`, no FFI — see the crate `CLAUDE.md`).  We
+//! with raw pointers (this crate has zero `unsafe` and no FFI).  We
 //! keep the *algorithm* 1:1 and replace only the storage model: the caller
 //! hands [`DeepScanLineOutputFile::set_frame_buffer`] a **flat per-channel
 //! sample heap** (`sample_data: &[u8]`) in which each pixel's sample array is
@@ -78,15 +78,6 @@
 //! immediately after the chunk is written (seek-back, write `u64` LE,
 //! seek-forward), so the file is valid without relying on `Drop` (the borrowed
 //! stream cannot be finalised from `Drop` safely).
-//!
-//! # What this Wave (W7-2) intentionally does NOT cover (tracked, not faked)
-//!
-//! * **Reading back** — `DeepScanLineInputFile` is W7-3.  This module is
-//!   verified structurally (re-parsing the bytes it writes).
-//! * **Multipart** output (`partNumber` chunk prefix), **deep tiled** output
-//!   (W7-4), `copyPixels`, threading (`ThreadPool`/`LineBufferTask`).  The
-//!   single-threaded gather here is observationally identical for the bytes it
-//!   produces.
 
 use crate::attr::PixelType;
 use crate::compressor::{
@@ -105,16 +96,16 @@ use imath_rs::modp;
 
 /// Source of raw (never decompressed) deep scanline chunks for
 /// [`DeepScanLineOutputFile::copy_pixels`] / [`DeepScanLineOutputFileState::copy_pixels`]
-/// -- D-13, one impl per C++ `copyPixels` overload's source type
+/// -- one impl per C++ `copyPixels` overload's source type
 /// (`DeepScanLineInputFile`, `DeepScanLineInputPart`).
 ///
 /// Duck-typed (no lifetime parameter, no "hand back the owned concrete
-/// reader" method) rather than the original design's `as_deep_scanline_input
-/// (&mut self) -> Result<&mut DeepScanLineInputFile<'a>>` shape -- mirrors
-/// `crate::tiled::output::TiledCopySource`'s OWN mid-round-4 redesign (a
-/// borrowing S-16 part-reader view, `DeepScanLineInputPartReader`, never
-/// owns a concrete `DeepScanLineInputFile` to hand back, the same
-/// constraint that forced `TiledCopySource`'s redesign). Implemented
+/// reader" method, unlike an `as_deep_scanline_input(&mut self) ->
+/// Result<&mut DeepScanLineInputFile<'a>>` shape) -- mirrors
+/// `crate::tiled::output::TiledCopySource`: a borrowing multipart
+/// part-reader view, `DeepScanLineInputPartReader`, never owns a concrete
+/// `DeepScanLineInputFile` to hand back, the same constraint that shapes
+/// `TiledCopySource`. Implemented
 /// directly for [`DeepScanLineInputFile`] here; `multipart::part::
 /// DeepScanLineInputPart` implements it in `multipart/part.rs` (trait
 /// bounds on a generic parameter are not satisfied via `Deref` coercion the
@@ -200,8 +191,7 @@ pub struct DeepScanLineOutputFile<'a> {
     /// Borrowed output stream (the C++ `_streamData->os`).
     stream: &'a mut dyn OStream,
 
-    /// Everything else this writer owns — the S-16 "ownership inversion"
-    /// design (round 4, `.bughunt/round4.md`, mirroring
+    /// Everything else this writer owns (mirroring
     /// `crate::scanline::OutputFileState` / `crate::tiled::output::
     /// TiledOutputFileState`): factored into its own, stream-free struct so
     /// [`crate::multipart::MultiPartOutputFile`] can persist it across
@@ -213,19 +203,18 @@ pub struct DeepScanLineOutputFile<'a> {
 }
 
 /// Every field of C++ `DeepScanLineOutputFile::Data` except the stream — the
-/// writer's **persisted** per-part state (S-16 mirror, round 4 continuation).
+/// writer's **persisted** per-part state.
 ///
-/// `MultiPartOutputFile::deep_scanline_output_part(n)` used to build a
-/// brand-new [`DeepScanLineOutputFile`] from the header on EVERY call,
-/// silently resetting `current_scan_line`/`missing_scan_lines` — C++ instead
+/// Building a brand-new [`DeepScanLineOutputFile`] from the header on EVERY
+/// `MultiPartOutputFile::deep_scanline_output_part(n)` call would silently
+/// reset `current_scan_line`/`missing_scan_lines` — C++ instead
 /// caches ONE writer object per part (`ImfMultiPartOutputFile.cpp:313-321`)
 /// so writes interleaved across parts resume correctly. Splitting the writer
 /// into this pure state struct plus the stream lets `MultiPartOutputFile`
 /// persist a `Vec<Option<DeepScanLineOutputFileState>>` (one slot per deep
 /// scanline part, built on first access) and hand out a borrowing
 /// [`DeepScanLineOutputPartWriter`] view instead. The standalone
-/// [`DeepScanLineOutputFile`] is unaffected: it just owns one state for its
-/// whole life, same as before this split.
+/// [`DeepScanLineOutputFile`] just owns one state for its whole life.
 pub(crate) struct DeepScanLineOutputFileState {
     /// The image header (type forced to `deepscanline`) — C++ `_data->header`.
     header: Header,
@@ -269,12 +258,12 @@ pub(crate) struct DeepScanLineOutputFileState {
     /// [`set_frame_buffer`][DeepScanLineOutputFile::set_frame_buffer]).
     slices: Vec<OutSliceInfo>,
     /// The caller's frame buffer, kept for [`frame_buffer`][Self::frame_buffer]
-    /// (D-13) — C++ `const DeepFrameBuffer& frameBuffer() const`. Cloned in
+    /// — C++ `const DeepFrameBuffer& frameBuffer() const`. Cloned in
     /// `set_frame_buffer`; `DeepFrameBuffer::new()` (empty) until then.
     caller_frame_buffer: DeepFrameBuffer,
 
     /// Sample-count slice geometry — C++'s `sampleCountSliceBase`/`xStride`/
-    /// `yStride`. round4.md "pixel data is passed PER WRITE CALL": this file
+    /// `yStride`. Pixel data is passed PER WRITE CALL: this file
     /// stores only the LAYOUT; the actual count/sample BYTES are passed fresh
     /// to each [`write_pixels`][Self::write_pixels] call, never stored.
     sample_count_base_offset: i64,
@@ -282,7 +271,7 @@ pub(crate) struct DeepScanLineOutputFileState {
     sample_count_x_stride: i32,
     /// Y byte stride for the sample-count buffer — C++ `sampleCountYStride`.
     sample_count_y_stride: i32,
-    /// D-10 fix: a growable per-row sample-count prefix cache (reset in
+    /// A growable per-row sample-count prefix cache (reset in
     /// `set_frame_buffer`) so `samples_before_line` computes each row's total
     /// at most once across the whole write, instead of being recomputed from
     /// scratch per channel per line (`gather_scanline` calls it once per
@@ -313,13 +302,13 @@ pub(crate) struct DeepScanLineOutputFileState {
     /// [`new_standalone`](Self::new_standalone) (the real value) or by
     /// [`from_part_with_preview`](Self::from_part_with_preview) (the real
     /// value `MultiPartOutputFile` captured from
-    /// `Header::write_attributes_to`, M-07, round-4 multipart audit); `0`
+    /// `Header::write_attributes_to`); `0`
     /// only via the plain [`from_part`](Self::from_part), used by the public
     /// `DeepScanLineOutputFile::from_part` constructor, which does not
     /// itself write any header and so has no real value to supply.
     preview_position: u64,
 
-    /// W3.9 phase B: this file's captured thread count — see
+    /// This file's captured thread count — see
     /// [`crate::threading::ThreadCount`] and the flat scanline writer's
     /// identical field.
     num_threads: crate::threading::ThreadCount,
@@ -350,7 +339,7 @@ impl<'a> DeepScanLineOutputFile<'a> {
     }
 
     /// Same as [`Self::new`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::new`]).
+    /// override (`None` behaves exactly like [`Self::new`]).
     pub fn with_num_threads(
         stream: &'a mut dyn OStream,
         header: &Header,
@@ -383,8 +372,7 @@ impl<'a> DeepScanLineOutputFile<'a> {
         Self::build(stream, header, part_number, Some(chunk_offset_table_position), None)
     }
 
-    /// Same as [`Self::from_part`], with an explicit `num_threads` override
-    /// (W3.9 phase B).
+    /// Same as [`Self::from_part`], with an explicit `num_threads` override.
     pub fn from_part_mt(
         stream: &'a mut dyn OStream,
         header: &Header,
@@ -398,7 +386,7 @@ impl<'a> DeepScanLineOutputFile<'a> {
     /// Shared constructor body for [`new`](Self::new) (single-part) and
     /// [`from_part`](Self::from_part) (multipart part).
     ///
-    /// S-16: the actual state computation now lives in
+    /// The actual state computation lives in
     /// [`DeepScanLineOutputFileState::new_standalone`] /
     /// [`DeepScanLineOutputFileState::from_part`] so
     /// [`DeepScanLineOutputPartWriter`] (which BORROWS a
@@ -424,8 +412,8 @@ impl<'a> DeepScanLineOutputFile<'a> {
     }
 
     /// The currently set frame buffer — port of
-    /// `const DeepFrameBuffer& DeepScanLineOutputFile::frameBuffer() const`
-    /// (D-13). Empty until [`set_frame_buffer`][Self::set_frame_buffer] has
+    /// `const DeepFrameBuffer& DeepScanLineOutputFile::frameBuffer() const`.
+    /// Empty until [`set_frame_buffer`][Self::set_frame_buffer] has
     /// been called.
     pub fn frame_buffer(&self) -> &DeepFrameBuffer {
         self.state.frame_buffer()
@@ -433,7 +421,7 @@ impl<'a> DeepScanLineOutputFile<'a> {
 
     /// Replace the header's preview-image pixels and rewrite them in place on
     /// disk — port of `void updatePreviewImage(const PreviewRgba newPixels[])`
-    /// (D-13, `ImfDeepScanLineOutputFile.cpp:891-918`). See
+    /// (`ImfDeepScanLineOutputFile.cpp:891-918`). See
     /// [`DeepScanLineOutputFileState::update_preview_image`] for the full doc.
     pub fn update_preview_image(&mut self, new_pixels: &[crate::attr::PreviewRgba]) -> Result<()> {
         self.state.update_preview_image(self.stream, new_pixels)
@@ -464,7 +452,7 @@ impl<'a> DeepScanLineOutputFile<'a> {
     }
 
     /// Quick pixel copy: transcode every scanline chunk of `input` straight
-    /// into this file, raw (no decompress/recompress). D-13, see
+    /// into this file, raw (no decompress/recompress). See
     /// [`DeepScanLineOutputFileState::copy_pixels`] for the full doc.
     pub fn copy_pixels<T: DeepScanLineCopySource>(&mut self, input: &mut T) -> Result<()> {
         self.state.copy_pixels(self.stream, input)
@@ -474,7 +462,7 @@ impl<'a> DeepScanLineOutputFile<'a> {
 // ---------------------------------------------------------------------------
 // DeepScanLineOutputFileState — the state-only construction + algorithm,
 // shared by the owning `DeepScanLineOutputFile` and the borrowing
-// `DeepScanLineOutputPartWriter` (S-16).
+// `DeepScanLineOutputPartWriter`.
 // ---------------------------------------------------------------------------
 
 
@@ -540,7 +528,7 @@ impl DeepScanLineOutputFileState {
     /// depend on `line_offsets_position`/`preview_position` (which the two
     /// callers fill in differently: written fresh vs. handed in / left 0 by
     /// the container). Never touches the stream.
-    /// `num_threads` is the W3.9 phase B per-file override (`None` = capture
+    /// `num_threads` is the per-file override (`None` = capture
     /// the current process-wide default).
     fn compute_mt(
         header: &Header,
@@ -553,7 +541,7 @@ impl DeepScanLineOutputFileState {
 
         // C++ DeepScanLineOutputFile::initialize(header) -------------------
         let mut hdr = header.clone();
-        // D-14 / `ImfDeepScanLineOutputFile.cpp:869-871`: a part header that
+        // `ImfDeepScanLineOutputFile.cpp:869-871`: a part header that
         // already declares a different type cannot be forced into
         // deepscanline — catch the type-mismatched-part misuse before
         // silently overwriting it below.
@@ -654,7 +642,7 @@ impl DeepScanLineOutputFileState {
     /// `stream` — port of the C++ `DeepScanLineOutputFile` constructor body,
     /// minus the pure state computation shared with
     /// [`from_part`](Self::from_part).
-    /// `num_threads` is the W3.9 phase B per-file override (`None` = capture
+    /// `num_threads` is the per-file override (`None` = capture
     /// the current process-wide default).
     fn new_standalone_mt(
         stream: &mut dyn OStream,
@@ -686,14 +674,14 @@ impl DeepScanLineOutputFileState {
     /// that table lives (`chunk_offset_table_position`, into which each
     /// chunk's start offset is back-patched). Touches no stream at all —
     /// this is what lets `MultiPartOutputFile` build this state ONCE per
-    /// part and persist it across `deep_scanline_output_part(n)` calls
-    /// (S-16). `preview_position` stays `0` (see the field doc).
+    /// part and persist it across `deep_scanline_output_part(n)` calls.
+    /// `preview_position` stays `0` (see the field doc).
     /// `preview_position` stays 0 unless given via
     /// [`from_part_with_preview_mt`](Self::from_part_with_preview_mt) — the
     /// public `DeepScanLineOutputFile::from_part` constructor (this
     /// function's only OTHER caller besides `MultiPartOutputFile`) does not
     /// itself write any header, so it has no real value to supply.
-    /// `num_threads` is the W3.9 phase B per-file override.
+    /// `num_threads` is the per-file override.
     pub(crate) fn from_part_mt(
         header: &Header,
         part_number: Option<i32>,
@@ -710,7 +698,7 @@ impl DeepScanLineOutputFileState {
     }
 
     /// Like [`from_part`](Self::from_part), but additionally records
-    /// `preview_position` — M-07 (round-4 multipart audit): C++
+    /// `preview_position`: C++
     /// `ImfMultiPartOutputFile.cpp:474-477` captures
     /// `parts[i]->previewPosition = headers[i].writeTo(..)` for every part
     /// while writing the header list, so `update_preview_image` works on a
@@ -718,7 +706,7 @@ impl DeepScanLineOutputFileState {
     /// [`MultiPartOutputFile`](crate::multipart::MultiPartOutputFile) calls
     /// this (not [`from_part`](Self::from_part)) with the value
     /// `Header::write_attributes_to` returned for this part.
-    /// `num_threads` is the W3.9 phase B per-file override.
+    /// `num_threads` is the per-file override.
     pub(crate) fn from_part_with_preview_mt(
         header: &Header,
         part_number: Option<i32>,
@@ -738,8 +726,8 @@ impl DeepScanLineOutputFileState {
     }
 
     /// The currently set frame buffer — port of
-    /// `const DeepFrameBuffer& DeepScanLineOutputFile::frameBuffer() const`
-    /// (D-13). Empty until [`set_frame_buffer`][Self::set_frame_buffer] has
+    /// `const DeepFrameBuffer& DeepScanLineOutputFile::frameBuffer() const`.
+    /// Empty until [`set_frame_buffer`][Self::set_frame_buffer] has
     /// been called.
     pub(crate) fn frame_buffer(&self) -> &DeepFrameBuffer {
         &self.caller_frame_buffer
@@ -747,7 +735,7 @@ impl DeepScanLineOutputFileState {
 
     /// Replace the header's preview-image pixels and rewrite them in place on
     /// disk — port of `void updatePreviewImage(const PreviewRgba newPixels[])`
-    /// (D-13, `ImfDeepScanLineOutputFile.cpp:891-918`). Same shape as
+    /// (`ImfDeepScanLineOutputFile.cpp:891-918`). Same shape as
     /// `tiled::output::TiledOutputFileState::update_preview_image` /
     /// `deep::tiled_output::DeepTiledOutputFile::update_preview_image`.
     ///
@@ -818,8 +806,7 @@ impl DeepScanLineOutputFileState {
     /// * [`ExrError::Arg`] when no sample-count slice was set (C++ "Invalid
     ///   base pointer, please set a proper sample count slice.").
     ///
-    /// round4.md "Design decision: writer pixel data is passed PER WRITE
-    /// CALL" (S-12/T-14/deep D-09, revised): this stores only the LAYOUT
+    /// Writer pixel data is passed PER WRITE CALL: this stores only the LAYOUT
     /// (channel slices as offsets/strides/types); it does **not** take or
     /// retain the sample-count / sample-data BYTES. Those are passed to each
     /// [`write_pixels`][Self::write_pixels] call instead — no stored
@@ -859,7 +846,7 @@ impl DeepScanLineOutputFileState {
                 "Invalid base pointer, please set a proper sample count slice.".into(),
             ));
         }
-        // F3: the sample-count byte strides are narrowed usize->i32 for the
+        // The sample-count byte strides are narrowed usize->i32 for the
         // addressing math; a value above i32::MAX would wrap to a bogus/negative
         // stride and mis-address the buffer, so reject it up front.
         if sc_slice.x_stride > i32::MAX as usize || sc_slice.y_stride > i32::MAX as usize {
@@ -899,7 +886,7 @@ impl DeepScanLineOutputFileState {
             }
         }
 
-        // D-10: reset the per-row prefix cache — a fresh `set_frame_buffer`
+        // Reset the per-row prefix cache — a fresh `set_frame_buffer`
         // call means a (possibly different) count-slice geometry, so any rows
         // cached under the old geometry must not be reused.
         self.sample_prefix =
@@ -911,12 +898,11 @@ impl DeepScanLineOutputFileState {
     }
 
     /// Validate that `sample_counts` covers every address `write_pixels` will
-    /// read this call — the per-call bounds check the old `set_frame_buffer`
-    /// used to do once against a buffer it then held forever. Moved here
-    /// because the buffer is now passed fresh to every `write_pixels` call
-    /// (round4.md "pixel data is passed PER WRITE CALL").
+    /// read this call — a per-call bounds check, because the buffer is passed
+    /// fresh to every `write_pixels` call rather than held by
+    /// `set_frame_buffer`.
     ///
-    /// Mirrors the F3 reasoning: with non-negative byte strides the extreme
+    /// With non-negative byte strides the extreme
     /// byte offsets are the `(min_x, min_y)` / `(max_x, max_y)` corners;
     /// `i128` keeps the check exact even for adversarial strides.
     fn validate_sample_counts(&self, sample_counts: &[u8]) -> Result<()> {
@@ -946,8 +932,8 @@ impl DeepScanLineOutputFileState {
     /// C++ inline `sampleCount(base, xStride, yStride, x, y)` (ImfMisc.h).
     ///
     /// Thin delegate to the shared [`sample_count_at`] so there is a single
-    /// lookup implementation; a negative/out-of-range address is a hard error
-    /// (F3), not a silent zero (see [`sample_count_at`]).
+    /// lookup implementation; a negative/out-of-range address is a hard error,
+    /// not a silent zero (see [`sample_count_at`]).
     fn sample_count(&self, sample_counts: &[u8], x: i32, y: i32) -> Result<u32> {
         sample_count_at(
             sample_counts,
@@ -965,7 +951,7 @@ impl DeepScanLineOutputFileState {
     /// channel's `sample_stride` gives that channel's byte start for line `y`,
     /// keeping the heap globally contiguous per channel (see the module docs).
     ///
-    /// D-10: O(1) amortized via the growable
+    /// O(1) amortized via the growable
     /// [`RowPrefixCache`](crate::deep::sample_table::RowPrefixCache) (each row
     /// summed at most once across the whole write), instead of re-summing
     /// every line from `minY` on every call (which made a whole-image write
@@ -1021,12 +1007,12 @@ impl DeepScanLineOutputFileState {
                 "No frame buffer specified as pixel data source.".into(),
             ));
         }
-        // round4.md "pixel data is passed PER WRITE CALL": validate the
+        // Pixel data is passed PER WRITE CALL: validate the
         // caller's buffer against the layout on every call (the buffer may
         // be a fresh refill each time), never a panic on a short one.
         self.validate_sample_counts(sample_counts)?;
 
-        // W3.9 phase B: every deep scanline chunk is exactly ONE line
+        // Every deep scanline chunk is exactly ONE line
         // (`lines_in_buffer == 1` always for the deep-valid codecs), so —
         // unlike the flat scanline writer — there is no partial-block
         // carryover to worry about: as long as this whole call's lines fit
@@ -1066,7 +1052,7 @@ impl DeepScanLineOutputFileState {
             // accumulates across x; each running total is written as Xdr int.
             let width = (self.max_x - self.min_x + 1) as usize;
             let mut count_table = Vec::with_capacity(width * SIZE_INT);
-            // Collect the row first so `sample_count`'s Result (F3) propagates
+            // Collect the row first so `sample_count`'s Result propagates
             // before it is handed to the count-encoder.
             let row: Vec<u32> = (self.min_x..=self.max_x)
                 .map(|x| self.sample_count(sample_counts, x, y))
@@ -1149,7 +1135,7 @@ impl DeepScanLineOutputFileState {
         // Serial pre-pass: extend the persisted `RowPrefixCache` in order and
         // snapshot each line's `samples_before` — see the deep scanline
         // READER's identical pre-pass (`read_pixels_parallel`) for why this
-        // preserves D-10's amortized-linear guarantee.
+        // preserves the cache's amortized-linear guarantee.
         let mut before_line = Vec::with_capacity(lines.len());
         for &y in &lines {
             before_line.push(self.samples_before_line(sample_counts, y)?);
@@ -1173,7 +1159,7 @@ impl DeepScanLineOutputFileState {
             line_bytes.push(2 * (max_sample_count_table_size + samples.saturating_mul(bytes_per_sample)));
         }
 
-        // (alloc audit follow-up, 2026-09-25) Two pools -- count-table
+        // Two pools -- count-table
         // codecs and sample-data codecs are constructed with different
         // sizes (`max_sample_count_table_size` vs `0`), so they must not
         // share one free list. See `encode_deep_line`'s doc.
@@ -1238,7 +1224,7 @@ impl DeepScanLineOutputFileState {
     }
 
     /// Write one already-gathered-and-compressed deep scanline chunk to the
-    /// stream NOW and back-patch its offset-table slot -- D-13, factored out
+    /// stream NOW and back-patch its offset-table slot -- factored out
     /// of [`Self::write_pixels`]'s tail so [`Self::copy_pixels`] can reuse the
     /// exact same low-level chunk write for a RAW (never decompressed)
     /// count-table + data pair, mirroring the flat/tiled writers'
@@ -1266,7 +1252,7 @@ impl DeepScanLineOutputFileState {
     }
 
     /// Quick pixel copy: transcode every scanline chunk of `input` straight
-    /// into this file, RAW (no decompress/recompress) -- D-13, port of the 2
+    /// into this file, RAW (no decompress/recompress) -- port of the 2
     /// C++ `DeepScanLineOutputFile::copyPixels` overloads
     /// (`ImfDeepScanLineOutputFile.cpp:1416-1571`).
     ///
@@ -1356,7 +1342,7 @@ impl DeepScanLineOutputFileState {
         data: &mut Vec<u8>,
     ) -> Result<()> {
         // Clone the (small) slice table so the loop body can call
-        // `self.samples_before_line` (which needs `&mut self` for the D-10
+        // `self.samples_before_line` (which needs `&mut self` for the
         // prefix cache) without holding a borrow of `self.slices` alive.
         let slices = self.slices.clone();
         for slice in &slices {
@@ -1412,13 +1398,13 @@ impl DeepScanLineOutputFileState {
 }
 
 // ---------------------------------------------------------------------------
-// W3.9 phase B — pure per-line pipeline functions (deep scanline writer)
+// Pure per-line pipeline functions (deep scanline writer)
 // ---------------------------------------------------------------------------
 
 /// Gather one scanline's cumulative sample-count table and sample data —
 /// pure function, no `self`, no stream access. Mirrors
 /// [`DeepScanLineOutputFileState::gather_scanline`] plus the count-table
-/// build the pre-W3.9 `write_pixels` loop did inline, parameterised so the
+/// build the serial `write_pixels` loop does inline, parameterised so the
 /// serial and parallel paths are a single source of truth.
 #[allow(clippy::too_many_arguments)]
 fn gather_deep_line(
@@ -1487,18 +1473,14 @@ fn gather_deep_line(
 
 /// Compress one gathered scanline's count table (with its OWN compressor)
 /// and sample data (with the SEPARATE data compressor) — owned-`Vec` form of
-/// the `stored_chunk` decisions the pre-W3.9 `write_pixels` loop made
-/// inline, for use from a rayon worker (each builds its own fresh compressor
-/// instances — cheap table/`Vec` setup, not itself compression work). The
+/// the `stored_chunk` decisions the serial `write_pixels` loop makes
+/// inline, for use from a rayon worker. The
 /// count table is always compressed positioned at `min_y` (matching C++ /
-/// the pre-W3.9 code exactly — NOT the line's own `y`); the sample data is
+/// the serial path exactly — NOT the line's own `y`); the sample data is
 /// compressed positioned at the line's own `y`.
-/// (alloc audit follow-up, 2026-09-25) `count_pool`/`data_pool` replace the
-/// old per-call `new_compressor` construction (measured: this constructed
-/// TWO fresh codecs per line, unconditionally, every call -- the worst
-/// offender among this crate's parallel paths, since it never even had
-/// `map_init`'s partial reuse). Checkout/checkin around each compress call
-/// instead -- see `crate::compressor::CodecPool`'s own doc.
+/// Codecs come from `count_pool`/`data_pool` (checkout/checkin around each
+/// compress call) rather than a per-call `new_compressor`, which would build
+/// TWO fresh codecs per line -- see `crate::compressor::CodecPool`'s own doc.
 #[allow(clippy::too_many_arguments)]
 fn encode_deep_line(
     compression: crate::attr::Compression,
@@ -1535,8 +1517,7 @@ fn encode_deep_line(
 }
 
 /// A **borrowing** view over one multipart part's persisted deep scanline
-/// writer state — the S-16 "ownership inversion" design mirror
-/// (`.bughunt/round4.md`), same shape as `crate::scanline::output::
+/// writer state — same shape as `crate::scanline::output::
 /// OutputPartWriter` / `crate::tiled::output::TiledOutputPartWriter`: instead
 /// of [`MultiPartOutputFile::deep_scanline_output_part`](crate::multipart::
 /// MultiPartOutputFile::deep_scanline_output_part) building a brand-new
@@ -1548,8 +1529,8 @@ fn encode_deep_line(
 ///
 /// Exposes the same public surface as [`DeepScanLineOutputFile`] (`header`,
 /// `frame_buffer`, `update_preview_image`, `current_scan_line`,
-/// `set_frame_buffer`, `write_pixels`) so existing callers of
-/// `deep_scanline_output_part` are unaffected by the return-type change.
+/// `set_frame_buffer`, `write_pixels`) so callers of
+/// `deep_scanline_output_part` use it like a standalone writer.
 pub struct DeepScanLineOutputPartWriter<'p> {
     stream: &'p mut dyn OStream,
     state: &'p mut DeepScanLineOutputFileState,
@@ -1602,7 +1583,7 @@ impl<'p> DeepScanLineOutputPartWriter<'p> {
     }
 
     /// Quick pixel copy: transcode every scanline chunk of `input` straight
-    /// into this file, raw (no decompress/recompress). D-13, see
+    /// into this file, raw (no decompress/recompress). See
     /// [`DeepScanLineOutputFileState::copy_pixels`] for the full doc.
     pub fn copy_pixels<T: DeepScanLineCopySource>(&mut self, input: &mut T) -> Result<()> {
         self.state.copy_pixels(self.stream, input)
@@ -1786,7 +1767,7 @@ mod tests {
         }
     }
 
-    /// W3.9 phase B: write the SAME multi-line deep image with `num_threads`
+    /// Write the SAME multi-line deep image with `num_threads`
     /// in {0, 1, 2, 3, 8, 17} and assert the produced FILE BYTES are
     /// identical at every thread count — the deep analogue of the flat
     /// writers' `parallel_write_*_byte_identical_across_thread_counts` tests.
@@ -1880,7 +1861,7 @@ mod tests {
         verify_deep_file(&bytes, w, h, Compression::NoCompression, &counts);
     }
 
-    /// D-13 — `update_preview_image` (`DeepScanLineOutputFile` has no
+    /// `update_preview_image` (`DeepScanLineOutputFile` has no
     /// `breakScanLine` in C++ — only the tiled writer has `breakTile`; the
     /// deep scanline writer's own missing-API list is just this one method).
     #[test]
@@ -1929,7 +1910,7 @@ mod tests {
         );
     }
 
-    /// D-13 — `update_preview_image` on a header with NO preview image must
+    /// `update_preview_image` on a header with NO preview image must
     /// error (`ExrError::Logic`), matching C++'s `LogicExc` throw, instead of
     /// silently no-oping.
     #[test]
@@ -1955,8 +1936,8 @@ mod tests {
     #[test]
     fn set_frame_buffer_rejects_short_count_buffer() {
         // A non-empty but too-short sample-count buffer must be rejected
-        // (F3) instead of silently reading out-of-range pixels as zero
-        // samples. round4.md "pixel data is passed PER WRITE CALL": this
+        // instead of silently reading out-of-range pixels as zero
+        // samples. Pixel data is passed PER WRITE CALL: this
         // bound is now checked in `write_pixels` (the buffer isn't available
         // at `set_frame_buffer` time anymore).
         let (w, h) = (4, 3);
@@ -1972,7 +1953,7 @@ mod tests {
     #[test]
     fn set_frame_buffer_rejects_oversized_stride() {
         // A sample-count stride above i32::MAX would wrap when narrowed to i32;
-        // reject it instead of mis-addressing the buffer (F3).
+        // reject it instead of mis-addressing the buffer.
         let (w, h) = (4, 3);
         let header = make_deep_header(w, h, Compression::NoCompression);
         let (sc, data, _fb, _counts) = make_deep_pixels(w, h);
@@ -2018,7 +1999,7 @@ mod tests {
         verify_deep_file(&bytes, w, h, Compression::Zips, &counts);
     }
 
-    /// D-13 — `copy_pixels`: transcode a source deep scanline file into a
+    /// `copy_pixels`: transcode a source deep scanline file into a
     /// fresh writer with a matching header, byte-for-byte, without ever
     /// decompressing. ZIPS (not NONE) so a byte-identical result actually
     /// proves `copy_pixels` never decompresses+recompresses.
@@ -2052,7 +2033,7 @@ mod tests {
         );
     }
 
-    /// D-13 — `copy_pixels` must reject copying into a file that already has
+    /// `copy_pixels` must reject copying into a file that already has
     /// pixel data (C++ LogicExc "already contains pixel data").
     #[test]
     fn d13_copy_pixels_rejects_when_destination_already_has_pixel_data() {
@@ -2178,7 +2159,7 @@ mod tests {
 
     #[test]
     fn missing_sample_count_slice_errors() {
-        // round4.md "pixel data is passed PER WRITE CALL": an empty
+        // Pixel data is passed PER WRITE CALL: an empty
         // sample-count buffer is no longer checkable at `set_frame_buffer`
         // (no buffer is passed there anymore) — it is now `write_pixels`'s
         // `validate_sample_counts` that treats an empty buffer as a null
@@ -2260,7 +2241,7 @@ mod tests {
         }
     }
 
-    /// D-09 / round4.md "pixel data is passed PER WRITE CALL": `write_pixels`
+    /// Pixel data is passed PER WRITE CALL: `write_pixels`
     /// takes the count/sample bytes directly (no stored buffer at all), so
     /// two calls with two DIFFERENT `sample_data` buffers (simulating a
     /// caller refilling one streaming buffer between calls) must each write
@@ -2287,7 +2268,7 @@ mod tests {
         let mut out = MemOStream::new();
         {
             let mut df = DeepScanLineOutputFile::new(&mut out, &header).unwrap();
-            // round4.md "pixel data is passed PER WRITE CALL": ONE
+            // Pixel data is passed PER WRITE CALL: ONE
             // `set_frame_buffer` (layout only), then each `write_pixels`
             // call gets the CURRENT bytes directly — no refill call needed.
             df.set_frame_buffer(&fb).unwrap();

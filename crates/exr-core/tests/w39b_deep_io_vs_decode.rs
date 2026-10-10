@@ -1,6 +1,5 @@
-//! W3.9 phase B — deep reader I/O share (team-lead follow-up: "'not measured'
-//! is not an argument" for skipping read-ahead pipelining on the deep
-//! readers). Same method as `tests/w39b_io_vs_decode.rs` (flat scanline):
+//! Deep reader I/O share: measures whether read-ahead pipelining would pay
+//! off on the deep readers, rather than skipping it unmeasured. Same method as `tests/w39b_io_vs_decode.rs` (flat scanline):
 //! write a real on-disk deep file, then time
 //! * `io_only` — every chunk's RAW bytes (`raw_pixel_data`/`raw_tile_data`,
 //!   no decompress, no scatter) — the work that stays on the calling thread

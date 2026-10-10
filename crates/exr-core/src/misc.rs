@@ -1,28 +1,26 @@
 //! Port of OpenEXR `ImfMisc.h/.cpp` — miscellaneous layout helpers for EXR I/O.
 //!
-//! This module contains the shared low-level helpers that scanline (and later
-//! tiled) I/O uses to compute per-line byte sizes, line-buffer offsets, pixel
+//! This module contains the shared low-level helpers that scanline and
+//! tiled I/O use to compute per-line byte sizes, line-buffer offsets, pixel
 //! type sizes, and to scatter/gather data between compressed line buffers and
 //! frame-buffer slices.
 //!
-//! # Skipped functions (tracked, not silent)
+//! # Functions that live elsewhere
 //!
-//! The following C++ functions from `ImfMisc.cpp` are **not** ported here
-//! because they depend on types / phases not yet landed:
+//! The following C++ functions from `ImfMisc.cpp` are **not** in this module
+//! because they depend on types defined in other layers:
 //!
-//! * `bytesPerDeepLineTable` (two overloads) — deep scanline; ported in the
-//!   deep-image phase (Phase 8).
-//! * `copyIntoDeepFrameBuffer` — deep-image scatter; Phase 8.
-//! * `copyFromDeepFrameBuffer` — deep-image gather; Phase 8.
-//! * `sampleCount` (inline in header) — deep-image sample-count accessor;
-//!   Phase 8.
+//! * `bytesPerDeepLineTable` (two overloads), `copyIntoDeepFrameBuffer`,
+//!   `copyFromDeepFrameBuffer` and `sampleCount` (inline in header) — deep-image
+//!   sizing, scatter/gather and sample-count access; implemented inside the
+//!   deep readers/writers (`crate::deep`).
 //! * `usesLongNames` — depends on `Header`; lives in `header.rs` as a method.
 //! * `getChunkOffsetTableSize` / `getScanlineChunkOffsetTableSize` — depends on
-//!   `Header` and `ImfPartType`; ported with the part layer (Phase 9).
-//! * `defaultFormat` / `numLinesInBuffer` — depend on `Compressor`; ported
-//!   with the codec layer (Phase 5).
+//!   `Header` and `ImfPartType`; lives in the part layer (`multipart/output.rs`).
+//! * `defaultFormat` / `numLinesInBuffer` — depend on `Compressor`; live in
+//!   `compressor/mod.rs`.
 //! * `WidenFilename` / `getLibraryVersion` — platform / metadata utilities;
-//!   ported in the file-level API (Phase 10).
+//!   see `container/version.rs` (`WidenFilename` needs no port there).
 //!
 //! Port target (pinned tag v3.3.11):
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.3.11/src/lib/OpenEXR/ImfMisc.h>
@@ -35,7 +33,7 @@ use crate::error::{ExrError, Result};
 
 /// Fallibly allocate a `Vec<T>` of `n` elements, each a clone of `fill` —
 /// the checked replacement for `vec![fill; n]` wherever `n` is derived from
-/// header fields an attacker controls (S-10 residual, round-4 audit).
+/// header fields an attacker controls.
 ///
 /// `vec![fill; n]` (and `Vec::resize`, `Vec::with_capacity`) call the global
 /// allocator through `RawVec::allocate_in`, which on failure calls
@@ -136,7 +134,7 @@ pub fn bytes_per_line_table(
     bytes_per_line: &mut Vec<usize>,
 ) -> Result<usize> {
     let nlines = (max_y - min_y + 1) as usize;
-    // S-10 residual (round-4 audit): fallible, not `resize` -- `nlines` is
+    // Fallible, not `resize` -- `nlines` is
     // driven directly by the header's `dataWindow` height, unbounded by any
     // chunk-count cap for a multi-line codec's `bytesPerLine` table itself
     // (see `try_filled_vec`'s docs for why an infallible `resize` is the
@@ -152,7 +150,7 @@ pub fn bytes_per_line_table(
 
         for (i, y) in (min_y..=max_y).enumerate() {
             if modp(y, ch.y_sampling) == 0 {
-                // E13 / `ImfMisc.cpp:160-166` (verified): a scanline whose
+                // `ImfMisc.cpp:160-166` (verified): a scanline whose
                 // accumulated byte count would overflow is a corrupt/hostile
                 // channel list, not a Rust-level panic (debug) or silent
                 // wraparound (release, before this fix).
@@ -174,8 +172,8 @@ pub fn bytes_per_line_table(
 /// `y_sampling`. Reduces to the full row count when `y_sampling <= 1`.
 ///
 /// The single home for this row-inclusion convention (`compute_sampled_height`,
-/// `internal_util.h:12-47`): DWA's `channel_dims` (W-06) and HTJ2K's
-/// `decode_chunk` (y-subsampling fix, `.bughunt/progress_htj2k_ysub.md`) both
+/// `internal_util.h:12-47`): DWA's `channel_dims` and HTJ2K's
+/// `decode_chunk` (y-subsampling fix) both
 /// need a per-channel row count for a sub-sampled channel's OWN reduced grid,
 /// and previously cross-imported it from `compressor::dwa` into
 /// `compressor::htj2k` — moved here instead so neither codec depends on the
@@ -505,7 +503,7 @@ pub fn copy_into_frame_buffer(
     type_fb: PixelType,
     type_file: PixelType,
 ) -> Result<(usize, usize)> {
-    // S-11 (round-4 audit, both halves): every branch below indexes
+    // Every branch below indexes
     // `write_buf[write_ptr..write_ptr+size]` `count` times, advancing
     // `write_ptr` by `x_stride` after each one. This is `count`-DRIVEN (a
     // `for _ in 0..count` loop), matching C++ 3.4's `unpack.c` (`for s in
@@ -564,7 +562,7 @@ pub fn copy_into_frame_buffer(
 
     use imath_rs::Half;
 
-    // These five conversions are the W4.6 single source of truth: see
+    // These five conversions are the single source of truth: see
     // `crate::convert` (a port of `ImfConvert.{h,cpp}` + the live 3.4
     // `internal_coding.h` primitives) for the UINT<->HALF overflow-rule
     // rationale. The closures below are thin bit-level adapters over it.
@@ -746,7 +744,7 @@ pub fn copy_from_frame_buffer(
 ) -> Result<(usize, usize)> {
     let sz = pixel_type_size(type_)?;
 
-    // S-11 (round-4 audit, both halves): the mirror-image of
+    // The mirror-image of
     // `copy_into_frame_buffer` above, for the GATHER direction — see that
     // function's comment for why this is `count`-driven (matches C++ 3.4's
     // `unpack.c` pixel-count loop) rather than an address-comparison `while`
@@ -843,13 +841,13 @@ pub fn convert_in_place(
 }
 
 // ---------------------------------------------------------------------------
-// W3.9 phase B — safe parallel-scatter destination planner
+// Safe parallel-scatter destination planner
 // ---------------------------------------------------------------------------
 //
 // NOT a C++ port (`ImfMisc.cpp` has no equivalent — C++ scatters from worker
 // threads by raw pointer arithmetic, `ImfThreading`/`LineBufferTask`, which
 // has no safe-Rust analogue). This is the "destination planner" from
-// `.bughunt/design_r5.md` §1.2.6: given each chunk's bounding write interval
+// the parallel read design: given each chunk's bounding write interval
 // into the caller's frame-buffer slab, either prove the chunks are pairwise
 // disjoint and hand each one its own exclusive `&mut [u8]` sub-slice (no
 // `unsafe`, via `split_at_mut`), or report `None` so the caller falls back to
@@ -889,8 +887,7 @@ pub(crate) struct ChunkDest<'a> {
 /// samples, then all of channel B's, ...) -- a single merged range per
 /// line/tile would necessarily span through every OTHER line's/tile's data
 /// sitting between two channels' regions, which is exactly the bug this
-/// generalization fixes (see `.bughunt/alloc_audit.md`'s C6-followup
-/// entry). `SmallVec<[_; 1]>` keeps the overwhelmingly common single-range
+/// generalization fixes. `SmallVec<[_; 1]>` keeps the overwhelmingly common single-range
 /// case allocation-free.
 pub(crate) type RangeSet = smallvec::SmallVec<[std::ops::Range<usize>; 1]>;
 
@@ -1123,7 +1120,7 @@ mod tests {
 
     use crate::attr::{Channel, ChannelList, PixelType};
 
-    // ---- try_filled_vec (S-10 residual) ----
+    // ---- try_filled_vec ----
 
     /// A count whose element size overflows `isize::MAX` bytes hits
     /// `Vec::try_reserve_exact`'s CAPACITY-OVERFLOW error path -- computed
@@ -1239,7 +1236,7 @@ mod tests {
     // ---- activeRowCount ----
 
     /// Mutation-testing gap fix (moved here from `compressor::dwa`, which
-    /// used to own this function -- `.bughunt/progress_htj2k_ysub.md`):
+    /// used to own this function):
     /// hand-derived boundary values (not a round trip) against
     /// `active_row_count`'s own documented contract (`modp(y, y_sampling) ==
     /// 0` for `y` in `[min_y, max_y]`). A symmetric range like `(0, 9, 2)` has
@@ -1398,12 +1395,12 @@ mod tests {
         }
     }
 
-    /// S-01 (round-4 audit, CONFIRMED against C++ 3.4's live read path
+    /// A FLOAT source (confirmed against C++ 3.4's live read path
     /// `OpenEXRCore/unpack.c` -> `internal_coding.h::float_to_half` ->
-    /// Imath's round-to-nearest `imath_float_to_half`): a FLOAT source
+    /// Imath's round-to-nearest `imath_float_to_half`)
     /// overflows to +/-inf only at `|bits| > 0x477fefff` (|f| >= 65520), NOT at
     /// HALF_MAX (65504). 65504 < |f| < 65520 rounds to the largest finite half.
-    /// This supersedes the round-3 `W3.3` claim that FLOAT overflows at
+    /// This supersedes an earlier claim that FLOAT overflows at
     /// HALF_MAX like UINT does — that claim was never checked against the
     /// oracle and was wrong.
     #[test]
@@ -1528,7 +1525,7 @@ mod tests {
         assert_eq!(dst, 42u32.to_le_bytes());
     }
 
-    /// S-11 (round-4 audit): a destination buffer shorter than the slice's own
+    /// A destination buffer shorter than the slice's own
     /// addressing (e.g. a caller passing a 2x2-tile-sized buffer for a HALF
     /// slice that actually needs 8 bytes, not 4) must error cleanly, never
     /// panic with an out-of-bounds slice index.
@@ -1544,7 +1541,7 @@ mod tests {
         let _ = format!("{err}");
     }
 
-    /// S-11: the same guard applies to a FILL slice (no matching file
+    /// The same guard applies to a FILL slice (no matching file
     /// channel) — a short destination must still error, not panic.
     #[test]
     fn copy_into_fb_short_write_buffer_fill_errors_not_panics() {
@@ -1558,7 +1555,7 @@ mod tests {
         let _ = format!("{err}");
     }
 
-    /// S-11 mirror on the gather side (`copy_from_frame_buffer`, used by
+    /// The mirror on the gather side (`copy_from_frame_buffer`, used by
     /// `OutputFile::write_pixels`): a caller's live pixel buffer shorter than
     /// the slice's own addressing must error, not panic.
     #[test]

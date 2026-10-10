@@ -258,7 +258,7 @@ pub struct PizCompressor {
     max_y: i32,
     /// Scratch buffer holding the result of the last call (the C++ output buffer).
     out: Vec<u8>,
-    /// K-02 test seam: the entropy-coded bit-count ceiling passed to
+    /// Test seam: the entropy-coded bit-count ceiling passed to
     /// `huffman::compress_with_limit`. Always `u32::MAX as u64` outside tests
     /// (matching C's real `hufEncode` `ARGUMENT_OUT_OF_RANGE` threshold,
     /// `internal_huf.c:846-848` — never observable at any size a real test
@@ -292,11 +292,11 @@ pub struct PizCompressor {
     /// still a per-chunk allocation before this field existed).
     chan_line: Vec<usize>,
     /// [`Self::channel_regions`]'s output buffer, reused across calls
-    /// (alloc audit E9, the `Vec::with_capacity` per call at the old
+    /// (instead of a `Vec::with_capacity` per call in the old
     /// `channel_regions`) — cleared and re-pushed every call, which is cheap
     /// (no zero-fill) and reuses the allocation once warmed up.
     regions: Vec<ChannelRegion>,
-    /// Persistent Huffman ENCODE-side scratch (alloc audit E7) — see
+    /// Persistent Huffman ENCODE-side scratch — see
     /// [`huffman::HufEncScratch`]'s doc. Also holds the assembled huffman
     /// stream bytes (`compress`'s `out` parameter), a separate buffer from
     /// `self.out` since the chunk header/bitmap are assembled into `self.out`
@@ -304,8 +304,8 @@ pub struct PizCompressor {
     /// that header).
     huf_scratch: huffman::HufEncScratch,
     huf_out: Vec<u8>,
-    /// Persistent Huffman DECODE-side accelerated-decoder scratch (alloc
-    /// audit E8) — see [`fast_huf::FastHufDecoder`]'s doc.
+    /// Persistent Huffman DECODE-side accelerated-decoder scratch
+    /// — see [`fast_huf::FastHufDecoder`]'s doc.
     fast_huf: fast_huf::FastHufDecoder,
 }
 
@@ -352,7 +352,7 @@ impl PizCompressor {
         })
     }
 
-    /// K-02 test seam (see the field doc): override the entropy-coded
+    /// Test seam (see the field doc): override the entropy-coded
     /// bit-count ceiling so a test can drive `compress()`'s raw-storage
     /// fallback for an oversized Huffman table through the REAL
     /// `Compressor::compress` method, instead of calling
@@ -439,7 +439,7 @@ impl Compressor for PizCompressor {
         // shared with `uncompress()` — see the field doc). `n_in` walks the
         // input; each channel line lands in its region at the correct line
         // offset. Every element gets written by the gather loop below (one
-        // full pass over `total_u16` slots) -- alloc audit E9: `ensure_len`
+        // full pass over `total_u16` slots) -- `ensure_len`
         // (grow/truncate, no unconditional zero-fill) instead of
         // `clear()` + `resize(_, 0)`, which used to re-zero-fill on every
         // single call regardless of what the PREVIOUS call already wrote.
@@ -466,7 +466,7 @@ impl Compressor for PizCompressor {
                 }
                 // Bulk gather (mirrors C's one `memcpy` + one byte-swap pass
                 // per line/channel, `internal_piz.c:530-531`): the shared
-                // `le_bytes_to_u16s` (audit block C) instead of one
+                // `le_bytes_to_u16s` instead of one
                 // bounds-checked `from_le_bytes` per sample.
                 let dst = start + self.chan_line[c] * samples;
                 let src_line = &data[n_in..n_in + in_bytes];
@@ -504,13 +504,13 @@ impl Compressor for PizCompressor {
 
         // Huffman-encode the whole transformed array.
         //
-        // K-02: `huffman::compress_with_limit` returns `Ok(false)` when the
+        // `huffman::compress_with_limit` returns `Ok(false)` when the
         // entropy-coded bit count does not fit a `u32` (`hufEncode`'s
         // `ARGUMENT_OUT_OF_RANGE`, `internal_huf.c:846-848`). C's
         // `internal_exr_apply_piz` (`internal_piz.c:596-603`) catches that by
         // storing the chunk raw — the same fallback as the "no-shrink" path
         // below, so we just take it early. `huf_scratch`/`huf_out` are
-        // persistent fields (alloc audit E7) instead of the old
+        // persistent fields instead of the old
         // fresh-tables-and-returned-Vec signature.
         if !huffman::compress_with_limit(
             &self.tmp,
@@ -524,7 +524,7 @@ impl Compressor for PizCompressor {
         }
         let huff = &self.huf_out;
 
-        // Assemble the PIZ chunk directly into self.out (audit block D: the
+        // Assemble the PIZ chunk directly into self.out (the
         // same out/scratch policy every codec's compress AND uncompress path
         // follows) instead of a throwaway local Vec: minNonZero, maxNonZero,
         // bitmap span, len, huff.
@@ -548,7 +548,7 @@ impl Compressor for PizCompressor {
 
     /// Uncompress one PIZ chunk — port of `internal_exr_undo_piz`.
     ///
-    /// `expected_len` (alloc audit C6) is unused here: PIZ's decode capacity
+    /// `expected_len` is unused here: PIZ's decode capacity
     /// is already driven entirely by `channel_regions(min_y, block_height)`
     /// -- the channel layout plus the CALLER-SUPPLIED `min_y`/block height,
     /// never a construction-time upper bound -- so unlike ZIP/PXR24 it never
@@ -654,7 +654,7 @@ impl Compressor for PizCompressor {
                 let src = start + self.chan_line[c] * samples;
                 // Bulk write (mirrors C's one `memcpy` per row/channel,
                 // `internal_piz.c:777`) via the shared `u16s_to_le_bytes`
-                // (audit block C) instead of one bounds-checked store per
+                // instead of one bounds-checked store per
                 // 2-byte sample.
                 let dst = self.out.get_mut(out_pos..out_pos + samples * 2).ok_or_else(|| {
                     ExrError::Logic("PIZ uncompress: scatter overruns the output buffer".into())
@@ -803,7 +803,7 @@ mod tests {
         buf
     }
 
-    /// Scratch-buffer reuse: `bitmap`/`tmp`/`chan_line` (`b39674e`/`9b82f90`)
+    /// Scratch-buffer reuse: `bitmap`/`tmp`/`chan_line`
     /// are persistent fields, filled in place on every `uncompress()` call
     /// instead of freshly allocated — this test exists specifically to catch
     /// stale data leaking from a PRIOR, LARGER chunk into a SMALLER one that
@@ -906,7 +906,7 @@ mod tests {
     /// Scratch-buffer reuse across BOTH directions: `PizCompressor` now
     /// shares `bitmap`/`lut`/`tmp`/`chan_line` between `compress()` AND
     /// `uncompress()` (`internal_piz.c`'s single `scratch_buffer_1/2`,
-    /// team-lead-approved shape) — the test above only interleaved two
+    /// shape) — the test above only interleaved two
     /// `uncompress` calls; this one drives the full
     /// compress(A) -> uncompress(A) -> compress(B) -> uncompress(B) sequence
     /// on ONE instance (A big, B strictly smaller, well-separated value
@@ -976,7 +976,7 @@ mod tests {
         assert_eq!(b_restored_reused, b_line, "B must also match the real uncompressed input");
     }
 
-    /// Phase 4 item 1: `uncompress` sizes `out` once and scatters into it with
+    /// `uncompress` sizes `out` once and scatters into it with
     /// no zero-fill, so the scatter must cover every byte. Decodes on a
     /// compressor whose EVERY scratch buffer (out, tmp, bitmap, lut, chan_line)
     /// was warmed by a prior call and then filled with 0xAA, on a layout with
@@ -1127,7 +1127,7 @@ mod tests {
         );
     }
 
-    /// K-02: `PizCompressor::compress` must take the raw-storage fallback
+    /// `PizCompressor::compress` must take the raw-storage fallback
     /// when the Huffman entropy-coded bit count exceeds the ceiling passed to
     /// `huffman::compress_with_limit` — mirroring C's `hufEncode`
     /// `ARGUMENT_OUT_OF_RANGE` -> raw-store path (`internal_piz.c:596-603`,
@@ -1142,7 +1142,7 @@ mod tests {
     /// `round_trip_large_compressible_genuine_path` uses below (so WITHOUT
     /// the ceiling override this would take the real compressed path, not
     /// accidentally hit "no-shrink" for an unrelated reason), then lowers
-    /// the ceiling via the K-02 test seam
+    /// the ceiling via the test seam
     /// ([`PizCompressor::set_huf_bit_limit_for_test`]) to force the
     /// bit-count-exceeded branch without needing the real ~512 MiB+ fixture
     /// that would naturally trigger it.
@@ -1168,7 +1168,7 @@ mod tests {
              no-shrink raw-store"
         );
 
-        // Same image, same compressor construction, but with the K-02 test
+        // Same image, same compressor construction, but with the test
         // seam forcing the "entropy-coded bit count doesn't fit" branch --
         // the same tiny ceiling `huffman::tests::
         // compress_with_limit_returns_none_over_ceiling_k02` uses.

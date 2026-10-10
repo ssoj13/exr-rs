@@ -1,6 +1,5 @@
-//! W3.9 phase B — "as C++ or better" wall-time comparison (team-lead
-//! follow-up: a numeric claim needs a numeric comparison, not just an
-//! internal before/after). Writes and reads the SAME 16384x8192 RGBA half+float
+//! "As C++ or better" wall-time comparison (a numeric claim needs a numeric
+//! comparison, not just an internal before/after). Writes and reads the SAME 16384x8192 RGBA half+float
 //! image at the same thread count on both sides — ours via
 //! `OutputFile::with_num_threads`/`InputFile::with_num_threads`, C++'s via
 //! `oracle.cpp`'s `bench-io` mode (`setGlobalThreadCount`) — for every codec in
@@ -124,8 +123,8 @@ fn time_ours(path: &str, header: &Header, pixels: &[u8], fb: &FrameBuffer, threa
 
     // Warm-up read (untimed): puts the file in the OS page cache before the
     // TIMED read below, mirroring oracle.cpp's `bench-io`'s own warm-up
-    // pass (team-lead follow-up: reduce cross-run noise from a cold vs
-    // already-cached first read).
+    // pass (reduces cross-run noise from a cold vs already-cached first
+    // read).
     {
         let mut is = StdIfStream::open(path).unwrap();
         let mut inf = InputFile::with_num_threads(&mut is, Some(threads)).unwrap();
@@ -198,18 +197,18 @@ fn stats(v: &[f64]) -> (f64, f64, f64) {
 /// antivirus scanning the freshly-written multi-GB temp files), so a single
 /// sample per codec is not reliable evidence for "we are N% slower/faster
 /// than C++ at codec X" — only the median of several is reported. Bumped
-/// from 3 to 5 (team-lead follow-up: reduce noise further) alongside the
+/// from 3 to 5 (to reduce noise further) alongside the
 /// warm-up read added to both `time_ours` and `oracle.cpp`'s `bench-io`.
 const REPEATS: usize = 5;
 
-/// A short pause between repeats (team-lead follow-up) — gives a background
+/// A short pause between repeats — gives a background
 /// burst (antivirus, OS housekeeping) a moment to settle before the next
 /// sample, instead of every repeat running back-to-back with no gap.
 const PAUSE_BETWEEN_REPEATS: std::time::Duration = std::time::Duration::from_millis(300);
 
 /// Run the comparison at a given thread count on both sides and print the
 /// table — `threads=1` isolates the codec/pipeline cost from parallel
-/// dispatch overhead (team-lead point 1: if single-threaded is ALREADY
+/// dispatch overhead (if single-threaded is ALREADY
 /// slower, the gap is in decode/encode/scatter, not in how the parallel
 /// path is dispatched).
 /// Serializes every 16k test in this file; see `run_comparison`.
@@ -315,8 +314,8 @@ fn ours_vs_cpp_16k_wall_time_across_codecs() {
     run_comparison(8);
 }
 
-/// Isolates codec/pipeline cost from parallel dispatch overhead (team-lead
-/// point 1): `setGlobalThreadCount(0)`/`num_threads=0` on both sides runs
+/// Isolates codec/pipeline cost from parallel dispatch overhead:
+/// `setGlobalThreadCount(0)`/`num_threads=0` on both sides runs
 /// every chunk on the calling thread, so any remaining "ours slower" gap
 /// here is NOT explained by rayon dispatch, channel handoffs, or thread
 /// pool overhead — it has to be in the actual gather/decode/encode/scatter

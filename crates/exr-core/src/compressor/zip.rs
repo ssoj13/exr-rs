@@ -41,9 +41,9 @@
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXRCore/internal_zip.c#L392>):
 //! after deflating, **if `compbufsz >= encode->packed_bytes` it copies
 //! `encode->packed_buffer` (the ORIGINAL pre-transform line bytes) and sets
-//! `compbufsz = packed_bytes`.** K-08: this `>=` only exists from 3.4.x; the
+//! `compbufsz = packed_bytes`.** This `>=` only exists from 3.4.x; the
 //! v3.3.11 port-base rule is `>` (raw wins only when *strictly* larger). Per
-//! the round-4 policy (behavioural target = the 3.4.15 oracle), this module
+//! the behavioural target (C++ 3.4.15), this module
 //! follows 3.4.15's `>=` here, so the byte-affecting citation below is pinned
 //! to 3.4.15 rather than the file's structural v3.3.11 port-base pin.
 //! We replicate this: when the zlib stream is not **strictly smaller** than the
@@ -79,7 +79,7 @@ use crate::error::Result;
 
 /// Default ZIP/ZIPS libdeflate compression level used by OpenEXR — re-export
 /// of [`crate::compressor::zlib::DEFAULT_ZIP_LEVEL`], the SSOT constant
-/// (block A of the audit: this used to be defined here and duplicated in
+/// (this used to be defined here and duplicated in
 /// `IDManifest::compress`).
 pub const DEFAULT_ZIP_LEVEL: i32 = crate::compressor::zlib::DEFAULT_ZIP_LEVEL;
 
@@ -109,11 +109,11 @@ pub struct ZipCompressor {
     /// core's `scratch_buffer_1`).
     scratch: Vec<u8>,
     /// Persistent low-level deflate compressor — constructed ONCE here
-    /// instead of per `compress()` call (perf follow-up, 2026-09-24:
+    /// instead of per `compress()` call (
     /// `deflate_rs::Compressor::new` allocates real matchfinder/Huffman
     /// tables, so a fresh one per chunk was a genuine per-chunk allocation
     /// cost C++ does not pay either — see `compressor::zlib`'s module doc).
-    /// Its level: K-06, resolved once at construction from
+    /// Its level: resolved once at construction from
     /// `header.codec_zip_level()` (the per-header level if C++ would accept
     /// it, else the process-global default) — matching
     /// C++ `apply_zip_impl`'s `exr_get_zip_compression_level` call
@@ -134,7 +134,7 @@ impl ZipCompressor {
     /// `max_scan_line_size` is the maximum uncompressed bytes in a single scan
     /// line; `num_scan_lines` is 16 (ZIP) or 1 (ZIPS).
     ///
-    /// K-06: `header.codec_zip_level()` now drives the actual deflate level (was
+    /// `header.codec_zip_level()` drives the actual deflate level (was
     /// hardcoded to [`DEFAULT_ZIP_LEVEL`] regardless of the header).
     ///
     /// # Errors
@@ -204,7 +204,7 @@ impl Compressor for ZipCompressor {
 
         // C++ `internal_zip_deconstruct_bytes(scratch, packed, packed_bytes)`.
         // `reorder_and_predict` fully overwrites all `srcb` bytes of
-        // `scratch` unconditionally (alloc audit E3), so growing/truncating
+        // `scratch` unconditionally, so growing/truncating
         // via `ensure_len` instead of `clear()` + zero-fill is sound — see
         // its doc.
         super::ensure_len(&mut self.scratch, srcb);
@@ -252,7 +252,7 @@ impl Compressor for ZipCompressor {
 
         // C `undo_zip_impl` decodes into a scratch buffer of size
         // `uncompressed_size` -- the CALLER's exact per-chunk target
-        // (alloc audit C6: `expected_len`), not just the construction-time
+        // (`expected_len`), not just the construction-time
         // `max_chunk_size` upper bound (== maxScanLineSize * numScanLines for
         // a FULL scanline/tiled chunk, always >= any real chunk in a
         // scanline/tiled file, but wrong for deep, where the packed/sample
@@ -266,7 +266,7 @@ impl Compressor for ZipCompressor {
         // exact `expected_uncompressed`.
         let cap = expected_len.max(self.max_chunk_size).max(1);
 
-        // K-01: use the checked entry point so trailing bytes after the zlib
+        // Use the checked entry point so trailing bytes after the zlib
         // stream are rejected, matching `exr_uncompress_buffer` (see
         // `uncompress_into` above). Decodes directly into
         // `self.scratch` -- no intermediate `decoded` Vec + copy.
@@ -282,7 +282,7 @@ impl Compressor for ZipCompressor {
         // C++ `internal_zip_reconstruct_bytes(out, scratch, actual_out_bytes)`:
         // reconstruct (un-predict) then interleave (reorder inverse).
         // `unpredict_and_reorder` fully overwrites all `outsz` bytes of
-        // `self.out` unconditionally (alloc audit E3) -- same `ensure_len`
+        // `self.out` unconditionally -- same `ensure_len`
         // argument as the compress side above.
         let outsz = self.scratch.len();
         super::ensure_len(&mut self.out, outsz);
@@ -307,12 +307,12 @@ mod tests {
 
     /// A default header — `zip_level()` resolves to whatever the process
     /// global is at the time (default `-1`, resolved to [`DEFAULT_ZIP_LEVEL`]
-    /// by `ZipCompressor::new`), same as every test before K-06.
+    /// by `ZipCompressor::new`), same as the tests that predate per-header levels.
     fn hdr() -> Header {
         Header::new()
     }
 
-    /// Perf follow-up regression (2026-09-24): `compress`/`uncompress` now
+    /// Regression test: `compress`/`uncompress` now
     /// reuse ONE persistent `deflate_compressor`/`deflate_decompressor`
     /// across calls, and `uncompress_into`'s destination buffer is grown or
     /// (cheaply, without zero-filling) truncated relative to whatever it
@@ -492,7 +492,7 @@ mod tests {
         assert_eq!(restored, data.as_slice());
     }
 
-    /// K-01: a zlib stream followed by trailing garbage must be rejected as a
+    /// A zlib stream followed by trailing garbage must be rejected as a
     /// corrupt chunk, matching `exr_uncompress_buffer`
     /// (`OpenEXRCore/compression.c:180-197`) — C requires
     /// `actual_in_bytes == in_bytes`. The old code (`Decompressor::zlib_decompress`,
@@ -518,7 +518,7 @@ mod tests {
         );
     }
 
-    /// K-06: `Header::set_zip_level` must actually change the deflate level
+    /// `Header::set_zip_level` must actually change the deflate level
     /// `ZipCompressor` uses — was previously hardwired to [`DEFAULT_ZIP_LEVEL`]
     /// regardless of the header (`internal_zip.c:368-370`'s
     /// `exr_get_zip_compression_level`, not consulted before). Uses only

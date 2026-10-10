@@ -67,7 +67,7 @@ pub(crate) use tiled_output::DeepTiledOutputFileState;
 /// when there are no slices or they disagree. The deep tiled parallel
 /// reader and writer precompute one per-tile sample prefix shared by all
 /// channels, which is only valid when every slice addresses pixels the
-/// same way; on `None` they decline to the serial path (T1/T2).
+/// same way; on `None` they decline to the serial path.
 pub(crate) fn uniform_tile_coords(mut flags: impl Iterator<Item = (bool, bool)>) -> Option<(bool, bool)> {
     let first = flags.next()?;
     flags.all(|f| f == first).then_some(first)

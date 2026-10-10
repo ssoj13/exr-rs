@@ -1,7 +1,7 @@
 //! Idiomatic `Image` read/write facade over the verified low-level core.
 //!
 //! This is the **one** place in `exr-core` where an idiomatic, non-1:1 Rust
-//! shape is allowed (see the repo-root `CLAUDE.md`).  It is deliberately
+//! shape is allowed; the rest of the crate mirrors the C++ structure.  It is deliberately
 //! *minimal*: it covers the common "load / save a single-part image" case
 //! cleanly and **drives** the verified scanline / tiled readers and writers —
 //! it never reimplements decoding or encoding.  Anything outside the common
@@ -255,15 +255,15 @@ impl ChannelData {
     ///
     /// `ChannelData` only ever holds `Half`/`Float`/`Uint` samples, so this
     /// never actually hits the `NumPixelTypes` sentinel `crate::misc::
-    /// pixel_type_size` (the W4.6 canonical size function) rejects.
+    /// pixel_type_size` (the canonical size function) rejects.
     fn sample_size(&self) -> Result<usize> {
         crate::misc::pixel_type_size(self.pixel_type())
     }
 
     // -------------------------------------------------------------------
-    // W4.6 SSOT: channel <-> f32 / bytes conversion, single source of truth
+    // Channel <-> f32 / bytes conversion, single source of truth
     // for every downstream crate (cryptomatte, exr-gpu, exr-view, openexr-py)
-    // instead of each hand-rolling its own copy (design_r5.md §4.1/§4.3).
+    // instead of each hand-rolling its own copy.
     // -------------------------------------------------------------------
 
     /// Every sample widened to `f32`. UINT is a **raw cast** (`crate::convert
@@ -347,7 +347,7 @@ impl ChannelData {
     }
 
     /// Encode to little-endian XDR wire bytes (EXR's on-disk/wire format is
-    /// LE; see root `CLAUDE.md`). Half/Uint/Float samples are `2`/`4`/`4`
+    /// LE). Half/Uint/Float samples are `2`/`4`/`4`
     /// bytes each, the raw bit pattern (not a value re-encoding).
     pub fn to_xdr_bytes(&self) -> Vec<u8> {
         match self {
@@ -602,7 +602,7 @@ impl Image {
     /// Consume the image and take ownership of its level-0 channels, in header
     /// (alphabetical) order.
     ///
-    /// V1: for a caller that owns a freshly-read, about-to-be-dropped
+    /// For a caller that owns a freshly-read, about-to-be-dropped
     /// `Image` and wants its channel data without cloning every pixel
     /// buffer (the pattern `img.channels().map(|(n, c)| (n.to_owned(),
     /// c.clone()))` was cloning the whole image just to move it into a
@@ -927,7 +927,7 @@ impl Image {
     }
 
     /// An untiled `Image` over `window` holding `planes`, with the header's
-    /// compression, line order, display window and carried attributes (W4.1: so a
+    /// compression, line order, display window and carried attributes (so a
     /// read -> write round trip, and `exr-rs convert`, preserves them).
     fn from_header(header: &Header, window: Box2i, planes: Planes) -> Result<Image> {
         Ok(Image {
@@ -1205,7 +1205,7 @@ fn open_path(path: &Path) -> Result<StdIfStream> {
 /// Decode a channel plane from the **native-endian** bytes the low-level
 /// readers scatter into the frame buffer.
 fn decode_plane_native(type_: PixelType, plane: &[u8], pixels: usize) -> Result<ChannelData> {
-    // (alloc audit V2) Exact-size `as_chunks::<N>().0.iter().map(..).collect()` instead
+    // Exact-size `as_chunks::<N>().0.iter().map(..).collect()` instead
     // of a per-sample `Vec::with_capacity` + bounds-checked `.get()` + push
     // loop — the bounds check moves up front (once, on the whole plane)
     // instead of once per sample, matching the sibling `from_xdr_bytes`'s own

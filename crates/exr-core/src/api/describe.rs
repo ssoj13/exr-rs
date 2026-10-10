@@ -52,7 +52,7 @@ pub const EXTENSION_TYPES: [&str; 8] = [
 /// One header attribute, ready to display.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
-    /// Attribute name (raw bytes, lossily decoded — see the C-08 notes).
+    /// Attribute name (raw bytes, lossily decoded; names need not be UTF-8).
     pub name: String,
     /// Wire type name (raw bytes, lossily decoded).
     pub type_name: String,
@@ -371,7 +371,7 @@ fn chlist(cl: &ChannelList) -> Vec<String> {
 }
 
 /// `printEnvmap` (main.cpp:151-162). Envmap has exactly the two valid values;
-/// an out-of-range byte is rejected at read time (C-07), so C++'s
+/// an out-of-range byte is rejected at read time, so C++'s
 /// `"map type N"` default has no counterpart.
 fn envmap(e: Envmap) -> String {
     match e {

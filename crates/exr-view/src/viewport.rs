@@ -181,7 +181,7 @@ pub fn show(
     // Right-button drag zooms about the VIEWPORT CENTRE (drag up = in, down =
     // out). We zoom about the centre rather than the cursor on purpose: with a
     // cursor pivot the zoom point slid around as the mouse moved during the
-    // drag, which felt unstable — the operator asked for a fixed centre pivot.
+    // drag, which felt unstable — so the pivot is the fixed centre.
     // (The wheel still zooms toward the cursor, where a moving pivot is natural.)
     //
     // Driven from the RAW pointer state (`secondary` button down + per-frame
@@ -663,7 +663,7 @@ mod tests {
         assert_eq!(Strip { rect: rect(4.0, 4.0, 22.0, 28.0), hot: false }.band(tiny, 4.0, 22.0), 0.0, "no room to roll out");
     }
 
-    /// V6: the readout must say "outside" rather than clamp to pixel 0. The old
+    /// The readout must say "outside" rather than clamp to pixel 0. The old
     /// `px.max(0)` reported (0,0) for anything left of / above the image, and let
     /// that phantom pixel be pinned.
     #[test]

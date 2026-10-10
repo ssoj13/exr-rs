@@ -86,7 +86,7 @@ impl PixelType {
     }
 
     // `size()` (a fallible-free `pixelTypeSize` returning `0` for the
-    // sentinel) was removed (W4.6 SSOT dedup): the sentinel is constructible
+    // sentinel) was removed: the sentinel is constructible
     // from a crafted file (`from_i32` above forces any unrecognised
     // discriminant to it), so silently sizing it as `0` bytes was a
     // silent-fallback hazard. `crate::misc::pixel_type_size(t) -> Result
@@ -152,8 +152,8 @@ impl Default for Channel {
 /// C++ `std::map<Name, Channel>` does; this ordering is what makes the on-disk
 /// byte layout deterministic and byte-exact.
 ///
-/// `PartialEq`/`Eq` are hand-written (not derived) to reproduce a C++ quirk
-/// (C-23): `ChannelList::operator==` (`ImfChannelList.cpp:239-253`) walks both
+/// `PartialEq`/`Eq` are hand-written (not derived) to reproduce a C++ quirk:
+/// `ChannelList::operator==` (`ImfChannelList.cpp:239-253`) walks both
 /// lists in sorted order and compares only the `Channel` VALUES pairwise —
 /// never the names. Two lists with the same channel values under different
 /// names compare equal in C++, and a derived `PartialEq` (which also compares
@@ -165,7 +165,7 @@ pub struct ChannelList {
 }
 
 impl PartialEq for ChannelList {
-    /// Port of `ChannelList::operator==` — see the struct doc (C-23).
+    /// Port of `ChannelList::operator==` — see the struct doc.
     fn eq(&self, other: &Self) -> bool {
         self.map.len() == other.map.len()
             && self
@@ -190,11 +190,11 @@ impl ChannelList {
     ///
     /// Returns `ArgExc` if `name` is empty, matching the C++ `THROW(ArgExc,…)`.
     ///
-    /// C-08: `name` accepts anything convertible to a byte-string [`Name`]
+    /// `name` accepts anything convertible to a byte-string [`Name`]
     /// (`&str`, `String`, `&[u8]`, `Vec<u8>`, `Name`); [`Name::new`] applies
     /// the exact C++ `strncpy(_text, text, MAX_LENGTH)` cut (first NUL, then
     /// 255 bytes) instead of the old UTF-8-boundary-respecting
-    /// `xdr::truncate_name` (C-09).
+    /// `xdr::truncate_name`.
     pub fn insert(&mut self, name: impl Into<Name>, channel: Channel) -> Result<()> {
         let name = name.into();
         if name.is_empty() {
@@ -217,8 +217,8 @@ impl ChannelList {
         self.map.get_mut(Name::normalize(name.as_ref()))
     }
 
-    /// Throwing lookup — mirrors `ChannelList::operator[](const char[]) const`
-    /// (C-16 follow-up). Returns [`ExrError::Arg`] ("Cannot find image
+    /// Throwing lookup — mirrors `ChannelList::operator[](const char[]) const`.
+    /// Returns [`ExrError::Arg`] ("Cannot find image
     /// channel …") for a missing name, matching C++'s `THROW(ArgExc, …)`,
     /// unlike [`find_channel`][Self::find_channel]'s `Option`.
     pub fn get<K: AsRef<[u8]> + ?Sized>(&self, name: &K) -> Result<&Channel> {
@@ -268,7 +268,7 @@ impl ChannelList {
     /// at the very beginning or very end, is not part of any layer.  Mirrors
     /// the C++ `rfind('.')` logic exactly (`pos != npos && pos != 0 && pos + 1
     /// < size`), operating on raw bytes so a non-UTF-8 name still splits
-    /// correctly on the ASCII `.` byte (C-08).
+    /// correctly on the ASCII `.` byte.
     pub fn layers(&self) -> BTreeSet<Name> {
         let mut layer_names = BTreeSet::new();
         for name in self.map.keys() {
@@ -350,7 +350,7 @@ impl AttrValue for ChannelList {
             }
 
             // Xdr::write<StreamIO>(os, i.name());  — zero-terminated string,
-            // raw bytes, no encoding assumed (C-08).
+            // raw bytes, no encoding assumed.
             xdr::write_name(o, name.as_bytes())?;
 
             // Xdr::write<StreamIO>(os, int(i.channel().type));
@@ -503,7 +503,7 @@ mod tests {
         o.into_data()
     }
 
-    // `PixelType::size()` was removed (W4.6); its boundary coverage lives in
+    // `PixelType::size()` was removed; its boundary coverage lives in
     // `misc.rs`'s `pixel_type_size_*` tests for the canonical
     // `misc::pixel_type_size`.
 
@@ -512,7 +512,7 @@ mod tests {
         assert_eq!(ChannelList::static_type_name(), "chlist");
     }
 
-    /// C-23 — `ChannelList::operator==` compares only the `Channel` values in
+    /// `ChannelList::operator==` compares only the `Channel` values in
     /// sorted-position order, never the names: two lists whose channels have
     /// swapped names but the same values-in-order must compare equal, and a
     /// differing channel count must compare unequal.
@@ -541,7 +541,7 @@ mod tests {
         assert_ne!(a, d);
     }
 
-    /// C-08 — a non-UTF-8 channel name (C++ `Name`/`parse_header.c`'s
+    /// A non-UTF-8 channel name (C++ `Name`/`parse_header.c`'s
     /// `read_text` never checks encoding) round-trips byte-exact through the
     /// real wire encode/decode, not just through the in-memory map. Oracle
     /// cross-read coverage (a real C++-written file with such a name) is
@@ -563,7 +563,7 @@ mod tests {
         assert_eq!(ch.type_, PixelType::Half);
     }
 
-    /// C-09 — a channel name with an interior NUL is truncated at insert
+    /// A channel name with an interior NUL is truncated at insert
     /// time, matching C++ `Name::operator=`, instead of corrupting the wire
     /// framing on write.
     #[test]
@@ -572,7 +572,7 @@ mod tests {
         list.insert("R\0garbage", Channel::new(PixelType::Half, 1, 1, false))
             .unwrap();
         assert!(list.find_channel("R").is_some());
-        // C-08: a LOOKUP key is normalized the exact same way an insert key
+        // A LOOKUP key is normalized the exact same way an insert key
         // is (C++ `map::find(const char*)` builds a temporary `Name` via the
         // same `strncpy` truncation `operator=` uses for insert), so a query
         // with an embedded NUL finds the SAME channel the truncated insert
@@ -580,7 +580,7 @@ mod tests {
         assert!(list.find_channel("R\0garbage").is_some());
     }
 
-    /// C-09 — a channel name over 255 bytes is truncated to `Name::MAX_LENGTH`.
+    /// A channel name over 255 bytes is truncated to `Name::MAX_LENGTH`.
     #[test]
     fn insert_truncates_overlong_name() {
         let mut list = ChannelList::new();
@@ -590,7 +590,7 @@ mod tests {
         assert_eq!(list.iter().next().unwrap().0.len(), NAME_MAX_LENGTH);
     }
 
-    /// C-16 follow-up — `get`/`get_mut` are the throwing-lookup equivalent of
+    /// `get`/`get_mut` are the throwing-lookup equivalent of
     /// `ChannelList::operator[]`: `Ok` for a present channel, `Err` for a
     /// missing one (never a panic, unlike a real `Index` impl would need).
     #[test]

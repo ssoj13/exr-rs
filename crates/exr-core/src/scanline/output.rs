@@ -31,17 +31,11 @@
 //! * [`OutputFile::update_preview_image`] / [`OutputFile::break_scan_line`] —
 //!   `updatePreviewImage`/`breakScanLine` (the latter a test-only corrupt-chunk
 //!   helper).
-//! * [`OutputFile::copy_pixels`] (W3.6) — `copyPixels(InputFile&)` /
+//! * [`OutputFile::copy_pixels`] — `copyPixels(InputFile&)` /
 //!   `copyPixels(InputPart&)`: a raw (never decompress/recompress) chunk
 //!   transcode from a matching-header scanline source, mirroring
 //!   [`crate::tiled::output::TiledOutputFile::copy_pixels`]'s design (see
 //!   [`ScanLineCopySource`]).
-//!
-//! # What this intentionally does NOT cover (tracked, not faked)
-//!
-//! * Threading (`ThreadPool`, `LineBufferTask`, the semaphore handshake).  The
-//!   single-threaded gather here is observationally identical for the file
-//!   bytes it produces.
 
 use crate::attr::PixelType;
 use crate::compressor::{
@@ -63,7 +57,7 @@ use std::marker::PhantomData;
 use std::ops::DerefMut;
 
 // ---------------------------------------------------------------------------
-// ScanLineCopySource — the `copyPixels` source abstraction (W3.6)
+// ScanLineCopySource — the `copyPixels` source abstraction
 // ---------------------------------------------------------------------------
 
 /// Anything [`OutputFile::copy_pixels`] can quick-copy pixels FROM — one impl
@@ -143,8 +137,7 @@ struct OutSliceInfo {
 // OutputFile — port of `class OutputFile`
 // ---------------------------------------------------------------------------
 
-/// Single-part scanline EXR writer — port of `Imf::OutputFile`, uncompressed
-/// path (Wave 3).
+/// Single-part scanline EXR writer — port of `Imf::OutputFile`.
 ///
 /// Construct with [`OutputFile::new`] (writes the header + reserves the
 /// line-offset table), describe the source pixels with
@@ -176,7 +169,7 @@ pub struct OutputFile<'a, S = &'a mut dyn OStream> {
 
     /// Every field of C++ `OutputFile::Data` EXCEPT the stream itself —
     /// factored out so the same state can be held either OWNED (here) or
-    /// BORROWED (see [`OutputPartWriter`], the S-16 multipart resumption
+    /// BORROWED (see [`OutputPartWriter`], the multipart resumption
     /// view). See [`OutputFileState`]'s own docs.
     state: OutputFileState,
 
@@ -189,7 +182,7 @@ pub struct OutputFile<'a, S = &'a mut dyn OStream> {
 /// Every field of C++ `OutputFile::Data` except the stream — the writer's
 /// **persisted** per-part state.
 ///
-/// S-16 (round-4 audit, `.bughunt/round4.md` "ownership-inversion" design):
+/// Ownership inversion:
 /// `MultiPartOutputFile::output_part(n)` used to build a brand-new
 /// [`OutputFile`] from the header on EVERY call, silently resetting
 /// `current_scan_line` / `missing_scan_lines` / the partial line-buffer block
@@ -256,7 +249,7 @@ pub(crate) struct OutputFileState {
     /// `Header::write_to`) or by
     /// [`from_part_with_preview`](Self::from_part_with_preview) (the real
     /// value `MultiPartOutputFile` captured from `Header::write_attributes_to`,
-    /// M-07, round-4 multipart audit); `0` only via the plain
+    /// see `from_part_with_preview_mt`); `0` only via the plain
     /// [`from_part`](Self::from_part), used by the public `OutputFile::from_part`
     /// constructor, which does not itself write any header and so has no real
     /// value to supply. Mirrors
@@ -306,7 +299,7 @@ pub(crate) struct OutputFileState {
     /// the pre-multipart writer.
     part_number: Option<i32>,
 
-    /// W3.9 phase B: this file's captured thread count — see
+    /// This file's captured thread count — see
     /// [`crate::threading::ThreadCount`] and the reader's identical field
     /// (`scanline/input.rs`).
     num_threads: crate::threading::ThreadCount,
@@ -329,7 +322,7 @@ pub(crate) struct OutputFileState {
 /// self-referential struct).  Build it with [`OutputFile::new_owned`]; the
 /// produced file is byte-identical to the borrowed path for the same input.
 /// `'a` here means "how long the boxed stream itself must live" — pixel data
-/// carries no lifetime at all (round-4 design: `write_pixels` takes the bytes
+/// carries no lifetime at all (by design: `write_pixels` takes the bytes
 /// per call rather than `set_frame_buffer` storing a borrow of them; see that
 /// method's docs). The stream slot is `Box<dyn OStream + 'a>` rather than the
 /// implicit `Box<dyn OStream + 'static>` so its `DerefMut::Target` is
@@ -344,7 +337,7 @@ pub type OutputFileOwned<'a> = OutputFile<'a, Box<dyn OStream + 'a>>;
 impl<'a> OutputFile<'a, &'a mut dyn OStream> {
     /// Open an `OutputFile` on `stream` for `header` — port of
     /// `OutputFile::OutputFile(OStream&, const Header&, int)` restricted to the
-    /// single-part, scanline, uncompressed path.
+    /// single-part, scanline path.
     ///
     /// Validates the header (`sanity_check`), then writes the magic number,
     /// version word and header, and reserves the line-offset table — exactly
@@ -352,8 +345,7 @@ impl<'a> OutputFile<'a, &'a mut dyn OStream> {
     ///
     /// # Errors
     /// * Propagates [`Header::sanity_check`] failures.
-    /// * Returns the [`new_compressor`] error for any compression other than
-    ///   `NO_COMPRESSION` (real codecs are Phase 5; nothing is faked).
+    /// * Propagates [`new_compressor`] errors (e.g. an invalid compression).
     /// * Propagates stream write / position errors.
     pub fn new(stream: &'a mut dyn OStream, header: &Header) -> Result<Self> {
         // Single-part: the writer itself emits magic + version + header +
@@ -363,7 +355,7 @@ impl<'a> OutputFile<'a, &'a mut dyn OStream> {
     }
 
     /// Same as [`Self::new`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::new`]).
+    /// override (`None` behaves exactly like [`Self::new`]).
     pub fn with_num_threads(
         stream: &'a mut dyn OStream,
         header: &Header,
@@ -403,7 +395,7 @@ impl<'a> OutputFile<'a, &'a mut dyn OStream> {
 }
 
 // Owned-stream constructor (`S = Box<dyn OStream + 'a>`).  Generic over `'a`
-// (S-12) — see the [`OutputFileOwned`] doc for why this is no longer pinned
+// — see the [`OutputFileOwned`] doc for why this is no longer pinned
 // to `'static`.
 impl<'a> OutputFile<'a, Box<dyn OStream + 'a>> {
     /// Open an [`OutputFileOwned`] that **owns** its output stream — the
@@ -445,7 +437,7 @@ where
     /// prologue and `offsets_position` is this part's reserved offset-table
     /// position.
     ///
-    /// S-16: the actual state computation now lives in
+    /// The actual state computation now lives in
     /// [`OutputFileState::new_standalone`] / [`OutputFileState::from_part`] so
     /// [`OutputPartWriter`] (which BORROWS an `OutputFileState` instead of
     /// owning one) can share the exact same construction logic.
@@ -502,14 +494,14 @@ where
 
     /// Set the pixel LAYOUT — port of `OutputFile::setFrameBuffer`.
     ///
-    /// Round-4 design revision (superseding the S-12 stored-borrow fix): the
+    /// Design note: the
     /// writer no longer holds any reference to the caller's pixel bytes at
     /// all. `frame_buffer` supplies only the per-channel addressing (byte
     /// offsets/strides/types) as small, cloned [`OutSliceInfo`] metadata; the
     /// actual pixel BYTES are passed to [`write_pixels`](Self::write_pixels)
     /// **on every call**. This is what makes the core C++ streaming idiom —
     /// refill ONE strip buffer, `writePixels(n)`, repeat — actually work: a
-    /// stored `&'a [u8]` borrow (the withdrawn S-12 design) froze the buffer
+    /// stored `&'a [u8]` borrow (an earlier, withdrawn design) froze the buffer
     /// for the writer's whole life, which is incompatible with reusing one
     /// small buffer across many calls (essential at 16k-65k resolutions) and
     /// broke any writer reused across a loop with a fresh per-iteration
@@ -551,7 +543,7 @@ where
         self.state.break_scan_line(&mut *self.stream, y, offset, length, c)
     }
 
-    /// Quick pixel copy from `input`, raw (no decompress/recompress) — W3.6,
+    /// Quick pixel copy from `input`, raw (no decompress/recompress) —
     /// port of `OutputFile::copyPixels(InputFile&)` /
     /// `copyPixels(InputPart&)`. See [`OutputFileState::copy_pixels`] for the
     /// full doc.
@@ -562,7 +554,7 @@ where
 
 // ---------------------------------------------------------------------------
 // OutputFileState — the state-only construction + algorithm, shared by the
-// owning `OutputFile` and the borrowing `OutputPartWriter` (S-16).
+// owning `OutputFile` and the borrowing `OutputPartWriter`.
 // ---------------------------------------------------------------------------
 
 impl OutputFileState {
@@ -572,8 +564,8 @@ impl OutputFileState {
     /// (which the two callers fill in differently: written fresh vs. handed in
     /// by the container). Never touches the stream.
     ///
-    /// Same as this doc's former `compute` (pre-W3.9), with an explicit
-    /// override (W3.9 phase B; `None` = capture the current process-wide
+    /// Same as this doc's former `compute`, with an explicit
+    /// override (`None` = capture the current process-wide
     /// default). See [`crate::threading::ThreadCount::capture`].
     fn compute_mt(
         header: &Header,
@@ -638,7 +630,7 @@ impl OutputFileState {
         };
 
         // C++: lineBufferSize = maxBytesPerLine * linesInBuffer; buffer resized.
-        // Checked (mirrors the reader's S-10 guard, `scanline/input.rs`):
+        // Checked (mirrors the reader's guard, `scanline/input.rs`):
         // a multi-line codec's `linesInBuffer` (DWA's 256) can overflow
         // `usize` on a 32-bit target even from an otherwise-plausible
         // `max_bytes_per_line`.
@@ -647,7 +639,7 @@ impl OutputFileState {
             .ok_or_else(|| {
                 ExrError::Arg("Line buffer size overflow (scan line size * lines per chunk).".into())
             })?;
-        // S-10 residual (round-4 audit): fallible allocations, not `vec![..]`
+        // Fallible allocations, not `vec![..]`
         // -- both are sized from header fields an attacker controls (image
         // height for `line_offsets`, height * codec block size for
         // `line_buffer`); see `try_filled_vec`'s docs for why an infallible
@@ -710,7 +702,7 @@ impl OutputFileState {
     /// the header, and reserves the (zero-filled) line-offset table on
     /// `stream` — port of the C++ `OutputFile` constructor body, minus the
     /// pure state computation shared with `from_part_with_preview_mt`.
-    /// `num_threads` is the W3.9 phase B per-file override (`None` = capture
+    /// `num_threads` is the per-file override (`None` = capture
     /// the current process-wide default).
     fn new_standalone_mt(
         stream: &mut dyn OStream,
@@ -743,14 +735,14 @@ impl OutputFileState {
     /// (`chunk_offset_table_position`, into which each chunk's start offset
     /// is back-patched). Touches no stream at all — this is what lets
     /// `MultiPartOutputFile` build this state ONCE per part and persist it
-    /// across `output_part(n)` calls (S-16).
-    /// Same construction, with an explicit `num_threads` override (W3.9
-    /// phase B; `None` = capture the current process-wide default).
+    /// across `output_part(n)` calls.
+    /// Same construction, with an explicit `num_threads` override
+    /// (`None` = capture the current process-wide default).
     /// `preview_position` stays 0: the public `OutputFile::from_part`
     /// constructor (this function's only OTHER caller besides
     /// `MultiPartOutputFile`) does not itself write any header, so it has no
     /// real value to supply. `MultiPartOutputFile` calls
-    /// `from_part_with_preview[_mt]` instead (M-07 below).
+    /// `from_part_with_preview[_mt]` instead (see below).
     pub(crate) fn from_part_mt(
         header: &Header,
         part_number: Option<i32>,
@@ -766,14 +758,14 @@ impl OutputFileState {
         )
     }
 
-    /// Records `preview_position` — M-07 (round-4 multipart audit): C++
+    /// Records `preview_position`: C++
     /// `ImfMultiPartOutputFile.cpp:474-477` captures
     /// `parts[i]->previewPosition = headers[i].writeTo(..)` for every part
     /// while writing the header list, so `OutputFile::updatePreviewImage`
     /// works on a multipart part exactly as it does on a standalone file.
     /// [`MultiPartOutputFile`](crate::multipart::MultiPartOutputFile) calls
     /// this with the value `Header::write_attributes_to` returned for this
-    /// part. `num_threads` is the W3.9 phase B per-file override (`None` =
+    /// part. `num_threads` is the per-file override (`None` =
     /// capture the current process-wide default).
     pub(crate) fn from_part_with_preview_mt(
         header: &Header,
@@ -790,14 +782,14 @@ impl OutputFileState {
 
     /// Set the pixel LAYOUT — port of `OutputFile::setFrameBuffer`.
     ///
-    /// Round-4 design revision (superseding the S-12 stored-borrow fix): the
+    /// Design note: the
     /// writer no longer holds any reference to the caller's pixel bytes at
     /// all. `frame_buffer` supplies only the per-channel addressing (byte
     /// offsets/strides/types) as small, cloned [`OutSliceInfo`] metadata; the
     /// actual pixel BYTES are passed to [`write_pixels`](Self::write_pixels)
     /// **on every call**. This is what makes the core C++ streaming idiom —
     /// refill ONE strip buffer, `writePixels(n)`, repeat — actually work: a
-    /// stored `&'a [u8]` borrow (the withdrawn S-12 design) froze the buffer
+    /// stored `&'a [u8]` borrow (an earlier, withdrawn design) froze the buffer
     /// for the writer's whole life, which is incompatible with reusing one
     /// small buffer across many calls (essential at 16k-65k resolutions) and
     /// broke any writer reused across a loop with a fresh per-iteration
@@ -887,10 +879,10 @@ impl OutputFileState {
     ///
     /// `pixels` is the caller-owned backing store the frame-buffer slices
     /// (installed by [`set_frame_buffer`](Self::set_frame_buffer)) address for
-    /// THIS call only — round-4 design revision: the writer holds no
+    /// THIS call only — by design, the writer holds no
     /// reference to it beyond the call, so the same small buffer can be
     /// refilled and re-passed on the next call (the C++ streaming idiom).
-    /// `stream` is the SAME split (S-16): the state that persists is `self`,
+    /// `stream` is the SAME split: the state that persists is `self`,
     /// while the stream is threaded through explicitly so a caller
     /// ([`OutputFile`] or [`OutputPartWriter`]) can hold it either owned or
     /// borrowed.
@@ -929,7 +921,7 @@ impl OutputFileState {
             -1
         };
 
-        // S-13 (round-4 audit): C++ `ImfOutputFile.cpp:1085-1107` checks
+        // C++ `ImfOutputFile.cpp:1085-1107` checks
         // `missingScanLines <= 0` ONCE, at the top, before processing anything
         // -- not once per scanline inside the loop. Two consequences that
         // differ from a naive per-scanline check: (1) calling `write_pixels`
@@ -948,7 +940,7 @@ impl OutputFileState {
         // HEAD: finish any block partially gathered by a PREVIOUS
         // `write_pixels` call, one line at a time, exactly as the fully
         // serial path always has — a partial block can only ever be the
-        // FIRST thing a call touches (design_r5.md §1.2.7 step 1: "Head").
+        // FIRST thing a call touches (the "Head" step).
         while remaining > 0 && self.block_lines_gathered > 0 {
             self.write_one_line_serial(stream, pixels, buf_format, step)?;
             remaining -= 1;
@@ -957,7 +949,7 @@ impl OutputFileState {
             return Ok(());
         }
 
-        // W3.9 phase B gate: parallel only when the captured thread count is
+        // Parallel gate: parallel only when the captured thread count is
         // `> 1`. (C++ additionally requires the call to span >1 chunk; the
         // "Body" enumeration below naturally yields 0 or 1 full blocks in
         // that case, which the parallel loop handles as a trivial 1-item
@@ -1094,7 +1086,7 @@ impl OutputFileState {
 
     /// Gather and emit exactly ONE scanline, flushing its block if that
     /// scanline completes it — the serial per-line body extracted verbatim
-    /// from the pre-W3.9 `write_pixels` loop (this IS the "safe scalar
+    /// from the original serial `write_pixels` loop (this IS the "safe scalar
     /// source of truth": the parallel body in `write_pixels` above must
     /// produce byte-identical chunks to what a sequence of these calls
     /// would). Used for: the fully-serial path (`num_threads <= 1`), the
@@ -1172,7 +1164,7 @@ impl OutputFileState {
         // cleanly.
         debug_assert_eq!(self.format, Format::Xdr);
         let raw: &[u8] = &self.line_buffer[..data_size];
-        // S-15 (round-4 audit): C++ `Compressor::compress` short-circuits
+        // C++ `Compressor::compress` short-circuits
         // an empty input BEFORE ever reaching a codec's own `compress()`
         // (`ImfCompressor.cpp:141-147`: `if (inSize == 0) { outPtr =
         // inPtr; return 0; }`) -- an empty block (every channel's
@@ -1203,7 +1195,7 @@ impl OutputFileState {
         // file — the ONLY difference from the single-part layout) +
         // lineBufferMinY + dataSize + data, then back-patch the reserved
         // offset-table entry — the single low-level primitive
-        // `copy_pixels` also uses (S-16 dedup, round-4 continuation).
+        // `copy_pixels` also uses.
         // Disjoint-field borrow: `chunk` may still borrow `self.line_buffer`
         // (the raw/no-shrink path above) while `&mut self.line_offsets` is
         // passed alongside it — different fields, borrows cleanly (same
@@ -1226,7 +1218,7 @@ impl OutputFileState {
     }
 
     /// Quick pixel copy: transcode every remaining scanline chunk of `input`
-    /// straight into this file, RAW (no decompress/recompress) — W3.6, port
+    /// straight into this file, RAW (no decompress/recompress) — port
     /// of `OutputFile::copyPixels(InputFile&)` / `copyPixels(InputPart&)`
     /// (`ImfOutputFile.cpp:1233-1360`), mirroring
     /// [`crate::tiled::output::TiledOutputFileState::copy_pixels`]'s design.
@@ -1459,11 +1451,11 @@ impl OutputFileState {
 }
 
 // ---------------------------------------------------------------------------
-// W3.9 phase B — pure per-block pipeline functions
+// Pure per-block pipeline functions
 // ---------------------------------------------------------------------------
 //
 // `gather_line`/`gather_block`/`encode_block` are the writer-side half of the
-// three-function split (design_r5.md §1.2.7): `write_one_line_serial` (the
+// three-function split: `write_one_line_serial` (the
 // serial path AND the parallel path's "Head"/"Tail") and the parallel body
 // in `write_pixels` both compose `gather_line`/`encode_block` in the same
 // order, so a block's chunk bytes depend only on `(raw gathered bytes,
@@ -1557,7 +1549,7 @@ fn gather_block(
 }
 
 /// A **borrowing** view over one multipart part's persisted writer state — the
-/// S-16 "ownership inversion" design (`.bughunt/round4.md`): instead of
+/// "ownership inversion" design: instead of
 /// [`MultiPartOutputFile::output_part`](crate::multipart::MultiPartOutputFile::output_part)
 /// building a brand-new [`OutputFile`] (and its state) on every call, the
 /// container persists one [`OutputFileState`] per scanline part across calls
@@ -1814,7 +1806,7 @@ mod tests {
 
     /// Build a `w`x`h` header (R,G,B half + A float, matching
     /// `scanline::input::tests::make_header[_comp]`) with the given line
-    /// order and compression, for W3.9 phase B write-determinism tests.
+    /// order and compression, for parallel write-determinism tests.
     fn make_header_wh(w: i32, h: i32, line_order: LineOrder, comp: Compression) -> Header {
         let mut hdr = Header::with_dimensions(
             w, h, 1.0, V2f { x: 0.0, y: 0.0 }, 1.0, line_order, comp,
@@ -1861,10 +1853,10 @@ mod tests {
         (buf, fb)
     }
 
-    /// W3.9 phase B: write the SAME image with `num_threads` in
+    /// Write the SAME image with `num_threads` in
     /// {0, 1, 2, 3, 8, 17}, in one `write_pixels` call covering the whole
     /// image, and assert the produced FILE BYTES are identical at every
-    /// thread count — the hard invariant from design_r5.md §1.2.1/§1.3.1.
+    /// thread count — the hard invariant of the parallel writer.
     /// NO_COMPRESSION gives one chunk per line (64 chunks for 64 rows),
     /// comfortably exercising multiple parallel windows.
     #[test]
@@ -2167,7 +2159,7 @@ mod tests {
 
     #[test]
     fn writing_too_many_lines_errors() {
-        // S-13 (round-4 audit): C++ clamps an over-request to whatever the
+        // C++ clamps an over-request to whatever the
         // data window has left and returns `Ok` -- it does NOT error partway
         // through (`ImfOutputFile.cpp:1085-1107` checks `missingScanLines <=
         // 0` once, at the top, before doing anything). Asking for 3 lines on
@@ -2333,7 +2325,7 @@ mod tests {
         assert_eq!(out, pixels, "owned-path round trip pixel mismatch");
     }
 
-    /// S-15 (round-4 audit): a block where NO channel has a sample (every
+    /// A block where NO channel has a sample (every
     /// channel's `ySampling` skips every line in the block) must be written
     /// and read back as a zero-byte chunk, matching C++ `Compressor::compress`
     /// short-circuiting `inSize == 0` BEFORE calling the codec's own
@@ -2568,7 +2560,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------
-    // W3.6: OutputFile::copy_pixels (from a scanline InputFile/InputPart)
+    // OutputFile::copy_pixels (from a scanline InputFile/InputPart)
     // -----------------------------------------------------------------
 
     /// `copy_pixels` from an `InputFile` must reproduce the source file

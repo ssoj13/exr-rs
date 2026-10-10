@@ -294,9 +294,9 @@ fn stdout_golden(oracle: &Oracle, golden_txt: &Path) -> Result<Vec<u8>> {
     // console handle opened in TEXT mode by default, so every "\n" it prints
     // becomes "\r\n" on the wire. Left as-is, every `cargo xtask parity*` run
     // rewrites the committed golden with 1 extra \r per line, leaving the
-    // tree dirty after a gate that changed nothing semantically (caught by
-    // team-lead's review: `git status --short` was non-empty right after a
-    // clean `parity-deflate` run). Single point for every oracle that writes
+    // tree dirty after a gate that changed nothing semantically (`git status
+    // --short` was non-empty right after a clean `parity-deflate` run).
+    // Single point for every oracle that writes
     // a golden this way (Imath's `parity` golden shares this function).
     let stdout = normalize_crlf(&stdout);
     std::fs::write(golden_txt, &stdout)
@@ -465,12 +465,12 @@ fn exr_golden(file: impl Into<String>, args: &[&str]) -> ExrGolden {
 fn exr_goldens() -> Vec<ExrGolden> {
     let mut jobs = vec![exr_golden("golden.exr", &["write"])];
 
-    // W2.7 "header wire bytes": the KNOWN image plus chromaticities/
+    // "Header wire bytes": the KNOWN image plus chromaticities/
     // rational/keyCode attributes, NO_COMPRESSION so the whole file
     // (including the header) is deterministic and byte-exact-comparable.
     jobs.push(exr_golden("golden_header_attrs.exr", &["write-header-attrs"]));
 
-    // C-08: byte-exact Name — a non-UTF-8 channel name, a non-UTF-8 attribute
+    // Byte-exact Name — a non-UTF-8 channel name, a non-UTF-8 attribute
     // name, and a 255-byte (Name::MAX_LENGTH) attribute name.
     jobs.push(exr_golden("golden_nonutf8_names.exr", &["write-nonutf8-names"]));
 
@@ -481,7 +481,7 @@ fn exr_goldens() -> Vec<ExrGolden> {
         jobs.push(exr_golden(format!("golden_{codec}.exr"), &["write", codec]));
     }
 
-    // K-06: ZIP/ZIPS at a non-default `Header::zipCompressionLevel()` (the
+    // ZIP/ZIPS at a non-default `Header::zipCompressionLevel()` (the
     // EXR_DEFAULT_ZLIB_COMPRESS_LEVEL both our writer and C++ otherwise use is
     // 4). Level 1 (fastest) and 9 (best) bracket the range and both differ
     // from 4, so a byte-exact match at either level is real level-plumbing
@@ -516,7 +516,7 @@ fn exr_goldens() -> Vec<ExrGolden> {
         "golden_tiled_none_one_offset.exr",
         &["write-tiled", "none", "one", "11", "7"],
     ));
-    // Header-variant tiled goldens (r3_tests.md §8: these paths had no
+    // Header-variant tiled goldens (these paths had no
     // C++-verified test at all -- ROUND_UP changed the level count, RANDOM_Y
     // and DECREASING_Y changed the on-disk tile order, and only the attribute
     // BYTE was ever checked).
@@ -532,7 +532,7 @@ fn exr_goldens() -> Vec<ExrGolden> {
         "golden_tiled_zip_one_decreasing.exr",
         &["write-tiled", "zip", "one", "order=decreasing"],
     ));
-    // W2.7: RIPMAP -- independent x/y level grids (numXLevels != numYLevels
+    // RIPMAP -- independent x/y level grids (numXLevels != numYLevels
     // for the non-square 68x44 KNOWN image), never exercised before this.
     jobs.push(exr_golden(
         "golden_tiled_zip_ripmap.exr",
@@ -552,7 +552,7 @@ fn exr_goldens() -> Vec<ExrGolden> {
         &["write-deep-scanline", "none", "-3", "7"],
     ));
 
-    // D-12: two deep scanline "sources" for the CompositeDeepScanLine oracle
+    // Two deep scanline "sources" for the CompositeDeepScanLine oracle
     // gate (see the `composite-deep-scanline` special-case dump job below,
     // after `DECODE_DUMPS`).
     jobs.push(exr_golden("golden_deep_composite_a.exr", &["write-deep-composite", "a"]));
@@ -560,8 +560,9 @@ fn exr_goldens() -> Vec<ExrGolden> {
 
     // Deep tiled: ONE_LEVEL + MIPMAP (all levels). For MIPMAP each level is
     // addressed in our whole-(level-0)-window flat-heap order with counts only
-    // in the level's corner (see parity_exr.rs `deep_count_buffer_mip` and the
-    // "MIPMAP gotcha" in src/deep/CLAUDE.md).
+    // in the level's corner, because our deep tiled writer/reader address every
+    // level through the same level-0 count buffer (see parity_exr.rs
+    // `deep_count_buffer_mip`).
     for (codec, mode) in
         [("none", "one"), ("rle", "one"), ("zips", "one"), ("none", "mipmap"), ("zips", "mipmap")]
     {
@@ -598,7 +599,7 @@ fn exr_goldens() -> Vec<ExrGolden> {
     // tiled/ZIP, deep-scanline/ZIPS), all lossless -> bit-exact both directions.
     jobs.push(exr_golden("golden_multipart.exr", &["write-multipart"]));
 
-    // W-06 (`.bughunt/r4_audit_dwa_htj2k.md`): DWA with sub-sampled channels —
+    // DWA with sub-sampled channels —
     // a CSC group (R/G/B, unsampled) alongside a standalone LOSSY_DCT channel
     // (BY, 2x2), an RLE channel (A, 2x1), and an UNKNOWN/zlib channel (Z,
     // 1x2). One golden per scan-line-batch size (DWAA=32, DWAB=256) so both
@@ -608,8 +609,8 @@ fn exr_goldens() -> Vec<ExrGolden> {
     jobs.push(exr_golden("golden_dwaa_sub.exr", &["write-dwa-sub", "dwaa"]));
     jobs.push(exr_golden("golden_dwab_sub.exr", &["write-dwa-sub", "dwab"]));
 
-    // Full per-codec x per-sampling scanline matrix (team-lead follow-up to the
-    // HTJ2K y-subsampling bug, `.bughunt/progress_htj2k_ysub.md`): the bug slipped
+    // Full per-codec x per-sampling scanline matrix (follow-up to an HTJ2K
+    // y-subsampling bug): the bug slipped
     // through because no test exercised channel sub-sampling for 11 of the 12
     // codecs. Two channels, "A" (unsampled reference) + "S" (the sampling under
     // test) -- `write-sub`/`dump-sub` in `oracle.cpp`. (1,1) is included as the
@@ -637,7 +638,7 @@ fn exr_goldens() -> Vec<ExrGolden> {
 /// lossy one there is no such formula, so without a committed decode the
 /// "our decode == C++ decode" tests can only run when the oracle binary is
 /// present -- which is why 11 of them silently degraded to a pixel COUNT in a
-/// plain `cargo test` (.bughunt/r3_tests.md 2.2).
+/// plain `cargo test`.
 ///
 /// `(golden file, oracle mode)`.
 const DECODE_DUMPS: &[(&str, &str)] = &[
@@ -663,14 +664,14 @@ const DECODE_DUMPS: &[(&str, &str)] = &[
     // (like the other lossy/transform paths above), so the C++ decode is
     // committed next to the golden.
     ("golden_aces_rec709.exr", "aces-read"),
-    // W-06: BY is LOSSY_DCT (subsampled), so its committed C++ decode is the
+    // BY is LOSSY_DCT (subsampled), so its committed C++ decode is the
     // only oracle-free exact check, same rationale as the other DWA goldens.
     ("golden_dwaa_sub.exr", "dump-dwa-sub"),
     ("golden_dwab_sub.exr", "dump-dwa-sub"),
-    // W3.4 oracle gate: the real, GENERIC `Imf::InputFile` flattening a
+    // Oracle gate: the real, GENERIC `Imf::InputFile` flattening a
     // single deep-scanline source through its internal `CompositeDeepScanLine`
     // -- reuses the existing `golden_deep_composite_a.exr` fixture (already
-    // built above for the D-12 two-source compositing gate) as a single
+    // built above for the two-source compositing gate) as a single
     // source; `read-deep-via-inputfile` takes the same `mode golden out`
     // shape as `dump`/`rgba-read`, so it fits this table directly (unlike
     // `composite-deep-scanline`, which is 2-input and lives in its own block
@@ -792,7 +793,7 @@ fn parity_exr() -> Result<()> {
         println!("wrote {} ({len} bytes)", lut_dump.display());
     }
 
-    // D-12: a real C++ `CompositeDeepScanLine` compositing BOTH deep sources
+    // A real C++ `CompositeDeepScanLine` compositing BOTH deep sources
     // above (not a decode of one golden -- `DECODE_DUMPS`'s `mode golden out`
     // shape doesn't fit a 2-input job, same reason `lut_dump` above lives
     // outside that table).

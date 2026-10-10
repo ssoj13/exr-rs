@@ -108,7 +108,7 @@ mod tests {
         assert_eq!(hex_to_float_id(&hex).unwrap().to_bits(), id.to_bits());
     }
 
-    /// C13: only exactly 8 hex digits parse.
+    /// Only exactly 8 hex digits parse.
     #[test]
     fn hex_parse_is_strict() {
         assert!(hex_to_float_id("13851a76").is_some());

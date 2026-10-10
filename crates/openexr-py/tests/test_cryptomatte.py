@@ -237,7 +237,7 @@ def test_inject_over(tmp_path):
 
 
 def test_inject_rejects_a_transposed_coverage(tmp_path):
-    """C8: the (H, W) shape must match, not only the element count."""
+    """The (H, W) shape must match, not only the element count."""
     import OpenEXR.cryptomatte as crypto
 
     h, w = 2, 3

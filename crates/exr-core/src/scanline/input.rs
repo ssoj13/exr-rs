@@ -33,10 +33,6 @@
 //!   channel into the frame buffer honouring strides / sampling, filling absent
 //!   channels with their fill value (`Data::readPixels` +
 //!   `ScanLineProcess::run_decode` / `run_fill`).
-//!
-//! Not covered (tracked, not faked): threading (`ThreadPool`, `LineBufferTask`)
-//! — the single-threaded read here produces identical pixels — and
-//! `rawPixelData` / `rawPixelDataToBuffer` (see [`crate::chunk`]).
 
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -66,7 +62,7 @@ use imath_rs::{divp, modp};
 /// the fill flag and fill value.  The raw `char* base` becomes a signed byte
 /// offset (`base_offset`) into the caller-owned output buffer — the same
 /// safe-Rust adaptation used by [`crate::frame_buffer::Slice`] and by the
-/// Wave-3 writer's `OutSliceInfo`.
+/// scanline writer's `OutSliceInfo`.
 #[derive(Clone, Debug)]
 struct InSliceInfo {
     /// Destination buffer this slice writes to (planar read; 0 for the single-buffer API).
@@ -107,7 +103,7 @@ struct InSliceInfo {
 // ---------------------------------------------------------------------------
 
 /// Single-part scanline EXR reader — port of `Imf::InputFile` dispatching to
-/// `Imf::ScanLineInputFile`, uncompressed path (Wave 4).
+/// `Imf::ScanLineInputFile`.
 ///
 /// Construct with [`InputFile::new`](crate::scanline::InputFile::new) (validates magic + version, reads the
 /// header and the line-offset table), describe the destination pixels with
@@ -117,8 +113,7 @@ struct InSliceInfo {
 /// The reader borrows the caller's [`IStream`] for its whole lifetime.
 pub struct ScanLineInputFile<'a, S = &'a mut dyn IStream> {
     /// The input stream, addressed through `DerefMut<Target = dyn IStream>`
-    /// (the C++ `_streamData->is`) -- queue item 5 (round-4, "not optional"):
-    /// generic over the stream HOLDER, the same split
+    /// (the C++ `_streamData->is`) -- generic over the stream HOLDER, the same split
     /// `multipart::MultiPartInputFile<'a, S>`/`tiled::TiledInputFile<'a, S>`
     /// already have, so `scanline::InputFile` (the front door this type
     /// backs) can own a path-opened stream.
@@ -127,7 +122,7 @@ pub struct ScanLineInputFile<'a, S = &'a mut dyn IStream> {
     /// Every field of C++ `ScanLineInputFile::Data` EXCEPT the stream itself
     /// — factored out so the same state can be held either OWNED (here) or
     /// BORROWED (see `scanline::input_file::PartReaderState::ScanLine`, the
-    /// read-side S-16 mirror of the writer's
+    /// read-side mirror of the writer's
     /// `OutputFileState`/`OutputPartWriter` split). See
     /// [`ScanLineInputFileState`]'s own docs.
     state: ScanLineInputFileState,
@@ -149,7 +144,7 @@ struct CachedChunk {
 /// reader's state, persistable independently of any particular borrow of the
 /// stream.
 ///
-/// Read-side S-16 (round-4 audit): confirmed OpenEXR v3.4.15
+/// OpenEXR v3.4.15
 /// `ImfMultiPartInputFile.cpp::getInputPart<T>` (byte-identical to v3.3.11,
 /// unchanged across that range) still caches one reader object per part
 /// (`_data->parts[n].file`, returned via `any_cast` on every subsequent
@@ -164,12 +159,10 @@ struct CachedChunk {
 /// cache at 16k-65k resolutions, not for any read-side correctness bug --
 /// read calls are already fully self-contained per `read_pixels(y1, y2,
 /// out)` call; unlike the writer there is no `currentScanLine`/
-/// partial-block state that a rebuild would silently reset). An earlier
-/// design iteration planned a dedicated `ScanLineInputPartReader` wrapper
-/// type for this borrowing view; it was superseded by the more general
-/// `PartReaderState` enum (which also covers tiled/deep parts) before ever
-/// being wired up, and was deleted as unreachable dead code (round-5 audit)
-/// -- C++'s own `InputPart` (`ImfInputPart.cpp`) confirms there is no
+/// partial-block state that a rebuild would silently reset). There is no
+/// dedicated scanline part-reader wrapper type: the general
+/// `PartReaderState` enum (which also covers tiled/deep parts) serves that
+/// role -- C++'s own `InputPart` (`ImfInputPart.cpp`) confirms there is no
 /// separate per-storage-kind "part reader" class in the reference either:
 /// `InputPart` holds a single raw `InputFile*` (`getInputPart<InputFile>`)
 /// and forwards every call to it verbatim, exactly like
@@ -242,7 +235,7 @@ pub(crate) struct ScanLineInputFileState {
     /// reads are byte-identical to the pre-multipart reader.
     part_number: Option<i32>,
 
-    /// W3.9 phase B: this file's captured thread count (C++ `numThreads`,
+    /// This file's captured thread count (C++ `numThreads`,
     /// captured once at construction — see [`crate::threading::ThreadCount`]).
     /// Defaults to the process-wide [`crate::threading::global_thread_count`]
     /// unless [`ScanLineInputFileState::from_part_mt`] was given an explicit
@@ -250,7 +243,7 @@ pub(crate) struct ScanLineInputFileState {
     num_threads: crate::threading::ThreadCount,
 
     /// The codec (C++ `_data->_compression`) — kept alongside `compressor` so
-    /// the parallel path (§1.2.5) can build a fresh per-worker codec instance
+    /// the parallel path can build a fresh per-worker codec instance
     /// via [`new_compressor`] (each worker owns one; codecs are not `Sync`).
     compression: crate::attr::Compression,
 
@@ -297,7 +290,7 @@ where
     }
 
     /// Same as [`Self::from_part`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::from_part`]).
+    /// override (`None` behaves exactly like [`Self::from_part`]).
     pub fn from_part_mt(
         stream: S,
         header: Header,
@@ -322,13 +315,12 @@ where
         self.state.line_offsets()
     }
 
-    /// Alloc audit C3 proof-of-reuse test hook: drive `fetch_chunk` with a
+    /// Proof-of-reuse test hook: drive `fetch_chunk` with a
     /// caller-owned pool, immediately give the buffer back, and report its
     /// capacity. `pub(crate)` (not module-private) so `scanline::input_file`
     /// (a sibling module) can reach it through `InputFile`'s own matching
     /// test-only wrapper for its `parallel_read_reuses_pool_buffer_across_chunks`
-    /// test — see that test's doc for why this replaced an earlier
-    /// global-counter-based version.
+    /// test — see that test's doc for why this is not a global counter.
     #[cfg(test)]
     pub(crate) fn debug_fetch_chunk_capacity(
         &mut self,
@@ -384,7 +376,7 @@ where
     }
 
     /// Read the chunk covering `first_scan_line` RAW (still-packed, no
-    /// decompression). W3.6, see
+    /// decompression). See
     /// [`ScanLineInputFileState::raw_pixel_data`] for the full doc.
     pub fn raw_pixel_data(&mut self, first_scan_line: i32) -> Result<(i32, Vec<u8>)> {
         self.state.raw_pixel_data(&mut *self.stream, first_scan_line)
@@ -396,7 +388,7 @@ impl ScanLineInputFileState {
     /// `MultiPartInputFile`'s per-part cache — touches no stream at all,
     /// since the header and line-offset table are already fully parsed by
     /// the time this runs (`multipart::input::read_prologue`). `num_threads`
-    /// is the W3.9 phase B per-file override (`None` = capture the current
+    /// is the per-file override (`None` = capture the current
     /// process-wide default).
     ///
     /// # Errors
@@ -445,7 +437,7 @@ impl ScanLineInputFileState {
         let max_bytes_per_line =
             bytes_per_line_table(min_y, max_y, width, channels, &mut bytes_per_line)?;
 
-        // S-10 (round-4 audit): C++ `Compressor::Compressor`
+        // C++ `Compressor::Compressor`
         // (`ImfCompressor.cpp:44-48`) throws `OverflowExc` for
         // `maxScanLineSize > INT_MAX` -- guard it here too, BEFORE sizing the
         // per-chunk scratch buffer below. Without this, a crafted header
@@ -475,7 +467,7 @@ impl ScanLineInputFileState {
             .ok_or_else(|| {
                 ExrError::Arg("Line buffer size overflow (scan line size * lines per chunk).".into())
             })?;
-        // S-10 residual: fallible allocation, not `vec![..]` -- see
+        // Fallible allocation, not `vec![..]` -- see
         // `try_filled_vec`'s docs.
         let line_buffer = try_filled_vec(line_buffer_size, 0u8)?;
 
@@ -714,7 +706,7 @@ impl ScanLineInputFileState {
         let first_chunk = ((min_scan - self.min_y) / self.lines_in_buffer) as usize;
         let last_chunk = ((max_scan - self.min_y) / self.lines_in_buffer) as usize;
 
-        // W3.9 phase B gate: parallel only when there is more than one chunk
+        // Gate: parallel only when there is more than one chunk
         // AND the captured thread count is `> 1` — 1:1 with C++'s
         // `nchunks > 1 && numThreads > 1` (`ImfScanLineInputFile.cpp:444`).
         if first_chunk < last_chunk && self.num_threads.is_parallel() {
@@ -875,15 +867,14 @@ impl ScanLineInputFileState {
 
     /// Fetch one chunk's leader-validated, still-possibly-compressed bytes
     /// from `stream` (calling thread only — this is the ONLY function in the
-    /// read pipeline that touches the stream; see design_r5.md §1.2.1
-    /// principle 1). Hands out an owned, independently-alive `RawChunk` per
+    /// read pipeline that touches the stream). Hands out an owned, independently-alive `RawChunk` per
     /// chunk in a window — required for the PARALLEL producer, which must
     /// keep a whole window of chunks alive simultaneously (see
     /// [`Self::fetch_chunk_into_line_buffer`] for the serial path's
     /// allocation-free alternative, which only ever has one chunk in
     /// flight).
     ///
-    /// Alloc audit C3: `data`'s buffer comes from `pool` (a
+    /// `data`'s buffer comes from `pool` (a
     /// [`crate::buf::BufPool`] shared with the decode worker across the
     /// `std::thread::scope` in [`Self::read_pixels`]/`_mt`) instead of a
     /// fresh `try_filled_vec` per call — the worker gives each `RawChunk`'s
@@ -904,11 +895,9 @@ impl ScanLineInputFileState {
     /// read loop's allocation-free counterpart to [`Self::fetch_chunk`].
     ///
     /// # Why this exists
-    /// Team-lead follow-up ("as C++ or better" wall-time comparison): the
-    /// serial loop used to call `fetch_chunk`, which allocates+zero-fills a
-    /// FRESH `Vec` for every chunk even though `line_buffer` — sized once at
-    /// construction to fit the largest possible chunk — sits right there
-    /// unused. Only the serial loop can safely reuse ONE persistent buffer
+    /// Calling `fetch_chunk` from the serial loop would take a buffer per
+    /// chunk even though `line_buffer` — sized once at construction to fit
+    /// the largest possible chunk — is available. Only the serial loop can safely reuse ONE persistent buffer
     /// this way: exactly one chunk is ever "in flight" (fetched, decoded,
     /// scattered, then the next chunk fetched), unlike the parallel
     /// producer, which must keep up to a whole window of chunks alive
@@ -929,18 +918,17 @@ impl ScanLineInputFileState {
         Ok((chunk_min_y, chunk_end_y, data_size))
     }
 
-    /// The parallel read body (§1.2.5, with read-ahead pipelining — see the
-    /// module-level note below). Returns `Ok(Some(()))` when it fully
+    /// The parallel read body (with read-ahead pipelining — see the
+    /// note below). Returns `Ok(Some(()))` when it fully
     /// serviced the request, or `Ok(None)` when the destination planner
     /// found the frame buffer's write intervals unsafely overlapping (an
     /// aliased/broadcast layout) and did nothing — the caller then falls
     /// back to the fully serial loop.
     ///
-    /// # Read-ahead pipelining (added after the milestone-1 report)
-    /// The first cut of this function read a whole window of `W =
-    /// num_threads.max_in_flight()` chunks serially, THEN decoded+scattered
-    /// it in parallel — decode-parallel-only, no I/O/decode overlap. A
-    /// dedicated measurement (`tests/w39b_io_vs_decode.rs`, 16384x8192, real
+    /// # Read-ahead pipelining
+    /// Reading a whole window of `W = num_threads.max_in_flight()` chunks
+    /// serially, THEN decoding+scattering it in parallel gives no I/O/decode
+    /// overlap. A dedicated measurement (`tests/w39b_io_vs_decode.rs`, 16384x8192, real
     /// on-disk file) showed the serial I/O share of the already-parallel
     /// (8-thread) wall time was 12-68% across NONE/RLE/ZIP/PIZ/DWAA —
     /// nowhere close to the "negligible" the original decode-bound-DWA
@@ -952,7 +940,7 @@ impl ScanLineInputFileState {
     ///
     /// **Why a dedicated OS thread instead of `rayon::Scope::spawn`/`in_place_scope`
     /// directly on our own pool:** `IStream`/`OStream` deliberately carry no
-    /// `Send` bound (design_r5.md §1.2.1 principle 1 — no ripple into ~40
+    /// `Send` bound (so the bound does not ripple into ~40
     /// `&mut dyn IStream` APIs). Any closure handed to `rayon::ThreadPool::install`
     /// (what `threading::run_on_global_pool` calls) must be `Send`, so a
     /// closure that touches `stream` can never be installed onto our pool.
@@ -961,9 +949,8 @@ impl ScanLineInputFileState {
     /// calling thread that owns this call.
     ///
     /// **One persistent decode-worker thread for the WHOLE call, not one per
-    /// window transition (team-lead follow-up on the milestone report).** The
-    /// first cut of this read-ahead spawned a fresh `Scope::spawn` thread for
-    /// every window transition. That is fine at the coarse end (large
+    /// window transition.** Spawning a fresh `Scope::spawn` thread for
+    /// every window transition is fine at the coarse end (large
     /// multiline chunks: few, expensive windows), but at the opposite
     /// extreme — NONE compression (1 scanline/chunk) at a large height —
     /// `tests/w39b_io_vs_decode.rs::many_small_windows_thread_spawn_overhead_65536_height_none`
@@ -971,7 +958,7 @@ impl ScanLineInputFileState {
     /// at 8 threads) for a single `read_pixels` call, and found `num_threads=8`
     /// **3x SLOWER** than `num_threads=0` (2025ms vs 684ms) — OS thread-spawn
     /// overhead (tens of microseconds each, but thousands of them) dwarfing
-    /// the near-zero decode+scatter work NONE chunks require. Fix: spawn the
+    /// the near-zero decode+scatter work NONE chunks require. So: spawn the
     /// decode-worker thread ONCE for the entire call; it loops receiving one
     /// window's `(raws, dest_batch)` at a time over a bounded (capacity-1)
     /// `mpsc::sync_channel`, decodes+scatters it (still via
@@ -987,7 +974,7 @@ impl ScanLineInputFileState {
     /// Errors are propagated with their window index so the reported error
     /// is always the LOWEST-indexed failing window regardless of which side
     /// (I/O on the producer, decode on the worker) detected it first
-    /// (design_r5.md §1.2.1 pt.4's determinism requirement) — a producer I/O
+    /// (a determinism requirement) — a producer I/O
     /// error for window `i` never overrides an already-reported worker
     /// decode error for an earlier window `j < i`, since the producer only
     /// ever gets that far after successfully sending every window `< i`.
@@ -1010,12 +997,10 @@ impl ScanLineInputFileState {
         for &offset_index in chunk_indices {
             let chunk_min_y = self.min_y + offset_index as i32 * self.lines_in_buffer;
             let chunk_end_y = (chunk_min_y + self.lines_in_buffer - 1).min(self.max_y);
-            // (alloc audit follow-up, 2026-09-24) `plan_disjoint` now takes a
-            // SET of ranges per chunk (deep's per-slice destinations need
-            // more than one); the flat scanline reader has exactly one
-            // contiguous destination per chunk, so this is a single-element
-            // `RangeSet` -- semantics unchanged from before the
-            // generalization.
+            // `plan_disjoint` takes a SET of ranges per chunk (deep's
+            // per-slice destinations need more than one); the flat scanline
+            // reader has exactly one contiguous destination per chunk and
+            // plane, so a single-plane read builds a single-element `RangeSet`.
             let mut set = crate::misc::RangeSet::new();
             if multi {
                 for p in 0..planes.len() {
@@ -1064,8 +1049,8 @@ impl ScanLineInputFileState {
             None => return Ok(None),
         };
 
-        // Byte-based window sizing (team-lead follow-up: "parallel must
-        // never be slower than serial") — see `ThreadCount::window_size_for_bytes`'s
+        // Byte-based window sizing (so parallel is never slower than
+        // serial) — see `ThreadCount::window_size_for_bytes`'s
         // doc. `max_bytes_per_line * lines_in_buffer` is an upper bound on
         // one chunk's raw/uncompressed size (exactly what the caller already
         // knows without reading the chunk).
@@ -1095,17 +1080,16 @@ impl ScanLineInputFileState {
         type WindowJob<'a, 'b> = (usize, Vec<RawChunk>, &'b mut [crate::misc::DestSet<'a>]);
         type WindowDone = (usize, Result<()>);
 
-        // Alloc audit C3: one pool, shared (by reference) between the
+        // One pool, shared (by reference) between the
         // producer (fetches into a pooled buffer) and the worker (gives the
         // buffer back once decode+scatter are done with it), across the
         // whole `thread::scope` below.
         let pool = crate::buf::BufPool::new();
-        // (alloc audit follow-up, 2026-09-25, team-lead measurement) Seed
-        // the pool with up to TWO windows' worth of right-sized buffers up
-        // front, matching this pipeline's own bound on outstanding chunks
+        // Seed the pool with up to TWO windows' worth of right-sized buffers
+        // up front, matching this pipeline's own bound on outstanding chunks
         // (the window currently draining on the worker + the next window
         // the producer fetches concurrently, gated by the channel's
-        // capacity-1 depth just below). Starting empty forced most of a
+        // capacity-1 depth just below). Starting empty would force most of a
         // large parallel read's chunks through a cold `BufPool::take` ->
         // `ensure_len` growth (a real, measured zero-fill cost that GREW
         // with thread count instead of shrinking -- see `BufPool::prewarm`'s
@@ -1116,12 +1100,11 @@ impl ScanLineInputFileState {
         pool.prewarm_for_pipeline(crate::buf::READ_WINDOWS_IN_FLIGHT, window, bytes_per_chunk, chunk_indices.len());
         let pool = &pool;
 
-        // (alloc audit follow-up, 2026-09-25) A real checkout/checkin
-        // `CodecPool`, shared the same way `pool` (the `BufPool`) is --
-        // see `Compressor`'s trait doc for why `map_init` alone was not
-        // achieving the reuse it looked like it was (deflate-fast's
-        // construction-count measurement: essentially one codec built per
-        // chunk regardless of thread count).
+        // A real checkout/checkin `CodecPool`, shared the same way `pool`
+        // (the `BufPool`) is -- see `Compressor`'s trait doc for why
+        // `map_init` alone does not achieve the reuse it appears to (a
+        // construction-count measurement showed essentially one codec built
+        // per chunk regardless of thread count).
         let codec_pool = crate::compressor::CodecPool::new();
         let codec_pool = &codec_pool;
 
@@ -1138,9 +1121,8 @@ impl ScanLineInputFileState {
                         let results: Vec<Result<()>> =
                             crate::threading::run_on_global_pool(count, move || {
                                 use rayon::prelude::*;
-                                // (alloc audit follow-up, 2026-09-25) `.map()`
-                                // over `CodecPool::checkout`/`checkin` per
-                                // item, replacing `map_init` (see
+                                // `.map()` over `CodecPool::checkout`/
+                                // `checkin` per item, not `map_init` (see
                                 // `Compressor`'s trait doc and
                                 // `CodecPool`'s own doc for why
                                 // `map_init` alone was not the "once per
@@ -1149,9 +1131,8 @@ impl ScanLineInputFileState {
                                 // given fixed compression/size/header
                                 // inputs) is `Err`, never checked in --
                                 // every item would hit the identical
-                                // error, matching the old cached-error
-                                // behavior.
-                                // Alloc audit C3: `into_par_iter()` (not
+                                // error.
+                                // `into_par_iter()` (not
                                 // `par_iter()`) so each closure invocation
                                 // OWNS its `RawChunk` and can give its
                                 // buffer back to `pool` once decode+scatter
@@ -1275,7 +1256,7 @@ impl ScanLineInputFileState {
             // Drain every completion the worker reported, keeping only the
             // LOWEST-indexed error — never let a later I/O failure on the
             // producer side override an earlier decode failure the worker
-            // already reported, or vice versa (design_r5.md §1.2.1 pt.4).
+            // already reported, or vice versa (deterministic error reporting).
             let mut worst: Option<(usize, ExrError)> = None;
             while let Ok((idx, outcome)) = done_rx.recv() {
                 if let Err(e) = outcome
@@ -1321,7 +1302,7 @@ impl ScanLineInputFileState {
     }
 
     /// Read the chunk covering `first_scan_line` RAW (still-packed, never
-    /// decompressed) — W3.6, port of `ScanLineInputFile::rawPixelData`
+    /// decompressed) — port of `ScanLineInputFile::rawPixelData`
     /// (`ImfScanLineInputFile.cpp:328-354`; C++'s two-parameter
     /// `char*&`/`int&` sizing dance is replaced by returning an owned
     /// `Vec<u8>` directly, same convention as
@@ -1410,11 +1391,11 @@ impl ScanLineInputFileState {
 }
 
 // ---------------------------------------------------------------------------
-// W3.9 phase B — pure per-chunk pipeline functions
+// Pure per-chunk pipeline functions
 // ---------------------------------------------------------------------------
 //
 // `fetch_chunk` (stream-only, above) / `decode_chunk` / `scatter_chunk` are
-// the three-function split from design_r5.md §1.2.5: the serial path in
+// a three-function split: the serial path in
 // `read_pixels` composes them in the same order the parallel path
 // (`read_pixels_parallel`) does, so both produce byte-identical `out` — a
 // "safe scalar source of truth" argument, the same shape used for SIMD
@@ -1439,8 +1420,9 @@ struct RawChunk {
 /// Mirrors the C core's `decompress_data` raw-vs-compressed rule: bytes are
 /// raw when `dataSize` already equals the expected uncompressed size
 /// (covers both NO_COMPRESSION and any codec's "no-shrink → store raw" chunk
-/// — W3.9 phase B relies on the SAME writer-side `stored_chunk` invariant
-/// documented in `crates/exr-core/CLAUDE.md`), otherwise the codec's
+/// — this relies on the writer-side `stored_chunk` invariant: a chunk is
+/// stored compressed only when that is strictly smaller than the raw bytes),
+/// otherwise the codec's
 /// `uncompress` is run and its output length is checked.
 fn decode_chunk<'r>(
     // `&mut Box<dyn Compressor>`, not `&mut dyn Compressor`: the latter,
@@ -1454,7 +1436,7 @@ fn decode_chunk<'r>(
     //
     // `&'r mut` (not a fresh, unrelated lifetime): unifying `compressor`'s
     // borrow with `data`'s lets the compressed-chunk path return
-    // `Cow::Borrowed(decoded)` (audit C1) instead of `decoded.to_vec()` —
+    // `Cow::Borrowed(decoded)` instead of `decoded.to_vec()` —
     // `Compressor::uncompress(&mut self, ..) -> Result<&[u8]>`'s output
     // borrows from `&mut self` by elision, so tying `compressor` to `'r`
     // makes that output's lifetime `'r` too, matching `Cow<'r, [u8]>`. Every
@@ -1482,13 +1464,12 @@ fn decode_chunk<'r>(
 
     if data.len() == expected_uncompressed {
         // Raw passthrough (matches NO_COMPRESSION *and* the codec "no-shrink
-        // -> store raw" case). BORROWS `data` — team-lead follow-up ("as
-        // C++ or better"): this used to `.clone()` unconditionally, paying a
-        // full memcpy per chunk for NONE (the single most common case this
-        // branch serves) even though `scatter_chunk` only ever needs a
-        // `&[u8]`. `Cow::Borrowed` costs nothing when the caller only reads
-        // it (every call site does); the compressed path below also borrows
-        // now (audit C1) — the codec's own persistent `out` buffer, not a
+        // -> store raw" case). BORROWS `data` rather than cloning it, which
+        // would pay a full memcpy per chunk for NONE (the single most common
+        // case this branch serves) even though `scatter_chunk` only ever
+        // needs a `&[u8]`. `Cow::Borrowed` costs nothing when the caller only
+        // reads it (every call site does); the compressed path below also
+        // borrows — the codec's own persistent `out` buffer, not a
         // fresh copy.
         return Ok(Cow::Borrowed(data));
     }
@@ -1507,9 +1488,9 @@ fn decode_chunk<'r>(
             decoded.len()
         )));
     }
-    // (audit C1) Borrow the codec's own output buffer instead of
-    // `decoded.to_vec()` — a real per-chunk allocation+copy this crate paid
-    // that C never does (C reads the decompressor's buffer in place).
+    // Borrow the codec's own output buffer instead of
+    // `decoded.to_vec()` — a per-chunk allocation+copy that C never pays
+    // (C reads the decompressor's buffer in place).
     Ok(Cow::Borrowed(decoded))
 }
 
@@ -1536,7 +1517,7 @@ fn scatter_chunk(
     dest: &mut [u8],
     dest_base: usize,
 ) -> Result<()> {
-    // W3.9 phase B follow-up (team-lead plan step 2): the packed same-type
+    // The packed same-type
     // fast path — see its own doc — only applies to a narrow, common shape
     // (every channel present, unconverted, unsampled, and tiling one
     // fully-packed interleaved pixel). `None` means it declined (falls
@@ -1768,8 +1749,8 @@ fn scatter_chunk_packed(
 
     Some((|| -> Result<()> {
         let mut read_offset = 0usize;
-        // Alloc audit C5: hoisted out of the scanline loop below (was a
-        // fresh `vec![0u8; ...]` per scanline) -- every byte of `combined`
+        // Hoisted out of the scanline loop below (not a fresh
+        // `vec![0u8; ...]` per scanline) -- every byte of `combined`
         // is written by the per-slice/per-pixel `copy_from_slice` loop each
         // iteration (the precondition already checked above guarantees the
         // slices tile `[0, pixel_size)` per pixel with no gaps or overlap,
@@ -1846,7 +1827,7 @@ fn scatter_fill_into(
         ));
     }
     let write_ptr = local_addr(write_ptr_i as usize, dest_base)?;
-    // S-11: count-driven, not address-driven — a broadcast fill slice
+    // Count-driven, not address-driven — a broadcast fill slice
     // (x_stride == 0, every pixel written to the SAME address) still needs
     // exactly `d_max_x - d_min_x + 1` iterations.
     let count = (d_max_x - d_min_x + 1).max(0) as usize;
@@ -1946,7 +1927,7 @@ fn chunk_write_interval(
 }
 
 // ---------------------------------------------------------------------------
-// Tests — write→read round-trip (the key correctness gate for Wave 4)
+// Tests — write→read round-trip (the key correctness gate)
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -1960,7 +1941,7 @@ mod tests {
     use crate::scanline::OutputFile;
     use imath_rs::{Half, V2f};
 
-    /// S-10 (round-4 audit): a crafted header (huge `dataWindow` width, a
+    /// A crafted header (huge `dataWindow` width, a
     /// multi-line codec) must error at construction, never request a
     /// hundreds-of-gigabytes allocation (`handle_alloc_error` aborts the
     /// whole process -- not something `Result` can catch, so the only fix is
@@ -2097,10 +2078,10 @@ mod tests {
         round_trip(LineOrder::DecreasingY);
     }
 
-    /// W3.9 phase B: read the SAME multi-chunk (NO_COMPRESSION = 1
+    /// Read the SAME multi-chunk (NO_COMPRESSION = 1
     /// line/chunk) file with `num_threads` in {0, 1, 2, 3, 8, 17} and assert
     /// every thread count produces byte-identical `out` — the read-side half
-    /// of design_r5.md §1.3's determinism matrix. 64 lines gives 64 chunks,
+    /// of the thread-count determinism matrix. 64 lines gives 64 chunks,
     /// comfortably more than any tested thread count, so the parallel gate
     /// (`nchunks > 1 && numThreads > 1`) and multiple windows are exercised.
     #[test]
@@ -2130,23 +2111,17 @@ mod tests {
         }
     }
 
-    /// Alloc audit C3 proof of reuse (scanline INPUT).
+    /// Proof of buffer reuse (scanline INPUT).
     ///
-    /// FINDING (worth recording): the first version of this test opened the
-    /// file through the real parallel pipeline and asserted a bound on the
-    /// PROCESS-WIDE `crate::buf::fresh_allocations()` counter (reset before
-    /// the read, read after) -- the same instrumentation
-    /// `tiled::input::tests::serial_read_reuses_pool_buffer_across_tiles`
-    /// originally used too. Run alone it passed; under the FULL `cargo test
-    /// -p exr-core --release --lib` suite (`cargo test`'s default
-    /// same-process, many-threads-at-once execution) it failed
-    /// intermittently with counts in the hundreds (467 in one run) --
-    /// swamped by OTHER, unrelated tests' concurrent `BufPool` traffic on
-    /// the SAME global counter. A global counter cannot give a meaningful
-    /// bound when hundreds of other pool-using tests run alongside it; see
-    /// the tiled test's own doc for the parallel finding.
+    /// Why not a bound on a PROCESS-WIDE allocation counter: under the full
+    /// `cargo test -p exr-core --release --lib` suite (`cargo test`'s default
+    /// same-process, many-threads-at-once execution) such a counter is
+    /// swamped by OTHER, unrelated tests' concurrent `BufPool` traffic
+    /// (counts in the hundreds, 467 in one run), so it cannot give a
+    /// meaningful bound; see
+    /// `tiled::input::tests::serial_read_reuses_pool_buffer_across_tiles`.
     ///
-    /// Fixed the same way: test the [`crate::buf::BufPool`] mechanism
+    /// Instead: test the [`crate::buf::BufPool`] mechanism
     /// directly with a pool THIS TEST OWNS, via
     /// `InputFile::debug_fetch_chunk_capacity` (a `#[cfg(test)]` hook that
     /// forwards to `ScanLineInputFile::debug_fetch_chunk_capacity`, which
@@ -2188,14 +2163,14 @@ mod tests {
         );
     }
 
-    /// Mutation-testing gap fix (round-5 audit): the parallel/serial read
+    /// The parallel/serial read
     /// dispatch gate (`chunk_indices.len() > 1 && self.num_threads.
     /// is_parallel()`, matching C++'s `nchunks > 1 && numThreads > 1`,
     /// `ImfScanLineInputFile.cpp:444`) produces byte-identical output no
     /// matter which branch runs (`read_pixels_parallel` degrades
     /// gracefully for 0/1 chunks), so no output-correctness assertion can
     /// kill its `&&`/`>` mutants -- this test observes which branch
-    /// actually executed via the D-10-style call counter instead (see
+    /// actually executed via a call counter instead (see
     /// `Probe::ScanReadParallel`). `num_threads = 0` must NEVER
     /// enter the parallel path at all, matching the explicit C++ contract
     /// that `numThreads == 0` means "the calling thread only" -- an
@@ -2246,7 +2221,7 @@ mod tests {
 
     /// Same matrix over a ZIP file (16 lines/chunk, `singleScan`-style reuse
     /// of the compressor across chunks in a window would corrupt bytes if a
-    /// codec carried cross-call state — this is the design_r5.md §1.5 risk
+    /// codec carried cross-call state — this is the codec-reuse risk
     /// check for the read side).
     #[test]
     fn parallel_read_zip_multiline_chunks_match_across_thread_counts() {
@@ -2275,7 +2250,7 @@ mod tests {
         }
     }
 
-    /// U4/U4b: after `prewarm_for_pipeline` every `BufPool::take` in the
+    /// After `prewarm_for_pipeline` every `BufPool::take` in the
     /// parallel scanline writer and reader must hit (the reader holds 3
     /// windows in flight, the writer 1).
     #[test]
@@ -2304,16 +2279,15 @@ mod tests {
             inf.read_pixels(0, h - 1, &mut readback).unwrap();
             assert_eq!(readback, pixels, "num_threads={n}: mismatch");
             assert_eq!(misses(), 0, "num_threads={n}: parallel scanline read missed the prewarmed pool");
-            // U6: the read-ahead pipeline must actually pipeline, i.e. hand
+            // The read-ahead pipeline must actually pipeline, i.e. hand
             // the worker several windows rather than one that covers the file.
             assert!(crate::probe::get(crate::probe::Probe::ReadAheadWindow) >= 2, "num_threads={n}: read-ahead ran a single window");
         }
     }
 
-    /// (alloc audit follow-up, 2026-09-25, team-lead's CodecPool request)
-    /// deflate-fast measured `map_init` constructing a FRESH codec for
+    /// `map_init` was measured constructing a FRESH codec for
     /// essentially EVERY chunk (256/256) at every thread count, not "once
-    /// per job split" as the surrounding code used to claim. With a real
+    /// per job split" as it appears to. With a real
     /// `CodecPool`, the number of codecs actually CONSTRUCTED for the whole
     /// read must be bounded by roughly the thread count (plus a small
     /// margin for the pool's own warm-up), not by the chunk count -- 256
@@ -2354,7 +2328,7 @@ mod tests {
     /// into the SAME row) forces [`crate::misc::plan_disjoint`] to report
     /// overlap, so the parallel path must fall back to a fully serial
     /// scatter — and still produce the same bytes as `num_threads = 0`
-    /// (design_r5.md §1.3.2's "aliased frame buffer" case).
+    /// (the "aliased frame buffer" case).
     #[test]
     fn parallel_read_aliased_frame_buffer_falls_back_and_matches_serial() {
         let (w, h) = (6i32, 12i32);
@@ -2554,7 +2528,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // W1.1 / W1.2 — offset-table hardening + chunk identity
+    // Offset-table hardening + chunk identity
     // -----------------------------------------------------------------------
 
     /// `(table_byte_position, entry_count)` of a written file's offset table.
@@ -2568,9 +2542,7 @@ mod tests {
         (first_chunk - count * 8, count)
     }
 
-    /// S-08 (round-4 audit, team-lead policy (b), 2026-09-22): renamed from
-    /// `offset_table_entry_count_is_capped`, and REVERSED to match C++'s
-    /// lazy semantics -- C++ `InputFile`/`MultiPartInputFile` constructors
+    /// Matches C++'s lazy semantics -- C++ `InputFile`/`MultiPartInputFile` constructors
     /// NEVER touch the chunk-offset table at all (`extract_chunk_table` runs
     /// only from `isComplete()`/an actual chunk read), and every one of its
     /// validation failures (including this one -- a `chunkCount` over the
@@ -2601,9 +2573,7 @@ mod tests {
         );
     }
 
-    /// S-08 (round-4 audit, team-lead policy (b), 2026-09-22): renamed from
-    /// `offset_table_bounded_by_file_size`, and REVERSED for the same reason
-    /// as the test above -- C++ never rejects a file at open time merely
+    /// Same lazy semantics as the test above -- C++ never rejects a file at open time merely
     /// because its declared chunk-offset table doesn't fit the file; that
     /// failure is deferred to `isComplete() == false` / a real read. The
     /// crafted-file case (a tiny file whose header declares far more chunks
@@ -2822,7 +2792,7 @@ crate::probe::reset(crate::probe::Probe::ScanReadParallel);
         }
     }
 
-    /// RV_X3c E-1/E-2: a slice that addresses the WRONG plane, or rows that overlap, is refused (or at
+    /// A slice that addresses the WRONG plane, or rows that overlap, is refused (or at
     /// worst written in place) identically at every thread count - never written into another plane,
     /// never a panic.
     #[test]
@@ -2960,8 +2930,7 @@ crate::probe::reset(crate::probe::Probe::ScanReadParallel);
         assert_eq!(readback, pixels, "RLE raw-store round-trip mismatch");
     }
 
-    /// Regression (baseline "PXR24 HALF byte-exactness ... 7×17 ... 16-line chunk
-    /// plus 1-line partial chunk"): PXR24 is LOSSLESS for HALF, so a HALF-only image
+    /// Regression: PXR24 is LOSSLESS for HALF, so a HALF-only image
     /// whose height is NOT a multiple of 16 (17 → a full 16-row chunk plus a 1-row
     /// partial trailing chunk) must round-trip bit-exact through the scanline
     /// writer/reader.  Runs both a compressible gradient (exercises the real
@@ -3055,8 +3024,7 @@ crate::probe::reset(crate::probe::Probe::ScanReadParallel);
         });
     }
 
-    /// W3.9 phase B, "as C++ or better" follow-up (team-lead point 2): an
-    /// ISOLATED `scatter_chunk` throughput measurement — synthetic, already
+    /// An ISOLATED `scatter_chunk` throughput measurement — synthetic, already
     /// XDR-encoded pixel data in memory, NO stream I/O, NO decode/decompress
     /// at all — to settle whether the generic interleaved-per-sample scatter
     /// loop (as opposed to C++ 3.4.15's `unpack.c` specialized fast-path
@@ -3081,7 +3049,7 @@ crate::probe::reset(crate::probe::Probe::ScanReadParallel);
 
         // Interleaved RGBA(half,half,half,float) destination — the same
         // layout `w39b_cpp_comparison.rs`'s `make_pixels` uses, confirmed
-        // identical to `oracle.cpp`'s `bench_io` (team-lead point 1).
+        // identical to `oracle.cpp`'s `bench_io`.
         let slices = vec![
             InSliceInfo { buffer: 0, local_base: 0,
                 type_fb: PixelType::Half, type_file: PixelType::Half,
@@ -3147,8 +3115,7 @@ crate::probe::reset(crate::probe::Probe::ScanReadParallel);
     }
 
     // -----------------------------------------------------------------------
-    // W3.9 phase B follow-up (team-lead plan step 2): `scatter_chunk_packed`
-    // equivalence harness — the packed fast path must be byte-identical to
+    // `scatter_chunk_packed` equivalence harness — the packed fast path must be byte-identical to
     // `scatter_chunk_generic` (the source of truth) for every layout it
     // claims to handle, checked BEFORE it is trusted (it is already wired
     // into `scatter_chunk`, but only ever applies when its own precondition

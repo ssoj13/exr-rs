@@ -1,4 +1,4 @@
-# deflate-rs ⟷ C libdeflate byte-exact golden parity (Phase 2, Wave 6)
+# deflate-rs ⟷ C libdeflate byte-exact golden parity
 
 This directory proves `deflate-rs`'s **zlib compressor** is **byte-identical** to
 the real C **libdeflate** (vcpkg, v1.26) for every compression level 1..=12 over

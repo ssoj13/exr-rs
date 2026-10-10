@@ -1,4 +1,4 @@
-//! Tile grid of the display pyramid (`.bughunt/design_tiling.md` §3.1): pure
+//! Tile grid of the display pyramid: pure
 //! geometry, no GPU and no pixels.
 //!
 //! Coordinates are data-window pixels with the data window's `min` at `(0, 0)`.

@@ -14,7 +14,7 @@
 //! # N/A in safe Rust (documented here, not ported)
 //! - `MATCHFINDER_MEM_ALIGNMENT` (32 bytes, needed by AVX-2 SIMD): heap allocations
 //!   via `Vec`/`Box` do not require explicit alignment annotations in safe Rust.
-//!   No SIMD tiers are implemented in this wave; revisit in a dedicated SIMD phase.
+//!   The SIMD init/rebase tiers use unaligned loads, so alignment only affects speed.
 //! - `MATCHFINDER_SIZE_ALIGNMENT` (1024 bytes): same reason — the scalar `matchfinder_init`
 //!   and `matchfinder_rebase` iterate over every element and do not need size alignment.
 //! - `MATCHFINDER_ALIGNED` attribute: no raw-pointer structs; `Vec` fields are heap-allocated.
@@ -56,7 +56,7 @@ pub const MATCHFINDER_INITVAL: MfPos = i16::MIN;
 
 /// Byte alignment of every matchfinder table, C's `MATCHFINDER_MEM_ALIGNMENT`
 /// (`matchfinder_common.h:66`). The SIMD init/rebase use unaligned loads and
-/// stores, so this is for speed only (measured in a8fefb6), not soundness.
+/// stores, so this is for speed only (measured), not soundness.
 const TAB_ALIGN: usize = 32;
 /// Extra entries allocated so a `TAB_ALIGN`-aligned start always fits.
 const TAB_PAD: usize = TAB_ALIGN / core::mem::size_of::<MfPos>();
@@ -258,19 +258,20 @@ pub fn load_u24_unaligned(p: &[u8]) -> u32 {
 /// We additionally clamp to the true buffer size as a safety measure.
 #[inline]
 pub fn lz_extend(in_buf: &[u8], str_pos: usize, match_pos: usize, start_len: u32, max_len: u32) -> u32 {
-    // F13 (plan4): C's `lz_extend` (matchfinder_common.h) uses `max_len`
+    // C's `lz_extend` (matchfinder_common.h) uses `max_len`
     // directly with no bounds clamp at all -- it trusts the caller to have
     // already guaranteed `str_pos + max_len <= in_buf.len()` and `match_pos +
     // max_len <= in_buf.len()` (every real caller does, via
     // `adjust_max_and_nice_len`/`BT_MATCHFINDER_REQUIRED_NBYTES`-style
-    // preconditions, the same invariant chain established for F6/F12). This
+    // preconditions, the same invariant chain the matchfinders rely on). This
     // port used to silently clamp `max` to `in_buf.len() - str_pos` /
     // `in_buf.len() - match_pos` instead -- masking a caller bug (a `max_len`
     // that actually would run past the buffer) by quietly returning a
     // shorter, still-technically-safe match length instead of surfacing the
     // violation. `debug_assert!` the precondition and use `max_len` directly,
     // matching C exactly and the project's "assert, don't silently degrade"
-    // rule for latent invariant violations (same fix shape as F12).
+    // rule for latent invariant violations (same fix shape as
+    // `bt_matchfinder`'s `can_extend`).
     debug_assert!(
         str_pos + max_len as usize <= in_buf.len() && match_pos + max_len as usize <= in_buf.len(),
         "lz_extend: max_len ({max_len}) runs past the buffer end from str_pos ({str_pos}) or \
@@ -454,12 +455,11 @@ mod tests {
     #[test]
     fn lz_extend_partial_match() {
         // "aabbaabb" — str=0 "aabbaabb", match=4 "aabb": match 4 then end.
-        // F13: max_len must respect BOTH str_pos and match_pos reaching the
+        // max_len must respect BOTH str_pos and match_pos reaching the
         // buffer end (`min(buf.len() - str_pos, buf.len() - match_pos)` =
-        // `min(8, 4)` = 4) -- the old max_len=8 here violated that
-        // precondition and was only "safe" because of the clamp F13 removed
-        // (this test predates F13 and needed the same fix bt_matchfinder's
-        // tests needed for the analogous F12 precondition).
+        // `min(8, 4)` = 4) -- a max_len of 8 here would violate that
+        // precondition (`lz_extend` no longer clamps it; bt_matchfinder's
+        // tests follow the analogous precondition).
         let buf = b"aabbaabb";
         assert_eq!(lz_extend(buf, 0, 4, 0, 4), 4);
     }

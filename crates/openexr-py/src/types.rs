@@ -241,7 +241,7 @@ impl PreviewRgba {
 
 /// Thumbnail version of the image. `pixels` is an `(H, W, 4)` uint8 numpy array
 /// (R,G,B,A). (The reference uses a structured `PreviewRgba` array; the flat uint8
-/// form is equivalent data and easier to consume — see CLAUDE.md.)
+/// form is equivalent data and easier to consume.)
 #[pyclass(module = "OpenEXR")]
 pub struct PreviewImage {
     #[pyo3(get, set)]
@@ -258,8 +258,8 @@ impl PreviewImage {
     /// `test_preview_image`'s `u4`-field array; `.astype("uint8")` per field
     /// reproduces that truncation). `.pixels` is ALWAYS normalised to a `(H, W)`
     /// structured array with `uint8` `r`/`g`/`b`/`a` fields — matching the
-    /// reference's own `array_t<PreviewRgba>` shape/dtype exactly (team-lead
-    /// correction 2026-09-23: an earlier round used a flat `(H,W,4)` uint8 array,
+    /// reference's own `array_t<PreviewRgba>` shape/dtype exactly (an
+    /// earlier version used a flat `(H,W,4)` uint8 array,
     /// which round-trips internally but fails official `preview_pixels_equal`
     /// shape/dtype comparisons against the real reference layout).
     #[new]
@@ -432,7 +432,7 @@ fn isTiledOpenExrFile(path: &str) -> bool {
 // ── Bytes ────────────────────────────────────────────────────────────────────────
 
 /// Arbitrary binary data with an optional MIME-style type hint (OpenEXR 3.4's
-/// `"bytes"` attribute, C-11 — a *known*, registered type, unlike `OpaqueAttribute`'s
+/// `"bytes"` attribute — a *known*, registered type, unlike `OpaqueAttribute`'s
 /// "unrecognised type" catch-all). Wraps `exr_core::attr::Bytes` 1:1.
 ///
 /// Reference: `openexr/src/wrappers/python/PyOpenEXR.cpp` (v3.4.15,

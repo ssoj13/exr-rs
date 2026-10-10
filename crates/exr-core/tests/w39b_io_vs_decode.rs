@@ -1,7 +1,6 @@
-//! W3.9 phase B — read-side I/O share measurement (team-lead follow-up on the
-//! milestone-1 report): before accepting the "decode-parallel-only, no
-//! read-ahead pipelining" simplification (design_r5.md §1.2.5's double-
-//! buffered A/B window is NOT implemented — see `.bughunt/progress_w39b.md`),
+//! Read-side I/O share measurement: before accepting a "decode-parallel-only,
+//! no read-ahead pipelining" simplification (no double-buffered A/B window
+//! overlapping the I/O of one window with the decode of the previous),
 //! measure how much of the real, whole-file, PARALLEL read wall time is I/O
 //! (seek+read off the stream, always serial, on the calling thread) versus
 //! decode+scatter (parallelized), at 16k-ish widths, across codecs, on a
@@ -53,7 +52,7 @@ use imath_rs::{Half, V2f};
 
 const WIDTH: i32 = 16384;
 /// A genuine 16k-class image (16384x8192, ~1.3 GB uncompressed per file) —
-/// team-lead follow-up on the milestone report: 2048x2048 does not answer
+/// 2048x2048 does not answer
 /// "is read-ahead needed at the sizes this repo targets" (16k-65k).
 const HEIGHT: i32 = 8192;
 const PARALLEL_THREADS: i32 = 8;
@@ -216,7 +215,7 @@ fn io_share_at_16k_width_across_codecs() {
     run_one("HTJ2K256", Compression::Htj2k256);
 }
 
-/// Team-lead follow-up: the read-ahead pipelining implemented for
+/// The read-ahead pipelining implemented for
 /// `read_pixels_parallel` (`scanline/input.rs`) spawns one `std::thread::scope`
 /// worker PER WINDOW TRANSITION (`window = max_in_flight() = 2*num_threads`).
 /// At the many-small-chunks extreme — NONE compression (1 scanline/chunk) at

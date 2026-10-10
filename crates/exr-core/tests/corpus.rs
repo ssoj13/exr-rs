@@ -1,4 +1,5 @@
-//! Phase 11 — **corpus verification runner** (W11-1 vendored + W11-2 official).
+//! **Corpus verification runner** (OpenEXR `src/test` images + official
+//! `openexr-images`).
 //!
 //! The real-world confidence gate: run REAL C++-written EXR files through *our*
 //! readers and assert that
@@ -16,11 +17,11 @@
 //!
 //! # Corpora (two roots, scanned together)
 //! Both come from the test image set (`exr-test-data`); the test runs with `--features test-data`.
-//! 1. **Vendored** (W11-1): OpenEXR's `src/test` images, v3.4.15 (overridable via
+//! 1. **Vendored**: OpenEXR's `src/test` images, v3.4.15 (overridable via
 //!    `EXR_CORPUS_DIR`).  Mix of valid codec images + deliberately corrupt
 //!    fixtures; each file's expected outcome comes from the C++ test that
 //!    consumes it (see [`expected_outcome`]).
-//! 2. **Official `openexr-images`** (W11-2), e38ffb0.  **Every** `.exr` here is a VALID real image (the corrupt
+//! 2. **Official `openexr-images`**, e38ffb0.  **Every** `.exr` here is a VALID real image (the corrupt
 //!    fuzzer fixtures in its `Damaged/` dir carry no `.exr` extension and are
 //!    therefore not collected) → expected outcome **Valid**.  These exercise
 //!    paths the vendored set never touches: multi-resolution MIP/RIP tiled,
@@ -28,7 +29,7 @@
 //!    multipart), and **luminance-chroma subsampled** channels (`xSampling` /
 //!    `ySampling` != 1) — see the planar frame-buffer builder below.
 //!
-//! # Subsampling (the W11-2 edge case)
+//! # Subsampling (the `openexr-images` edge case)
 //! Six openexr-images files store chroma at half resolution
 //! (`BY`/`RY` channels `xSampling==ySampling==2`, `Y` at 1×1):
 //! `Chromaticities/{Rec709_YC,XYZ_YC}.exr`,
@@ -58,9 +59,9 @@ use exr_core::{MemIStream, MemOStream, MultiPartInputFile, StdIfStream};
 use imath_rs::Box2i;
 
 // ---------------------------------------------------------------------------
-// Small reader-agnostic traits (round 4 continuation, container caching):
+// Small reader-agnostic traits (container caching):
 // `MultiPartInputFile::{tiled_input_part, deep_scanline_input_part,
-// deep_tiled_input_part}` now return borrowing S-16 cache views
+// deep_tiled_input_part}` return borrowing views over cached per-part state
 // (`TiledInputPartReader` / `DeepScanLineInputPartReader` /
 // `DeepTiledInputPartReader`) instead of a freshly-built owned `TiledInputFile`
 // / `DeepScanLineInputFile` / `DeepTiledInputFile`. These traits let
@@ -477,13 +478,13 @@ fn detect_kind(path: &Path) -> Kind {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Planar (per-channel) frame buffer — handles subsampling (W11-2)
+// Planar (per-channel) frame buffer — handles subsampling
 //
 // The vendored (all-1×1) corpus and the openexr-images corpus both use this
 // single planar builder: for full-resolution channels it degenerates to a
 // per-channel contiguous plane, and for subsampled chroma channels it sizes
 // each region by its true (divp-reduced) extent.  One layout path, no special
-// cases — the unified single-point-of-responsibility per CLAUDE.md.
+// cases.
 // ---------------------------------------------------------------------------
 
 /// One channel's planar placement: its byte region `[base, base+len)` inside the

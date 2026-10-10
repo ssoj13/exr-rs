@@ -3,14 +3,13 @@
 //! and `Compressor::{compress,uncompress}`), not the crate-private unit-test
 //! helpers — so these keep working across internal refactors of
 //! `compressor/dwa/mod.rs` (e.g. `classify_channels`'s signature changing to
-//! `Result<Classification>`, round 4/5).
+//! `Result<Classification>`).
 //!
 //! Confirmed real gaps: `cargo-mutants` missed these mutants against BOTH the
 //! crate's internal unit tests AND the full `parity_exr` oracle-comparison
-//! suite (two independent passes, both scoped to the round-4 diff). Every
+//! suite (two independent passes). Every
 //! test here was verified by hand-applying the exact confirmed mutation in an
-//! isolated clone (`C:\Users\joss1\AppData\Local\Temp\claude\mut-clone-chunk`,
-//! never the shared working tree) and confirming the test fails — not by
+//! isolated clone (never the shared working tree) and confirming the test fails — not by
 //! inspection alone.
 //!
 //! `validate_dwa_size`'s contract (cited in its own doc comment) is a direct

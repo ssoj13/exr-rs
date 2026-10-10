@@ -1,4 +1,4 @@
-//! W2.7 oracle-verified boundary test: HALF->UINT and FLOAT->UINT
+//! Oracle-verified boundary test: HALF->UINT and FLOAT->UINT
 //! conversion at the clamp boundaries (negative, NaN, +/-infinity, overflow),
 //! checked against a real C++ OpenEXR 3.4 oracle run (`tests/parity/
 //! oracle.cpp`'s new `read-as-uint` mode: every channel read into a UINT
@@ -7,7 +7,7 @@
 //! `float_to_uint` conversion paths directly -- the mirror of
 //! `s01_half_boundary.rs`'s ->HALF coverage, completing another pair of
 //! cells in the pixel-type conversion matrix `misc::copy_into_frame_buffer`
-//! implements (r3_tests.md W2.7 "pixel-type conversion on read").
+//! implements on read.
 //!
 //! Same pattern as `s01_half_boundary.rs`: the C++ oracle output is a
 //! COMMITTED fixture (captured from a real `oracle.exe read-as-uint` run

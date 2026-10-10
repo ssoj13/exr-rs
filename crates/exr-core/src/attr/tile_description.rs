@@ -148,7 +148,7 @@ impl AttrValue for TileDescription {
         //   unsigned char levelMode = tmp & 0x0f; if (levelMode > 3) levelMode = 3;
         //   unsigned char levelRoundingMode = (tmp >> 4) & 0x0f; if (> 2) = 2;
         //
-        // C-22 / 3.4 core `check_populate_tiles`
+        // 3.4 core `check_populate_tiles`
         // (`OpenEXRCore/parse_header.c:1586-1603`) instead REJECTS the whole
         // attribute outright when `lev >= EXR_TILE_LAST_TYPE(3)` or
         // `rnd >= EXR_TILE_ROUND_LAST_TYPE(2)` — non-strict then drops it —
@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(back, td);
     }
 
-    /// C-22 — 3.4 core `check_populate_tiles` REJECTS an out-of-range mode or
+    /// 3.4 core `check_populate_tiles` REJECTS an out-of-range mode or
     /// rounding nibble outright (the non-strict header reader then drops the
     /// whole `tiles` attribute); 3.3.11 used to silently clamp it to
     /// `Invalid` instead, which this port matched until this fix.

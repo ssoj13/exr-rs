@@ -342,7 +342,7 @@ fn extreme_pixels_are_identical() {
 /// operand order (`exr_core::sse`), so the output is byte-identical to the C++ in release too.
 ///
 /// KNOWN GAP (pinned): a NaN radius additionally reaches a NaN-to-`int` conversion in the C++
-/// (undefined; `INT_MIN` on x86), whose result depends on the compiler (openexr_bug.md T7); ours
+/// (undefined; `INT_MIN` on x86), whose result depends on the compiler; ours
 /// differs in those bytes. The test fails once they agree, so the entry must then be removed.
 #[test]
 #[ignore = "needs the C++ tools: cargo run -p xtask -- parity-tools"]

@@ -152,7 +152,7 @@ std_attribute!("adoptedNeutral", V2f, add_adopted_neutral, has_adopted_neutral, 
 // Deprecated in OpenEXR v3.2 but still defined/read; ported for round-trip fidelity.
 std_attribute!("renderingTransform", ExrString, add_rendering_transform, has_rendering_transform, rendering_transform, rendering_transform_mut);
 std_attribute!("lookModTransform", ExrString, add_look_mod_transform, has_look_mod_transform, look_mod_transform, look_mod_transform_mut);
-// C-12: `colorInteropID` — OpenEXR 3.4 addition
+// `colorInteropID` — OpenEXR 3.4 addition
 // (<https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXR/ImfStandardAttributes.cpp#L136>),
 // an OpenColorIO Interop Config identifier.
 std_attribute!("colorInteropID", ExrString, add_color_interop_id, has_color_interop_id, color_interop_id, color_interop_id_mut);
@@ -201,7 +201,7 @@ mod tests {
         assert_eq!(h.comments().unwrap().as_str(), Some("rendered overnight"));
     }
 
-    /// C-12 — `colorInteropID` round-trips through the standard accessors.
+    /// `colorInteropID` round-trips through the standard accessors.
     #[test]
     fn add_has_get_color_interop_id() {
         let mut h = Header::new();

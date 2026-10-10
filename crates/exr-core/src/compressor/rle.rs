@@ -129,8 +129,8 @@ impl Compressor for RleCompressor {
         let srcb = data.len();
 
         // C++ `internal_exr_apply_rle`: reorder_and_predict(scratch, packed, srcb).
-        // `reorder_and_predict` fully overwrites all `srcb` bytes (alloc audit
-        // E4), so `ensure_len` (grow/truncate, no unconditional zero-fill)
+        // `reorder_and_predict` fully overwrites all `srcb` bytes,
+        // so `ensure_len` (grow/truncate, no unconditional zero-fill)
         // is sound -- see `compressor::ensure_len`'s doc.
         super::ensure_len(&mut self.scratch, srcb);
         reorder_and_predict(&mut self.scratch, data);
@@ -169,14 +169,14 @@ impl Compressor for RleCompressor {
         // unpredict_and_reorder(out, scratch, decoded_len). RLE is
         // self-describing (`rle_decompress` runs until `data` is exhausted),
         // so unlike ZIP/PXR24 it never NEEDED `expected_len` to size its
-        // output -- kept unused here (alloc audit C6: the trait grew this
+        // output -- kept unused here (the trait has this
         // parameter uniformly so a caller doesn't need to know per-codec
         // which ones need it).
         self.scratch.clear();
         rle_decompress(data, &mut self.scratch)?;
 
-        // `unpredict_and_reorder` fully overwrites all `outsz` bytes (alloc
-        // audit E4) -- same argument as the compress side above.
+        // `unpredict_and_reorder` fully overwrites all `outsz` bytes
+        // -- same argument as the compress side above.
         let outsz = self.scratch.len();
         super::ensure_len(&mut self.out, outsz);
         unpredict_and_reorder(&mut self.out, &mut self.scratch);

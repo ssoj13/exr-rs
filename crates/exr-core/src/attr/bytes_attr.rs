@@ -1,5 +1,5 @@
 //! Port of OpenEXR `ImfBytesAttribute.h/.cpp` — the `"bytes"` attribute
-//! (new in OpenEXR 3.4 / C-11).
+//! (new in OpenEXR 3.4).
 //!
 //! Unlike [`OpaqueAttribute`][crate::attr::OpaqueAttribute], which is the
 //! reader's catch-all for a type name it does not recognise, `bytes` is a
@@ -144,7 +144,7 @@ mod tests {
         assert_eq!(bytes, vec![2, 0, 0, 0, b'a', b'b', 9, 9]);
     }
 
-    /// C-11 — a declared size too small for `4 + hintLength` is rejected.
+    /// A declared size too small for `4 + hintLength` is rejected.
     #[test]
     fn read_value_rejects_size_too_small_for_hint() {
         let mut raw = Vec::new();
@@ -155,7 +155,7 @@ mod tests {
     }
 
     /// A round-trip through the `TypedAttribute<Bytes>` alias, exercised via
-    /// the registry, since `BytesAttribute` is now a registered type (C-11).
+    /// the registry, since `BytesAttribute` is now a registered type.
     #[test]
     fn registered_via_header() {
         use crate::header::Header;

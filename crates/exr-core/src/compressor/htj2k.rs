@@ -171,7 +171,7 @@ pub struct Htj2kCompressor {
 }
 
 /// Free-function form of [`Htj2kCompressor::channel_width`] — needed inside
-/// `decode_chunk` once it writes directly into `self.out` (audit block D):
+/// `decode_chunk` once it writes directly into `self.out`:
 /// `self.channel_width(..)` is a whole-`&self` method call, which cannot be
 /// used while `self.out` is separately borrowed mutably, even though the two
 /// fields are disjoint. Taking `min_x`/`max_x` as plain parameters (read from
@@ -258,7 +258,7 @@ impl Htj2kCompressor {
     }
 
     /// Bytes per sample for a pixel type (HALF=2, FLOAT/UINT=4) — delegates
-    /// to the W4.6 canonical `crate::misc::pixel_type_size`.
+    /// to the canonical `crate::misc::pixel_type_size`.
     #[inline]
     fn bytes_per_sample(t: PixelType) -> Result<usize> {
         crate::misc::pixel_type_size(t)
@@ -410,7 +410,7 @@ fn make_channel_map(
 /// (`divp(max_x, xs) - divp(min_x, xs) + 1`, matching
 /// [`Htj2kCompressor::channel_width`]).
 ///
-/// H-07 fix: this used to take a plain `image_width` and compute
+/// This used to take a plain `image_width` and compute
 /// `divp(image_width, xs)`, i.e. it implicitly assumed `min_x == 0`. For a
 /// subsampled channel (`xs > 1`) with an odd/unaligned `min_x`, that undercounts
 /// or overcounts the true sample count by up to one relative to
@@ -418,7 +418,7 @@ fn make_channel_map(
 /// correctly. The mismatch only matters where `channel_byte_width` sizes a
 /// buffer (`bpl`/`uncompressed_size` in the planar path) rather than just
 /// walking `xs == 1` channels (the non-planar path, where `divp(_, 1)` cannot
-/// diverge — hence the audit's "no effect" for that path).
+/// diverge, so that path was never affected).
 #[inline]
 fn channel_byte_width(ch: &ChannelInfo, min_x: i32, max_x: i32) -> Result<usize> {
     let w = (divp(max_x, ch.x_sampling) - divp(min_x, ch.x_sampling) + 1) as usize;
@@ -563,13 +563,13 @@ impl Compressor for Htj2kCompressor {
         }
 
         // OpenJPH (jph-rs) reports unrecoverable errors as `Err(OjphError)` (jph-rs
-        // `BUG1.md` "Round 7": the whole port converted from panicking to `Result`,
+        // converted its whole port from panicking to `Result`,
         // so no `catch_unwind` boundary is needed here any more). C++
         // `internal_exr_apply_ht` wraps the encode in `try { … } catch(...)` and
         // returns `EXR_ERR_INCORRECT_CHUNK`; `encode_chunk` mirrors that by mapping
         // every fallible jph-rs call into `ExrError` and propagating with `?` — this
         // is the codec's error boundary, not an `unwrap`/`panic!` in our logic.
-        // (audit block D) encode_chunk fills self.out directly (see its own
+        // encode_chunk fills self.out directly (see its own
         // doc) instead of returning a fresh Vec for this to move-assign.
         self.encode_chunk(data, min_y)?;
         Ok(&self.out)
@@ -581,13 +581,13 @@ impl Compressor for Htj2kCompressor {
     /// component's reconstructed line back to little-endian HALF/FLOAT/UINT bytes.
     ///
     /// OpenJPH (jph-rs) reports corrupt-stream errors as `Err(OjphError)` (jph-rs
-    /// `BUG1.md` "Round 7"); `internal_exr_undo_ht` catches `(...)` and returns
+    /// no longer panics); `internal_exr_undo_ht` catches `(...)` and returns
     /// `EXR_ERR_CORRUPT_CHUNK`. `decode_chunk` mirrors that by mapping every
     /// fallible jph-rs call into `ExrError` and propagating with `?` — corrupt
     /// input never panics out of this codec, and no `catch_unwind` is needed any
     /// more to guarantee that.
     ///
-    /// `expected_len` (alloc audit C6) is unused: `decode_chunk`'s size comes
+    /// `expected_len` is unused: `decode_chunk`'s size comes
     /// entirely from `image_width()`/`block_height()` (the caller-supplied
     /// `min_y` plus the rectangle fields), never a construction-time bound.
     fn uncompress(&mut self, data: &[u8], min_y: i32, _expected_len: usize) -> Result<&[u8]> {
@@ -595,10 +595,10 @@ impl Compressor for Htj2kCompressor {
             self.out.clear();
             return Ok(&self.out);
         }
-        // (audit block D) decode_chunk fills self.out directly (same "one
+        // decode_chunk fills self.out directly (same "one
         // out/scratch policy" every other codec's uncompress() follows)
         // instead of returning a fresh Vec — no per-chunk allocation of the
-        // whole decoded buffer, and (E12) no per-chunk zero-fill either.
+        // whole decoded buffer, and no per-chunk zero-fill either.
         self.decode_chunk(data, min_y)?;
         Ok(&self.out)
     }
@@ -646,10 +646,10 @@ impl Htj2kCompressor {
     /// bytes, or the raw bytes when the "no-shrink → store raw" rule fires.
     /// All OpenJPH interaction is confined here — every fallible jph-rs call
     /// is mapped into `ExrError` via `map_e` and propagated with `?` (jph-rs
-    /// `BUG1.md` "Round 7": `ojph_error!` no longer panics, so this is an
+    /// `ojph_error!` no longer panics, so this is an
     /// ordinary `Result` chain, not a `catch_unwind` boundary).
     ///
-    /// (audit block D) Takes `&mut self` and fills `self.out` directly
+    /// Takes `&mut self` and fills `self.out` directly
     /// instead of returning a freshly-allocated `Vec<u8>` — the same
     /// out/scratch policy every other codec's compress AND uncompress path
     /// follows. Unlike `decode_chunk`, no borrow-conflict workaround is
@@ -788,7 +788,7 @@ impl Htj2kCompressor {
                             let mut feed_err = None;
                             cs.fill_and_exchange(&mut cur_line, &mut next_comp, |lb, _| {
                                 // `LineBuf::get_i32_mut` asserts `w <= lb.size` — a bare contract,
-                                // not an `OjphResult` error (jph-rs `BUG1.md` "Round 7" made
+                                // not an `OjphResult` error (jph-rs made
                                 // `ojph_error!` fallible, but this bounds check is a caller
                                 // invariant, same as slice indexing). Check it ourselves so a
                                 // malformed header (e.g. sub-sampling misaligned with `min_x`,
@@ -891,8 +891,8 @@ impl Htj2kCompressor {
     /// confined here — every fallible jph-rs call is mapped into `ExrError`
     /// via `map_e` and propagated with `?` (see [`Self::encode_chunk`]).
     ///
-    /// (audit block D) Fills `self.out` in place (sized with `ensure_len`, NOT
-    /// zero-filled: every byte is overwritten, see the E12 note below) instead
+    /// Fills `self.out` in place (sized with `ensure_len`, NOT
+    /// zero-filled: every byte is overwritten, see the note below) instead
     /// of returning a freshly-allocated `Vec<u8>` — the same out/scratch
     /// policy every other codec's decode path follows. Takes
     /// `&mut self` for that reason; the in-loop channel-width lookups use the
@@ -908,7 +908,7 @@ impl Htj2kCompressor {
         let image_width = self.image_width();
         let image_height = self.block_height(min_y) as usize;
 
-        // H-07: recompute file-order offsets from the CURRENT x rectangle.
+        // Recompute file-order offsets from the CURRENT x rectangle.
         // Compute row and total packed sizes in the same pass, without temporary
         // collections. Y-subsampled channels contribute only their active rows,
         // matching compute_chunk_unpack_size (chunk.c:677-700), not bpl * height.
@@ -937,7 +937,7 @@ impl Htj2kCompressor {
         // Fill raster_line_offset from file-order channel widths and bounds-check
         // each file index (ht_undo_impl:180-191).
         //
-        // H-01: reject a duplicate `file_index` in the channel map, matching
+        // Reject a duplicate `file_index` in the channel map, matching
         // `read_header` (`internal_ht_common.cpp:308-317`,
         // <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXRCore/internal_ht_common.cpp#L308-L317>),
         // which throws (-> `EXR_ERR_CORRUPT_CHUNK`) on `file_index >= NCH` or on
@@ -989,7 +989,7 @@ impl Htj2kCompressor {
             }
         }
 
-        // H-02: per-component geometry cross-check — `internal_ht.cpp:232-241`,
+        // Per-component geometry cross-check — `internal_ht.cpp:232-241`,
         // <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXRCore/internal_ht.cpp#L232-L241>.
         // The old code only checked the overall width/height/component count
         // above; a codestream whose PER-COMPONENT downsampling or recon size
@@ -1038,7 +1038,7 @@ impl Htj2kCompressor {
         cs.set_planar(is_planar);
         cs.create().map_err(map_e)?;
 
-        // (alloc audit E12) `self.out` is fully covered on every SUCCESS
+        // `self.out` is fully covered on every SUCCESS
         // path regardless of prior contents: the planar branch's per-channel
         // loop writes every byte its OWN y_sampling includes across every
         // row (and every error path returns `Err` before `self.out` would
@@ -1050,9 +1050,9 @@ impl Htj2kCompressor {
         // path and diffs against a fresh instance. `ensure_len` (grow/
         // truncate, no unconditional zero-fill) is therefore sound, unlike
         // DWA's UNKNOWN sub-stream, whose deterministic-zero tail on a short
-        // decode genuinely IS load-bearing (`.bughunt/upstream_openexr.md`
-        // defect #3) -- not the same shape, checked separately, not assumed.
-        // Phase 4 item 3 re-proved it for every chunk shape (full, partial
+        // decode genuinely IS load-bearing
+        // -- not the same shape, checked separately, not assumed.
+        // A dedicated test re-proves it for every chunk shape (full, partial
         // edge, tile, multi-channel, all sample types, subsampled):
         // `decode_overwrites_every_byte_for_every_chunk_shape`.
         // `ensure_len`'s grow/truncate, inlined so the probe sits on the branch
@@ -1553,7 +1553,7 @@ mod tests {
         assert_eq!(c.num_scan_lines(), 32);
     }
 
-    /// H-01: a channel map with a duplicate `file_index` must be rejected as a
+    /// A channel map with a duplicate `file_index` must be rejected as a
     /// corrupt chunk (`read_header`, `internal_ht_common.cpp:308-317`). The old
     /// code only range-checked each index, so `[0, 0]` decoded — two codestream
     /// components writing the same file channel and another left zero.
@@ -1588,7 +1588,7 @@ mod tests {
         );
     }
 
-    /// H-02: swapping a channel-map entry between two file channels with
+    /// Swapping a channel-map entry between two file channels with
     /// different per-component geometry (here, different horizontal
     /// sub-sampling) must be rejected, matching `internal_ht.cpp:232-241`'s
     /// per-component `recon_width`/`recon_height`/`downsampling` cross-check.
@@ -1609,7 +1609,7 @@ mod tests {
         let mut cl = ChannelList::new();
         // "A" full-res, "B" horizontally sub-sampled by 2 -> different
         // per-component recon widths (32 vs 16), so swapping their channel-map
-        // entries is a geometry mismatch H-02 must catch.
+        // entries is a geometry mismatch the cross-check must catch.
         cl.insert("A", Channel::new(PixelType::Half, 1, 1, false)).unwrap();
         cl.insert("B", Channel::new(PixelType::Half, 2, 1, false)).unwrap();
         hdr.insert("channels", ChannelListAttribute::new(cl)).unwrap();
@@ -1770,7 +1770,7 @@ mod tests {
         }
     }
 
-    /// H-07: a subsampled channel with an odd (unaligned) `min_x` must still
+    /// A subsampled channel with an odd (unaligned) `min_x` must still
     /// size the planar decode buffer correctly. `channel_byte_width` used to
     /// compute `divp(image_width, xs)`, implicitly assuming `min_x == 0`; for
     /// `min_x` odd and `xs == 2` that undercounts the true per-channel sample
@@ -1836,7 +1836,7 @@ mod tests {
         );
     }
 
-    /// Alloc audit E12: `Htj2kCompressor::uncompress`'s `self.out` is a
+    /// `Htj2kCompressor::uncompress`'s `self.out` is a
     /// persistent field (`self.out.clear(); self.out.resize(uncompressed_size,
     /// 0)`), reused across calls -- unlike DWA's UNKNOWN sub-stream (whose
     /// deterministic-zero tail on a short decode is explicitly load-bearing),
@@ -1940,7 +1940,7 @@ mod tests {
         buf
     }
 
-    /// Phase 4 item 3: HTJ2K decode no longer zero-fills `self.out` — it must
+    /// HTJ2K decode no longer zero-fills `self.out` — it must
     /// therefore overwrite EVERY byte of the chunk. Proved per chunk shape by
     /// decoding into a buffer pre-filled with 0xAA, then 0x55, at three
     /// lengths (shorter than the chunk: stale prefix + zero-filled growth;
@@ -2045,7 +2045,7 @@ mod tests {
         }
     }
 
-    /// H-07 (verified against C++ 3.4.15, not a codec-level structural limit):
+    /// Verified against C++ 3.4.15 (not a codec-level structural limit):
     /// a subsampled channel whose data window `min_x` is NOT a multiple of its
     /// x-sub-sampling factor is not a case any HTJ2K decoder — ours or C++'s —
     /// ever has to handle, because C++'s `Header::sanityCheck`
@@ -2058,8 +2058,8 @@ mod tests {
     /// *"we require that the start_x % x_sampling == 0"* as its precondition.
     /// `crates/exr-core/src/header.rs:995-999` already ports this exact check
     /// in `Header::sanity_check`, which every real reader/writer path in this
-    /// crate calls before any compressor is constructed (see this crate's
-    /// CLAUDE.md, "`Header::read_checked`..."). So on any legitimately-opened
+    /// crate calls before any compressor is constructed.
+    /// So on any legitimately-opened
     /// file, `Htj2kCompressor::new` never sees this combination — it is C++'s
     /// header validation, not any codestream-shape limit, that rules it out.
     /// This test constructs the `Header` directly (bypassing `sanity_check`,
@@ -2124,7 +2124,7 @@ mod tests {
         );
     }
 
-    /// Y-subsampling bug (found via mutation-audit repro, 2026-09-23): the
+    /// Y-subsampling bug (found via a mutation-testing repro): the
     /// planar-path packed buffer size was computed as `bpl * image_height`
     /// (`bpl` = sum of full-height per-channel row bytes), which silently
     /// treats a `y_sampling > 1` channel as if it contributed a row for
@@ -2134,7 +2134,7 @@ mod tests {
     /// instead sums, per channel, `chansz(width, x_sampling) *
     /// chansz(height, y_sampling)` — a y-subsampled channel contributes only
     /// `height / y_sampling` rows, matching `misc::bytes_per_line_table`'s and
-    /// `misc::active_row_count`'s (also used by DWA's `channel_dims`, W-06)
+    /// `misc::active_row_count`'s (also used by DWA's `channel_dims`)
     /// packed-row convention.
     /// `internal_ht.cpp:253`/`:432`'s `bpl * chunk.height` is only an overflow
     /// SANITY bound (`bpl > INT32_MAX || bpl * height > PTRDIFF_MAX`), never

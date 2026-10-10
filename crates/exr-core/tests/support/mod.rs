@@ -130,7 +130,7 @@ const SHRINK_FLOOR: usize = 1024;
 
 /// Assert that a committed golden really exercises its codec.
 ///
-/// The reason this exists: the round-3 audit found that `golden_piz.exr`,
+/// The reason this exists: an audit found that `golden_piz.exr`,
 /// `golden_dwaa.exr`, `golden_dwab.exr` and both HTJ2K goldens stored **every**
 /// chunk raw (490 of 490 bytes), because the 7x5 KNOWN image was too small to
 /// compress. The writer's "no shrink -> store raw" rule meant the tests named

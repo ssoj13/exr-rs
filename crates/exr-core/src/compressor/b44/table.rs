@@ -12,16 +12,15 @@
 //! Port target (pinned tag v3.3.11):
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.3.11/src/lib/OpenEXRCore/internal_b44_table.c>
 //!
-//! K-08: from v3.4.x the oracle no longer embeds this static table — it
+//! From v3.4.x the oracle no longer embeds this static table — it
 //! generates the same values at runtime (`expf`/`logf` in float,
 //! `init_b44_tables`,
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXRCore/internal_b44_table_init.c>).
-//! Round-4 verified this table equal, entry-for-entry (all 2x65536), to the
+//! This table was verified equal, entry-for-entry (all 2x65536), to the
 //! 3.4.15 runtime formula recomputed two ways (correctly-rounded `expf`/`logf`,
-//! and the real MSVC `ucrtbase.dll` `expf`/`logf` via ctypes) — see
-//! `.bughunt/r4_audit_codecs.md` K-08. Embedding the v3.3.11 static table
-//! therefore still reproduces the 3.4.15 oracle's bytes; no fix was needed,
-//! only this doc update.
+//! and the real MSVC `ucrtbase.dll` `expf`/`logf` via ctypes).
+//! Embedding the v3.3.11 static table
+//! therefore still reproduces the 3.4.15 oracle's bytes.
 
 pub static EXP_TABLE: [u16; 65536] = [
     0x3c00, 0x3c00, 0x3c00, 0x3c00, 0x3c00, 0x3c00, 0x3c00, 0x3c00, 0x3c00, 0x3c00, 0x3c00, 0x3c00, 0x3c00, 0x3c00, 0x3c00, 0x3c00,

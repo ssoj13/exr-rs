@@ -13,8 +13,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::probe::{Probe, SharedProbes};
 
-/// Shared "high-water-mark" scratch-buffer growth policy (alloc audit
-/// E3-E6/E9/E10/E12/C3/C4): grow `buf` to at least `len` bytes, zero-filling
+/// Shared "high-water-mark" scratch-buffer growth policy:
+/// grow `buf` to at least `len` bytes, zero-filling
 /// only the NEWLY added tail, or `truncate` it to exactly `len` bytes if it
 /// is already at least that long — never an unconditional `clear()` +
 /// zero-fill of the whole buffer on every call.
@@ -55,7 +55,7 @@ pub const WRITE_WINDOWS_IN_FLIGHT: usize = 1;
 
 /// A thread-safe pool of reusable `Vec<u8>` buffers.
 ///
-/// Alloc audit C3/C4: the scanline/tiled parallel read and write pipelines
+/// The scanline/tiled parallel read and write pipelines
 /// each hand a buffer across a producer/worker or worker/writer boundary --
 /// unlike [`ensure_len`] alone (which only helps when the SAME persistent
 /// buffer is reused by the SAME call site, e.g. a codec's own scratch), a
@@ -65,11 +65,11 @@ pub const WRITE_WINDOWS_IN_FLIGHT: usize = 1;
 /// outlives any one stage and that multiple threads can check buffers in and
 /// out of concurrently. `BufPool` is that one mechanism, shared by both
 /// pipelines:
-/// - C3 (read): [`BufPool::take`] a buffer sized for the next chunk/tile
+/// - Read: [`BufPool::take`] a buffer sized for the next chunk/tile
 ///   before `stream.read`; after the decoded pixels are scattered into the
 ///   frame buffer, [`BufPool::give`] the (now-unneeded) raw-bytes buffer
 ///   back.
-/// - C4 (write): [`BufPool::take`] a buffer before compressing a block/tile
+/// - Write: [`BufPool::take`] a buffer before compressing a block/tile
 ///   into it (instead of a fresh `Vec::new()`/`.to_vec()`); after the
 ///   ordered write flushes it to the stream, [`BufPool::give`] it back.
 ///
@@ -151,7 +151,7 @@ impl BufPool {
     /// `len` bytes, in ONE lock acquisition — a bulk-`give` for a caller
     /// that knows its own steady-state depth up front.
     ///
-    /// # Why this exists (measured, 2026-09-25, team-lead request)
+    /// # Why this exists (measured, 2026-09-25)
     /// A read-ahead pipeline with a bounded one-window-deep channel (the
     /// scanline/tiled parallel readers) can have at most TWO windows'
     /// worth of chunks "outstanding" at once: the window the decode

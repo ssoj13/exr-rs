@@ -48,7 +48,7 @@ pub fn level_size(min: i32, max: i32, l: i32, rmode: LevelRoundingMode) -> Resul
     if l < 0 {
         return Err(ExrError::Arg("Argument not in valid range.".into()));
     }
-    // T-07 (round 4 tiled audit): `1 << l` is computed in i64 below, so any
+    // `1 << l` is computed in i64 below, so any
     // `l` that fits an i64 shift (`l <= 62`) is safe; the old `l >= 31` bound
     // assumed an i32 shift and rejected legitimate levels. A `ROUND_UP` image
     // wider/taller than 2^30 needs level 31 (`ceil_log2` returns 31 for a
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn level_size_out_of_range_level_errs_no_panic() {
-        // T-07: `1 << l` is computed in i64, so l up to 62 is valid (a
+        // `1 << l` is computed in i64, so l up to 62 is valid (a
         // ROUND_UP image wider/taller than 2^30 needs level 31 — see
         // `level_31_reachable_for_round_up_giant_window` below). Only a level
         // that would overflow even the i64 shift is rejected.
@@ -518,7 +518,7 @@ mod tests {
 
     #[test]
     fn level_31_reachable_for_round_up_giant_window() {
-        // T-01/T-07 regression fixture: a ROUND_UP window of width 2^30+2
+        // Regression fixture: a ROUND_UP window of width 2^30+2
         // (min=-536870912, max=536870913) needs 32 levels (0..=31) because
         // `ceil_log2` of a dimension in (2^30, 2^31) is 31. C++ 3.4.15 opens
         // this fine (`OpenEXRCore/parse_header.c:2326-2338`, int64 shift);

@@ -10,7 +10,7 @@
 # cdylib with pyo3's `extension-module` deliberately does NOT link libpython, which
 # would break `cargo test --workspace` (a test binary needs libpython). It is built
 # in isolation by maturin. It still PATH-depends on the workspace crates, so it
-# tracks them exactly. Full requirements + the parity surface: see CLAUDE.md here.
+# tracks them exactly.
 # =============================================================================
 
 [package]

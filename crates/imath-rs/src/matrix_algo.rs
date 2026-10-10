@@ -26,8 +26,6 @@
 //!   `double` only in the C++ `.cpp`; they are ported as generics bound to the
 //!   float element traits (`VecFloat` etc.). Procrustes always accumulates in
 //!   `double` and returns `M44d`, exactly like the C++.
-//!
-//! See this directory's `CLAUDE.md` and the repo `CLAUDE.md` for conventions.
 
 use crate::euler::{Euler, EulerFloat, InputLayout, Order};
 use crate::fun::abs;

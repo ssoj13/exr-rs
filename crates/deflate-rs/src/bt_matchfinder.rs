@@ -201,13 +201,13 @@ fn advance_one_byte<const RECORD: bool>(
     nice_len: u32,
     max_search_depth: u32,
     next_hashes: &mut [u32; 2],
-    // F8 (plan4): a caller-owned slice (the compressor's match cache) written
+    // A caller-owned slice (the compressor's match cache) written
     // in place, plus a running count -- not a `Vec` allocated per call site.
     // Ignored (never indexed) when RECORD=false.
     matches: &mut [LzMatch],
     match_count: &mut usize,
 ) {
-    // F12 precondition (mirrors the doc comment on `bt_matchfinder_get_matches`
+    // Precondition (mirrors the doc comment on `bt_matchfinder_get_matches`
     // and `BT_MATCHFINDER_REQUIRED_NBYTES`'s own doc comment): the BST-descent
     // loop below indexes `in_buf[in_next_pos + len]` / `in_buf[match_abs +
     // len]` directly (no bounds check, matching C's raw pointer indexing),
@@ -329,7 +329,7 @@ fn advance_one_byte<const RECORD: bool>(
         // is just a thin public wrapper around `advance_one_byte`) to keep
         // `in_next_pos + len` and `match_abs + len` in bounds.
         //
-        // F12: this used to compare `.get(..) == .get(..)` so it wouldn't
+        // This used to compare `.get(..) == .get(..)` so it wouldn't
         // panic if `len` ran past the buffer end. That silently accepted
         // `None == None` as a match whenever BOTH sides were out of bounds —
         // fabricating a match at the buffer tail instead of surfacing the
@@ -361,7 +361,7 @@ fn advance_one_byte<const RECORD: bool>(
 
         // Navigate the BST based on lexicographic order at position `len`.
         // Mirrors C's raw `matchptr[len]` / `in_next[len]` — direct indexing;
-        // see the F12 note above `can_extend` for why the previous
+        // see the note above `can_extend` for why the previous
         // `.get(..).unwrap_or(0)` guard was a silent invariant-violation
         // fallback rather than a real fix.
         let str_byte = in_buf[in_next_pos + len as usize];
@@ -413,7 +413,7 @@ fn advance_one_byte<const RECORD: bool>(
 /// Writes matches into `matches` starting at index 0 and returns how many
 /// were written (`matches` must be at least `nice_len - 2` long, the C-
 /// documented maximum -- the compressor's match cache is always sized for
-/// the whole block, comfortably larger). F8 (plan4): this used to take
+/// the whole block, comfortably larger). This used to take
 /// `&mut Vec<LzMatch>` and `.push()` into it, forcing every call site to own
 /// (and typically freshly allocate) a `Vec` just to immediately copy its
 /// contents into the real match cache. Writing directly into a caller-owned
@@ -581,7 +581,7 @@ mod tests {
         assert_eq!(best.offset, 5, "expected offset 5, got {}", best.offset);
     }
 
-    /// F12 regression: `bt_matchfinder_get_matches` with `max_len <
+    /// Regression: `bt_matchfinder_get_matches` with `max_len <
     /// BT_MATCHFINDER_REQUIRED_NBYTES` must panic on the asserted
     /// precondition, not silently degrade. Before the fix, the BST-descent
     /// loop's `.get(..) == .get(..)` comparison let `None == None` fabricate
@@ -654,7 +654,7 @@ mod tests {
     fn bt_matches_sorted_by_increasing_length() {
         // A buffer with a long repeated run to produce multiple matches. Long
         // enough that `nice_len` (258) never exceeds the remaining bytes at
-        // any position used below — see the F12 fix: `max_len` (and, for
+        // any position used below — `max_len` (and, for
         // `bt_matchfinder_skip_byte`, `nice_len` doubling as `max_len`) must
         // never exceed the buffer's remaining bytes, exactly like production
         // (`deflate_compress.rs`'s `adjust_max_and_nice_len`) always ensures.
@@ -731,7 +731,7 @@ mod tests {
     fn bt_max_search_depth_limits_work() {
         // depth=1 must not panic or produce incorrect lengths. `nice_len`
         // (used as `max_len` by `bt_matchfinder_skip_byte`) is capped to the
-        // buffer's remaining bytes at each position — see the F12 fix's
+        // buffer's remaining bytes at each position — see the precondition
         // comment in `bt_matches_sorted_by_increasing_length` above.
         let input = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; // 32 'a's
         let mut mf = BtMatchfinder::new();
@@ -776,7 +776,7 @@ mod tests {
         }
     }
 
-    /// V4 (plan4): at least one input > `MATCHFINDER_WINDOW_SIZE` (32 KiB),
+    /// At least one input > `MATCHFINDER_WINDOW_SIZE` (32 KiB),
     /// actually crossing a `slide_window()` call, with the match verified
     /// byte-for-byte. See the identical rationale on
     /// `hc_matchfinder::tests::hc_finds_correct_match_across_window_slide`.
@@ -800,7 +800,7 @@ mod tests {
         // nice_len=32 stays <= the remaining bytes at every skipped position
         // (minimum remaining during the skip loop is len - (search_pos - 1)
         // = 41), satisfying `bt_matchfinder_skip_byte`'s `max_len == nice_len
-        // <= remaining` precondition (F12) throughout the whole slide.
+        // <= remaining` precondition throughout the whole slide.
         bt_matchfinder_skip_bytes(
             &mut mf,
             &input,

@@ -84,7 +84,7 @@ fn extract<'py>(
 
     let mut selected = Vec::new();
     if let Some(ns) = names {
-        // W4.6 (design_r5.md §4.4): route through the canonical
+        // Route through the canonical
         // `Manifest::id_for_name` (manifest hit, else hash fallback — the
         // hash IS the id definition, spec 1.2.0 p.3) instead of a hand-rolled
         // `by_name` lookup. A broken/missing manifest must not block
@@ -242,7 +242,7 @@ fn inject(
         };
     }
 
-    // W4.6 (design_r5.md §4.4): route through the canonical
+    // Route through the canonical
     // `CryptomatteFile::inject` instead of hand-assembling `InjectArgs` — it
     // resolves the manifest via `layer_manifest_or_empty` (a broken/missing
     // sidecar warns and falls back, matching `extract`'s policy, instead of

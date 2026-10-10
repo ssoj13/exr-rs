@@ -1,11 +1,11 @@
-//! S-01 (round-4 audit) oracle-verified boundary test: FLOAT->HALF and
+//! Oracle-verified boundary test: FLOAT->HALF and
 //! UINT->HALF conversion at and around HALF_MAX, checked against a real C++
 //! OpenEXR 3.4 oracle run (`tests/parity/oracle.cpp`'s `read-half` mode:
 //! every channel read into a HALF slice regardless of its on-disk type,
 //! exercising C++'s `OpenEXRCore/unpack.c` -> `internal_coding.h::
 //! float_to_half`/`uint_to_half` conversion paths directly).
 //!
-//! This settles the round-3 `W3.3` claim (that FLOAT overflows to +/-inf at
+//! This settles an earlier claim (that FLOAT overflows to +/-inf at
 //! HALF_MAX, same as UINT) by a REAL oracle run rather than by reading alone:
 //! that claim was WRONG for FLOAT. The two source types genuinely have
 //! different overflow thresholds in C++ 3.4:

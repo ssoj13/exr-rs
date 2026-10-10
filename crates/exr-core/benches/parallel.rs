@@ -1,4 +1,4 @@
-//! W3.9 parallel scaling benchmark harness (round-5 design §1.4).
+//! Parallel scaling benchmark harness.
 //!
 //! **Phase A** (`bench_parallel_compress`/`bench_parallel_uncompress`)
 //! measures independent per-chunk `Compressor::compress`/`uncompress` calls
@@ -10,10 +10,9 @@
 //! exercises the REAL thing: `scanline::OutputFile::with_num_threads` /
 //! `InputFile::with_num_threads` writing/reading a whole synthetic image,
 //! reporting decode/encode MB/s of uncompressed bytes at each thread count —
-//! the round-5 §1.4 acceptance measurement (scaling to 8 threads, scatter
-//! share). Numbers from a representative run are recorded in
-//! `crates/exr-core/CLAUDE.md`'s Threading section (quiet-machine caveat
-//! applies — see that section).
+//! the acceptance measurement for the parallel paths (scaling to 8 threads,
+//! scatter share). Run it on a quiet machine: background load skews the
+//! scaling curve.
 //!
 //! ```text
 //! cargo bench -p exr-core --bench parallel -- --warm-up-time 1 --measurement-time 2
@@ -111,10 +110,10 @@ struct CodecCase {
     block: usize,
 }
 
-/// Entropy-heavy codecs where the round-5 §1.4 acceptance criteria (>=0.8x
-/// C++ throughput, near-linear scaling to 8 threads) actually apply. NONE is
-/// included as the zero-overhead baseline the scatter/gather share (round-5
-/// §1.4's "scatter share below 15% of wall time" check) is measured against.
+/// Entropy-heavy codecs where the acceptance criteria (>=0.8x C++
+/// throughput, near-linear scaling to 8 threads) actually apply. NONE is
+/// included as the zero-overhead baseline the scatter/gather share (the
+/// "scatter share below 15% of wall time" check) is measured against.
 const CODECS: &[CodecCase] = &[
     CodecCase { name: "NONE", comp: Compression::NoCompression, block: 1 },
     CodecCase { name: "ZIP", comp: Compression::Zip, block: 16 },
@@ -139,8 +138,8 @@ fn bench_parallel_compress(c: &mut Criterion) {
         let uncompressed_total = (chunks.iter().map(|ch| ch.len()).sum::<usize>()) as u64;
 
         for &threads in THREAD_COUNTS {
-            // Resize the ONE process-wide pool (round-5 review: no per-file
-            // pool — see `threading.rs` module docs). Criterion runs one
+            // Resize the ONE process-wide pool (no per-file pool — see
+            // `threading.rs` module docs). Criterion runs one
             // benchmark function at a time, so there is no concurrent bench
             // racing this resize.
             set_global_thread_count(threads).unwrap();

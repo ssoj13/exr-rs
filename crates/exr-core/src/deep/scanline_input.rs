@@ -18,7 +18,7 @@
 //! IlmImf `DeepScanLineInputFile`** read algorithm, which is the canonical
 //! description of the on-disk byte format and is the precise inverse of this
 //! crate's [`DeepScanLineOutputFile`][crate::deep::DeepScanLineOutputFile]
-//! (W7-2) writer:
+//! writer:
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.1.0/src/lib/OpenEXR/ImfDeepScanLineInputFile.cpp>
 //!
 //! The v3.3.11 semantics that *are* observable are matched exactly:
@@ -66,9 +66,9 @@
 //! # Safe-Rust adaptation of the `char**` deep addressing
 //!
 //! The C++ deep `base` is a `char**` (per-pixel pointers into a sample heap),
-//! impossible in safe Rust (zero `unsafe`, no FFI — see the crate `CLAUDE.md`).
+//! impossible in safe Rust (this crate has zero `unsafe` and no FFI).
 //! This reader keeps the *algorithm* 1:1 and uses the **same flat-buffer model**
-//! as the W7-2 writer (see its module docs): the caller provides
+//! as the writer (see its module docs): the caller provides
 //! * a flat **sample-count buffer** (`&mut [u8]`) holding one `u32` per pixel,
 //!   addressed by the sample-count slice's byte strides (== C++
 //!   `sampleCount(base,xStride,yStride,x,y)`), and
@@ -79,15 +79,8 @@
 //!   slice's `base_offset` is its channel's heap origin and the per-pixel array
 //!   start advances by `count * sampleStride` over preceding pixels.
 //!
-//! The bytes consumed are byte-identical to the W7-2 writer's, so this reader
+//! The bytes consumed are byte-identical to the writer's, so this reader
 //! round-trips the writer pixel-exact (and count-exact).
-//!
-//! # What this Wave (W7-3) intentionally does NOT cover (tracked, not faked)
-//!
-//! * `rawPixelData` / `readPixels(rawPixelData, …)` mem-decode helpers (the
-//!   `copyPixels` path), multipart `partNumber` chunk prefix, deep tiled input
-//!   (W7-4), threading (`ThreadPool`/`LineBufferTask`).  The single-threaded
-//!   two-pass read here is observationally identical for the bytes it consumes.
 
 use crate::attr::name::Name;
 use crate::attr::PixelType;
@@ -114,7 +107,7 @@ const SIZE_INT: usize = 4;
 // InSliceInfo — read-side per-channel deep descriptor
 // ---------------------------------------------------------------------------
 
-/// Per-channel deep read descriptor — the read-side counterpart of the W7-2
+/// Per-channel deep read descriptor — the read-side counterpart of the
 /// writer's `OutSliceInfo` and the inverse of the C++ `update_pointers` /
 /// `run_fill` channel handling.
 ///
@@ -176,12 +169,11 @@ where
     /// / [`crate::tiled::TiledInputFile`] (see their module docs for the rationale).
     stream: S,
 
-    /// Everything else this reader owns — the read-side S-16 mirror (round 4
-    /// continuation, mirrors `crate::scanline::input::ScanLineInputFileState`):
-    /// factored into its own, stream-free struct so
-    /// [`crate::multipart::MultiPartInputFile`] can persist it across
-    /// separate `deep_scanline_input_part` calls (once wired — see
-    /// `deep/CLAUDE.md`) instead of rebuilding a fresh reader every call.
+    /// Everything else this reader owns (mirrors
+    /// `crate::scanline::input::ScanLineInputFileState`): factored into its
+    /// own, stream-free struct so [`crate::multipart::MultiPartInputFile`] can
+    /// persist it across separate `deep_scanline_input_part` calls instead of
+    /// rebuilding a fresh reader every call.
     state: DeepScanLineInputFileState,
 
     /// Marker only — `S`'s bound (not a field type) is the only thing tying
@@ -197,7 +189,8 @@ where
 pub type DeepScanLineInputFileOwned<'a> = DeepScanLineInputFile<'a, Box<dyn IStream + 'a>>;
 
 /// Every field of C++ `DeepScanLineInputFile::Data` except the stream — the
-/// reader's **persisted** per-part state (read-side S-16 mirror).
+/// reader's **persisted** per-part state, owned by the multipart file between
+/// part-view calls.
 pub(crate) struct DeepScanLineInputFileState {
     /// The image header — C++ `_data->header`.
     header: Header,
@@ -224,7 +217,7 @@ pub(crate) struct DeepScanLineInputFileState {
     /// `_data->frameBufferValid`.
     frame_buffer_valid: bool,
     /// The caller's frame buffer, kept for [`frame_buffer`][Self::frame_buffer]
-    /// (D-13) — C++ `const DeepFrameBuffer& frameBuffer() const`. Cloned in
+    /// — C++ `const DeepFrameBuffer& frameBuffer() const`. Cloned in
     /// `set_frame_buffer`; `DeepFrameBuffer::new()` (empty) until then.
     caller_frame_buffer: DeepFrameBuffer,
 
@@ -249,15 +242,11 @@ pub(crate) struct DeepScanLineInputFileState {
     /// count is unbounded a priori.
     count_compressor: Option<Box<dyn Compressor>>,
     /// The **separate** sample-DATA decompressor for the fully SERIAL read
-    /// path (`read_data_line`), or `None` for NONE. (alloc audit C6-followup,
-    /// 2026-09-24) Used to be rebuilt **per chunk** sized to that chunk's
-    /// exact `unpackedDataSize`, mirroring the C core sizing its decode
-    /// buffer per chunk -- necessary back when a codec's decode capacity
-    /// could only come from a construction-time bound. Now that
-    /// `Compressor::uncompress` takes an explicit `expected_len` per call
-    /// (alloc audit C6), THIS field is built once here (any construction
-    /// size works; `expected_len` is authoritative per call) and reused —
-    /// matching C2's "persistent codec, not one per chunk" fix for the flat
+    /// path (`read_data_line`), or `None` for NONE. Because
+    /// `Compressor::uncompress` takes an explicit `expected_len` per call,
+    /// this field is built once here (any construction size works;
+    /// `expected_len` is authoritative per call) and reused rather than
+    /// rebuilt per chunk — the same persistent-codec design as the flat
     /// scanline/tiled readers. The genuinely PARALLEL decode path
     /// (`decode_and_scatter_line`, run from several rayon threads at once)
     /// cannot share this field (or any single `&mut self` compressor) across
@@ -274,14 +263,14 @@ pub(crate) struct DeepScanLineInputFileState {
     /// part; when `None` there is no such prefix.
     part_number: Option<i32>,
 
-    /// Growable per-row sample-count prefix cache (D-10), sourced from the
+    /// Growable per-row sample-count prefix cache, sourced from the
     /// caller's own `sample_counts` buffer rather than the chunk stream
-    /// (D-07) and rebuilt at the start of every `read_pixels` call, so it
+    /// and rebuilt at the start of every `read_pixels` call, so it
     /// is addressed from that call's first line — see
     /// [`samples_before_line`](Self::samples_before_line).
     sample_prefix: crate::deep::sample_table::RowPrefixCache,
 
-    /// W3.9 phase B: this file's captured thread count — see
+    /// This file's captured thread count — see
     /// [`crate::threading::ThreadCount`] and the flat scanline reader's
     /// identical field. Gates [`Self::read_pixels`]'s parallel path; never
     /// touches [`Self::read_pixel_sample_counts`], mirroring C++ (only
@@ -311,7 +300,7 @@ impl<'a> DeepScanLineInputFile<'a, &'a mut dyn IStream> {
     }
 
     /// Same as [`Self::new`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::new`]).
+    /// override (`None` behaves exactly like [`Self::new`]).
     pub fn with_num_threads(stream: &'a mut dyn IStream, num_threads: Option<i32>) -> Result<Self> {
         // ONE prologue reader for the whole crate: magic + version word + the
         // header + the chunk offset table (with reconstruction) — C++ likewise
@@ -338,7 +327,7 @@ impl<'a> DeepScanLineInputFile<'a, &'a mut dyn IStream> {
     }
 }
 
-/// Owned-stream constructors (`S = Box<dyn IStream + 'a>`) — W3.4, mirrors
+/// Owned-stream constructors (`S = Box<dyn IStream + 'a>`) — mirrors
 /// [`crate::tiled::TiledInputFile::open`]/`new_owned`.
 impl<'a> DeepScanLineInputFile<'a, Box<dyn IStream + 'a>> {
     /// Open `path`, OWNING the decoded stream — the deep-scanline analogue of
@@ -403,7 +392,7 @@ where
     }
 
     /// Same as [`Self::from_part`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::from_part`]).
+    /// override (`None` behaves exactly like [`Self::from_part`]).
     pub fn from_part_mt(
         stream: S,
         header: Header,
@@ -428,8 +417,8 @@ where
     }
 
     /// The currently set frame buffer — port of
-    /// `const DeepFrameBuffer& DeepScanLineInputFile::frameBuffer() const`
-    /// (D-13). Empty until [`set_frame_buffer`][Self::set_frame_buffer] has
+    /// `const DeepFrameBuffer& DeepScanLineInputFile::frameBuffer() const`.
+    /// Empty until [`set_frame_buffer`][Self::set_frame_buffer] has
     /// been called.
     pub fn frame_buffer(&self) -> &DeepFrameBuffer {
         self.state.frame_buffer()
@@ -498,7 +487,7 @@ where
     }
 
     /// Read scanline `first_scan_line`'s chunk RAW (still-packed count table +
-    /// sample data, no decompression). D-13, see
+    /// sample data, no decompression). See
     /// [`DeepScanLineInputFileState::raw_pixel_data`] for the full doc.
     pub fn raw_pixel_data(&mut self, first_scan_line: i32) -> Result<(i32, Vec<u8>, Vec<u8>, u64)> {
         self.state.raw_pixel_data(&mut *self.stream, first_scan_line)
@@ -507,8 +496,8 @@ where
 
 // ---------------------------------------------------------------------------
 // DeepScanLineInputFileState — the state-only construction + algorithm,
-// shared by the owning `DeepScanLineInputFile` and a future borrowing
-// part-reader view (read-side S-16 mirror).
+// shared by the owning `DeepScanLineInputFile` and the borrowing multipart
+// part-reader view (`multipart::input`).
 // ---------------------------------------------------------------------------
 
 impl DeepScanLineInputFileState {
@@ -516,10 +505,9 @@ impl DeepScanLineInputFileState {
     /// `DeepScanLineInputFile::DeepScanLineInputFile(InputPartData*)`. Pure
     /// (no stream access at all): the prologue reader
     /// (`multipart::input::read_prologue`) already parses the header + chunk
-    /// offset table before this ever runs — confirmed by reading the
-    /// original body before moving it here, not assumed (same finding
-    /// fix-scanline made for `ScanLineInputFileState::from_part_mt`).
-    /// `num_threads` is the W3.9 phase B per-file override (`None` = capture
+    /// offset table before this ever runs (the same holds for
+    /// `ScanLineInputFileState::from_part_mt`).
+    /// `num_threads` is the per-file override (`None` = capture
     /// the current process-wide default).
     pub(crate) fn from_part_mt(
         header: Header,
@@ -537,7 +525,7 @@ impl DeepScanLineInputFileState {
             )));
         }
 
-        // D-03 / `OpenEXRCore/decoding.c:307-318`: a deep part's `version`
+        // `OpenEXRCore/decoding.c:307-318`: a deep part's `version`
         // attribute (defaulted to 1 when absent — `multipart/input.rs`) must
         // be exactly 1; any other value is rejected at decode-init time in
         // C++ ("Version %d not supported for deepscanline images"). This is
@@ -571,7 +559,7 @@ impl DeepScanLineInputFileState {
         let width = (max_x - min_x + 1) as usize;
         let max_sample_count_table_size = lines_per_buffer * width * core::mem::size_of::<u32>();
         let count_compressor = new_compressor(compression, max_sample_count_table_size, &header)?;
-        // (alloc audit C6-followup) Any construction size works now that
+        // Any construction size works now that
         // `expected_len` is authoritative per `uncompress()` call -- see
         // `data_compressor`'s doc.
         let data_compressor = new_compressor(compression, 0, &header)?;
@@ -605,16 +593,16 @@ impl DeepScanLineInputFileState {
     }
 
     /// The currently set frame buffer — port of
-    /// `const DeepFrameBuffer& DeepScanLineInputFile::frameBuffer() const`
-    /// (D-13). Empty until [`set_frame_buffer`][Self::set_frame_buffer] has
+    /// `const DeepFrameBuffer& DeepScanLineInputFile::frameBuffer() const`.
+    /// Empty until [`set_frame_buffer`][Self::set_frame_buffer] has
     /// been called.
     pub(crate) fn frame_buffer(&self) -> &DeepFrameBuffer {
         &self.caller_frame_buffer
     }
 
     /// Whether the on-disk offset table was complete — port of `bool
-    /// DeepScanLineInputFile::isComplete() const` (D-13,
-    /// `ImfDeepScanLineInputFile.cpp:289-293`: `_ctxt.chunkTableValid(...)`).
+    /// DeepScanLineInputFile::isComplete() const`
+    /// (`ImfDeepScanLineInputFile.cpp:289-293`: `_ctxt.chunkTableValid(...)`).
     /// A missing chunk leaves its offset-table slot at `0` (the crate's own
     /// convention — see `chunk::offsets::read_offset_table`/`reconstruct`),
     /// so "every slot non-zero" is the same condition, computed locally
@@ -687,7 +675,7 @@ impl DeepScanLineInputFileState {
             match channels.find_channel(name) {
                 None => {
                     // No file channel → fill-list entry (filled with fillValue).
-                    // D-08 / `ImfDeepScanLineInputFile.cpp:928-929`: a
+                    // `ImfDeepScanLineInputFile.cpp:928-929`: a
                     // fill-list slice still must have sampling (1,1) — C++
                     // throws `InputExc` "Expect sampling of 1" at run_fill
                     // time; we reject it up front instead of silently
@@ -825,7 +813,7 @@ impl DeepScanLineInputFileState {
         // totals for the new count buffer while retaining row/prefix allocation capacity.
         self.sample_prefix.reset(self.min_x, self.max_x, min_scan);
 
-        // W3.9 phase B gate: parallel only when there is more than one line
+        // Gate: parallel only when there is more than one line
         // AND the captured thread count is `> 1` — matches C++'s
         // `nchunks > 1 && numThreads > 1` gate on the flat readers (deep
         // chunks are always 1 line each, so "chunks" and "lines" coincide
@@ -849,11 +837,10 @@ impl DeepScanLineInputFileState {
     }
 
     /// The parallel read body — same three-function split and read-ahead-free
-    /// shape as the flat scanline reader's milestone-1 cut (design_r5.md
-    /// §1.2.5, decode-parallel-only; read-ahead pipelining is a follow-up
-    /// here too, tracked in `.bughunt/progress_w39b.md`, not yet justified by
-    /// a dedicated deep I/O-share measurement the way the flat readers'
-    /// was). Returns `Ok(true)` when it fully serviced the request, or
+    /// shape as the flat scanline reader's first parallel version
+    /// (decode-parallel-only; unlike the flat readers, there is no read-ahead
+    /// pipelining here, since no deep I/O-share measurement has justified
+    /// it yet). Returns `Ok(true)` when it fully serviced the request, or
     /// `Ok(false)` when [`crate::misc::plan_disjoint`] found the sample-data
     /// heap's write intervals unsafely overlapping.
     fn read_pixels_parallel(
@@ -869,7 +856,7 @@ impl DeepScanLineInputFileState {
         // Serial pre-pass: extend the (persisted, incrementally-growing)
         // `RowPrefixCache` up to `max_scan` and snapshot each line's
         // `samples_before` into a plain owned `Vec` — the cache itself stays
-        // `&mut self`-only (D-10's amortized-linear guarantee depends on
+        // `&mut self`-only (its amortized-linear guarantee depends on
         // sequential, in-order extension), but a plain snapshot is safe to
         // share (read-only) across the parallel decode below. Same total
         // work as calling it once per line serially (no extra O(N) cost),
@@ -882,7 +869,7 @@ impl DeepScanLineInputFileState {
         // Fetch every line's chunk (leader + count table decode + packed
         // sample-data bytes) on the calling thread — see `fetch_line`'s doc
         // for why the count table is decoded here rather than deferred.
-        // Also verify each line's counts against the caller's buffer (D-15)
+        // Also verify each line's counts against the caller's buffer
         // while we're still serial and can report a clean per-line error.
         let mut raws = Vec::with_capacity(lines.len());
         for &y in &lines {
@@ -906,7 +893,7 @@ impl DeepScanLineInputFileState {
         let (min_x, max_x) = (self.min_x, self.max_x);
         let count = self.num_threads;
 
-        // (alloc audit follow-up, 2026-09-25) A real checkout/checkin
+        // A real checkout/checkin
         // `CodecPool` instead of `map_init` -- see `Compressor`'s trait
         // doc and `crate::compressor::CodecPool`'s own doc for why
         // `map_init` alone was not the "once per job split" reuse it
@@ -1004,13 +991,12 @@ impl DeepScanLineInputFileState {
         let packed_data = xdr::read_u64(&mut *stream)?;
         let unpacked = xdr::read_u64(&mut *stream)?;
 
-        // Round-4 verifier P1 fix (D-02 reopened): this is the ONE place all
-        // three deep chunk leader sizes are parsed, feeding BOTH the normal
-        // decode path (`read_count_table`/`read_data_line`) and the raw
-        // `copy_pixels` path (`raw_pixel_data`, added later for D-13) --
-        // `raw_pixel_data` allocated straight from `packed_count`/`packed_data`
-        // with no cap at all, reopening the exact allocation-DoS class D-02
-        // fixed elsewhere. Ported C++'s own leader-parse bounds
+        // This is the ONE place all three deep chunk leader sizes are parsed,
+        // feeding BOTH the normal decode path (`read_count_table`/
+        // `read_data_line`) and the raw `copy_pixels` path (`raw_pixel_data`,
+        // which allocates straight from `packed_count`/`packed_data`, so an
+        // unchecked size there would be an allocation DoS). Ported C++'s own
+        // leader-parse bounds
         // (`OpenEXRCore/chunk.c:1007-1066`, `read_and_validate_chunk_leader`)
         // here instead of only in the decode path, so every consumer of this
         // chunk's sizes -- present and future -- inherits the same guarantee:
@@ -1047,7 +1033,7 @@ impl DeepScanLineInputFileState {
 
     /// Read scanline `y`'s chunk RAW -- the packed (still compressed, or
     /// already-raw for NONE/no-shrink) count-table and sample-data bytes,
-    /// without decompressing or scattering into a frame buffer -- D-13, port
+    /// without decompressing or scattering into a frame buffer -- port
     /// of `void rawPixelData(int firstScanLine, char* pixelData, uint64_t&
     /// pixelDataSize)` (`ImfDeepScanLineInputFile.cpp:324-354`).
     ///
@@ -1070,7 +1056,7 @@ impl DeepScanLineInputFileState {
         first_scan_line: i32,
     ) -> Result<(i32, Vec<u8>, Vec<u8>, u64)> {
         // `seek_chunk` already bounds `packed_count`/`packed_data` to `i32::MAX`
-        // and to the remaining bytes of the file (round-4 verifier P1 fix), so
+        // and to the remaining bytes of the file, so
         // these `usize` conversions cannot fail on a 32-bit target's `usize`
         // either -- `i32::MAX` always fits. `try_filled_vec` (fallible
         // `try_reserve`) is still used rather than `vec![0u8; n]`, matching
@@ -1099,7 +1085,7 @@ impl DeepScanLineInputFileState {
         let width = (self.max_x - self.min_x + 1) as usize;
         let raw_table_size = width * SIZE_INT;
 
-        // F1: reject an implausible count-table size BEFORE allocating a buffer
+        // Reject an implausible count-table size BEFORE allocating a buffer
         // from the untrusted on-wire `packed_count`.  The writer stores the count
         // table either compressed (strictly smaller than the raw table) or raw
         // (exactly `raw_table_size`), so `packed_count` can never exceed
@@ -1123,14 +1109,14 @@ impl DeepScanLineInputFileState {
         // writer's "no-shrink (or no compressor) → store raw" rule: if the
         // stored bytes already equal the raw table size, they are the raw table.
         //
-        // D-06 / C++ `OpenEXRCore/chunk.c:1046-1051`: for `EXR_COMPRESSION_NONE`
+        // C++ `OpenEXRCore/chunk.c:1046-1051`: for `EXR_COMPRESSION_NONE`
         // the leader requires `sample_count_table_size == chunkmin` (here
         // `raw_table_size`) EXACTLY — a zero-length table under NONE is a
         // corrupt chunk, not a valid absent one, since NONE stores the raw
         // ints and there is no codec to have "compressed away" an all-zero
-        // row. The zero-length exception (D-05 below) is compressed-only.
+        // row. The zero-length exception (below) is compressed-only.
         //
-        // D-05 / C++ `OpenEXRCore/decoding.c:590-609`: for a COMPRESSED count
+        // C++ `OpenEXRCore/decoding.c:590-609`: for a COMPRESSED count
         // table, an absent (zero-length) one is treated as an all-zero row,
         // not an error — a chunk whose count table compressed to nothing
         // (every pixel has zero samples) is valid and must read back as zero
@@ -1204,7 +1190,7 @@ impl DeepScanLineInputFileState {
         Ok(())
     }
 
-    /// W3.9 phase B: fetch scanline `y`'s chunk — leader + count table +
+    /// Fetch scanline `y`'s chunk — leader + count table +
     /// packed sample-data bytes — WITHOUT decompressing the sample data or
     /// scattering. Port of the "fetch" half of what `read_data_line` used to
     /// do in one step (count-table decode included here — see the
@@ -1217,7 +1203,7 @@ impl DeepScanLineInputFileState {
     /// mirroring C++'s own asymmetry that only `readPixels`, never
     /// `readPixelSampleCounts`, is threaded).
     ///
-    /// (alloc audit C6-followup, 2026-09-24) `&mut self`, using the
+    /// `&mut self`, using the
     /// persistent `self.count_compressor` — this function has exactly ONE
     /// caller (`read_pixels_parallel`'s serial pre-pass for-loop, itself
     /// `&mut self`), which fetches every line ONE AFTER ANOTHER on the
@@ -1229,8 +1215,8 @@ impl DeepScanLineInputFileState {
     /// itself or with `decode_and_scatter_line`'s DATA decode (`fetch_line`
     /// only touches the count table, a fully separate codec instance from
     /// `decode_and_scatter_line`'s data compressor), so reusing
-    /// `self.count_compressor` here is exactly C2's "persistent codec for
-    /// the serial path" fix, not a correctness risk.
+    /// `self.count_compressor` here is the same "persistent codec for the
+    /// serial path" design as the flat readers, not a correctness risk.
     fn fetch_line(&mut self, stream: &mut dyn IStream, y: i32) -> Result<RawDeepLine> {
         let (per_pixel, packed_data, unpacked_size) = self.read_count_table(stream, y)?;
         let mut packed_data_bytes = vec![0u8; packed_data];
@@ -1239,7 +1225,7 @@ impl DeepScanLineInputFileState {
     }
 
     /// Read scanline `y`'s sample data and scatter it into the caller's flat
-    /// per-channel sample heap — the inverse of the W7-2 writer's
+    /// per-channel sample heap — the inverse of the writer's
     /// `gather_scanline` and the port of the deep `readPixels` decode scatter.
     ///
     /// The chunk data is laid out (per the writer): for each channel in *file
@@ -1262,10 +1248,9 @@ impl DeepScanLineInputFileState {
         let mut packed = vec![0u8; packed_data_usize];
         stream.read(&mut packed)?;
 
-        // Decompress with the SEPARATE, persistent data decompressor (alloc
-        // audit C6-followup: `self.data_compressor`, reused across lines --
-        // was rebuilt fresh per chunk before `expected_len` existed; see its
-        // field doc), same raw-store rule: if the stored bytes already equal
+        // Decompress with the SEPARATE, persistent data decompressor
+        // (`self.data_compressor`, reused across lines; see its field doc),
+        // same raw-store rule: if the stored bytes already equal
         // the unpacked size they are raw.
         let data: Vec<u8> = if packed_data_usize == unpacked_usize {
             packed
@@ -1298,12 +1283,10 @@ impl DeepScanLineInputFileState {
         // channel and the round-trip is byte-exact.
         let samples_before = self.samples_before_line(sample_counts, y)?;
 
-        // D-15: verify the caller's sample-count buffer BEFORE scattering
+        // Verify the caller's sample-count buffer BEFORE scattering
         // into `sample_data` — a mismatch means the caller did not run
-        // `readPixelSampleCounts` first / sized the heap wrong, and used to
-        // only be caught AFTER writing into `sample_data` (a wasted, and
-        // more importantly potentially confusing, partial write before the
-        // error surfaced).
+        // `readPixelSampleCounts` first / sized the heap wrong, and checking
+        // first avoids a confusing partial write before the error surfaces.
         self.verify_counts(y, &per_pixel, sample_counts)?;
 
         // De-interleave channel-by-channel in *file channel order* so the read
@@ -1429,13 +1412,13 @@ impl DeepScanLineInputFileState {
     /// lines (C++ hands `readPixels` per-pixel pointers, so lines outside
     /// the request never matter).
     ///
-    /// D-07 / D-10: sourced from the caller's own `sample_counts` buffer
+    /// Sourced from the caller's own `sample_counts` buffer
     /// (already fully populated, independently per chunk, by the mandatory
     /// first `read_pixel_sample_counts` pass) via the growable
     /// [`RowPrefixCache`](crate::deep::sample_table::RowPrefixCache) — never
     /// by re-decoding an earlier chunk's own count-table bytes from the
     /// stream. That old approach (a) made reading line `y` depend on every
-    /// earlier chunk being intact (D-07: a damaged/missing chunk anywhere
+    /// earlier chunk being intact (a damaged/missing chunk anywhere
     /// before `y` failed the read), and (b) could leave the stream cursor
     /// positioned at the WRONG chunk: `read_data_line` calls this only after
     /// already seeking to line `y`'s own chunk, so decoding earlier chunks
@@ -1457,9 +1440,9 @@ impl DeepScanLineInputFileState {
     /// allocated arrays sized exactly by the prior `readPixelSampleCounts`.
     fn verify_counts(&self, y: i32, per_pixel: &[u32], sample_counts: &[u8]) -> Result<()> {
         for (i, x) in (self.min_x..=self.max_x).enumerate() {
-            // D-15: a negative/out-of-range count address used to be silently
-            // skipped (`continue`), contradicting the F3 hard-error policy
-            // (`sample_count_at`'s own rule) — this is a Rust-only guard with
+            // A negative/out-of-range count address is a hard error, not
+            // silently skipped, matching the crate's hard-error policy for
+            // bad count addresses (`sample_count_at`'s own rule) — this is a Rust-only guard with
             // no C++ equivalent, so it must be at least as strict as the rest
             // of the crate, not more lenient.
             let off = count_byte_offset(
@@ -1495,7 +1478,7 @@ impl DeepScanLineInputFileState {
 }
 
 // ---------------------------------------------------------------------------
-// W3.9 phase B — pure per-line pipeline functions (deep scanline reader)
+// Pure per-line pipeline functions (deep scanline reader)
 // ---------------------------------------------------------------------------
 
 /// One scanline's fetched-but-not-decoded deep chunk: the count table
@@ -1519,15 +1502,14 @@ struct RawDeepLine {
 /// parameterised so the serial and parallel paths stay a single source of
 /// truth.
 ///
-/// (alloc audit follow-up, 2026-09-24) Was a single combined `dest: &mut
-/// [u8]` + `dest_base: usize` -- wrong for 2+ active channels, since deep's
-/// `sample_data` heap is per-channel-contiguous and a single destination
+/// One destination per slice, not a single combined one: deep's
+/// `sample_data` heap is per-channel-contiguous, so a single destination
 /// cannot represent "this line owns these two disjoint pieces of the
 /// heap" (see `deep_line_write_interval`'s doc for the full story). Each
-/// slice now writes into its OWN `dests[slice_index].piece`, addressed
+/// slice writes into its OWN `dests[slice_index].piece`, addressed
 /// relative to its OWN `dests[slice_index].base`.
 ///
-/// (alloc audit C6-followup, 2026-09-24) Takes the compressor BY REFERENCE
+/// Takes the compressor BY REFERENCE
 /// instead of building one from `compression`/`header` internally -- this
 /// runs from several rayon threads at once, so each worker checks its OWN
 /// compressor out of the call site's `CodecPool` (reused across lines, not
@@ -1669,15 +1651,14 @@ fn local_deep_addr(abs_addr: usize, base: usize) -> Result<usize> {
 /// -- gets an empty `0..0` placeholder, matching `plan_disjoint`'s "empty
 /// range never overlaps, gets an empty piece" contract).
 ///
-/// (alloc audit follow-up, 2026-09-24) Used to return ONE range merged
-/// across every slice via `lo`/`hi` union. That was wrong for any
-/// multi-channel deep image: `sample_data` is per-channel-contiguous (all
+/// Why not ONE range merged across every slice via a `lo`/`hi` union: that
+/// is wrong for any multi-channel deep image: `sample_data` is per-channel-contiguous (all
 /// of channel A's samples, then all of B's, ...), so a single range
 /// spanning from a line's slice in A's region to its slice in B's region
 /// necessarily contains every OTHER line's A and B data sitting in
 /// between -- guaranteed overlap with every other line, for any image with
 /// 2+ active channels. Returning one range PER SLICE (matched to its own
-/// [`crate::misc::ChunkDest`] by `plan_disjoint`) fixes this: two
+/// [`crate::misc::ChunkDest`] by `plan_disjoint`) avoids this: two
 /// different channels' regions never need to be checked against each
 /// other for THIS line at all, since `plan_disjoint`'s flattened check
 /// naturally allows non-overlapping ranges from different channels to
@@ -1795,7 +1776,7 @@ fn write_fill_value(dst: &mut [u8], type_: PixelType, fill_value: f64) -> Result
 }
 
 // ---------------------------------------------------------------------------
-// Tests — write (W7-2) → read (W7-3) round-trip (the key correctness gate)
+// Tests — write → read round-trip (the key correctness gate)
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -1940,7 +1921,7 @@ mod tests {
         fb
     }
 
-    /// Write `img` to an in-memory deep EXR via the W7-2 writer.
+    /// Write `img` to an in-memory deep EXR via the deep scanline writer.
     fn write_deep(img: &DeepImage, comp: Compression, line_order: LineOrder) -> Vec<u8> {
         let header = make_header(img, comp, line_order);
         let (sc, x_stride, y_stride) = build_count_buffer(img);
@@ -2028,7 +2009,7 @@ mod tests {
         build_sample_heap(img).0.len()
     }
 
-    /// W1.2: a deep file whose chunk offset table was never written (an
+    /// A deep file whose chunk offset table was never written (an
     /// interrupted write) must still read — the table is reconstructed by
     /// scanning the deep chunks (C++ `chunk.c::reconstruct_chunk_table`).
     #[test]
@@ -2053,7 +2034,7 @@ mod tests {
         }
     }
 
-    /// D-13 — `is_complete()`: a fully-written file reports complete; a file
+    /// `is_complete()`: a fully-written file reports complete; a file
     /// whose on-disk offset table was zeroed (and cannot be reconstructed
     /// because the FIRST chunk's own bytes are also gone) reports incomplete.
     #[test]
@@ -2091,7 +2072,7 @@ mod tests {
         round_trip(&img, Compression::NoCompression, LineOrder::IncreasingY);
     }
 
-    /// W3.9 phase B: read the SAME multi-line deep scanline file with
+    /// Read the SAME multi-line deep scanline file with
     /// `num_threads` in {0, 1, 2, 3, 8, 17} and assert every thread count
     /// produces byte-identical sample data (and matching counts) — the deep
     /// analogue of the flat readers' parallel determinism tests. A
@@ -2099,13 +2080,11 @@ mod tests {
     /// pixels) exercises the `samples_before`/interval-planner addressing
     /// across chunk boundaries.
     ///
-    /// (alloc audit follow-up, 2026-09-24) `sample_image` uses TWO channels
-    /// (A, Z) -- this is the "2+ channel" half of the required coverage
-    /// (see `Probe::PlanDisjointAccepted`): before the
-    /// per-slice `plan_disjoint` generalization, this exact test's parallel
-    /// fast path NEVER engaged (confirmed by instrumenting it during that
-    /// investigation), silently exercising only the serial fallback despite
-    /// its name. The single-channel counterpart is
+    /// `sample_image` uses TWO channels (A, Z) -- this is the "2+ channel"
+    /// half of the required coverage (see `Probe::PlanDisjointAccepted`):
+    /// with a single merged write interval per line, this test's parallel
+    /// fast path would never engage and would silently exercise only the
+    /// serial fallback. The single-channel counterpart is
     /// `parallel_read_single_channel_is_byte_identical_across_thread_counts`.
     #[test]
     fn parallel_read_is_byte_identical_to_serial_across_thread_counts() {
@@ -2219,32 +2198,7 @@ mod tests {
         }
     }
 
-    /// (alloc audit C6-followup, 2026-09-24) Proves a `NUM_LINES`-line
-    /// `read_pixels` call stopped constructing one data compressor per LINE.
-    ///
-    /// **Honest scope note**: this exercises the SERIAL path
-    /// (`read_data_line` -> persistent `self.data_compressor`), not the
-    /// parallel one. Investigated empirically why: `read_pixels_parallel`
-    /// gates on [`crate::misc::plan_disjoint`], which rejects any two
-    /// ADJACENT non-empty lines because `deep_line_write_interval`
-    /// deliberately pads each line's bounding box by one sample's worth of
-    /// bytes past its true end (a documented, intentional
-    /// over-approximation — see that function's own doc). Since the writer
-    /// packs real lines byte-adjacent with zero gap, this padding makes
-    /// EVERY pair of temporally-adjacent non-empty lines overlap by
-    /// construction, so `read_pixels_parallel` returns `Ok(false)` (falls
-    /// back to serial) for essentially any real deep-scanline image with
-    /// more than a handful of populated lines — confirmed directly: even
-    /// the existing `parallel_read_zips_matches_across_thread_counts` test
-    /// (2 channels, 30 lines) silently takes the serial fallback on every
-    /// `num_threads` value it tries. This is a distinct, pre-existing
-    /// finding (not introduced by this change, and this function does not
-    /// touch `plan_disjoint`/`deep_line_write_interval`), recorded in
-    /// `.bughunt/alloc_audit.md`'s closing note rather than fixed here.
-    /// (Since fixed: the deep parallel read engages, see
-    /// `Probe::DeepScanReadParallel`, and codecs come from a `CodecPool`.)
-    /// This test proves the SERIAL persistent-field half of the fix.
-    /// Negative test (alloc audit follow-up, 2026-09-24): a genuinely
+    /// Negative test: a genuinely
     /// ALIASED frame buffer -- two different channels' slices pointing
     /// into OVERLAPPING memory (a real caller mistake, not something the
     /// file format itself could cause) -- must still produce a correct,
@@ -2305,6 +2259,10 @@ mod tests {
         }
     }
 
+    /// Proves a `NUM_LINES`-line `read_pixels` call does not construct one
+    /// data compressor per LINE. This exercises the SERIAL path
+    /// (`read_data_line` -> persistent `self.data_compressor`); the parallel
+    /// path's codecs come from a `CodecPool`.
     #[test]
     fn read_pixels_builds_few_compressors_not_one_per_line() {
         const NUM_LINES: i32 = 200;
@@ -2336,7 +2294,7 @@ mod tests {
         let expected_heap = build_sample_heap(&img).0;
 
         let mut is = MemIStream::new(bytes.clone());
-        // T8: pin the serial path; the per-thread probe only sees construction on
+        // Pin the serial path; the per-thread probe only sees construction on
         // this thread, so a global thread count > 1 would pass vacuously.
         let mut inf = DeepScanLineInputFile::with_num_threads(&mut is, Some(0)).unwrap();
         inf.set_frame_buffer(&fb).unwrap();
@@ -2540,7 +2498,7 @@ mod tests {
         }
     }
 
-    // -- F1: allocation-guard rejection paths (malformed chunk size fields) -----
+    // -- Allocation-guard rejection paths (malformed chunk size fields) -----
 
     /// Byte offset of the (single) chunk in a 1x1 deep scanline file: parse the
     /// header length, then read the first line-offset slot.  Chunk field layout
@@ -2628,11 +2586,11 @@ mod tests {
     /// A `packedDataSize` larger than `unpackedDataSize` (here `u64::MAX`, also
     /// the near-`u64::MAX` allocation path) must be rejected before allocating.
     ///
-    /// Round-4 verifier P1 fix: the rejection now happens at the FIRST chunk
-    /// access (`read_pixel_sample_counts`), not only at `read_pixels` — ported
-    /// C++'s own leader validation (`OpenEXRCore/chunk.c::
-    /// read_and_validate_chunk_leader`) into `seek_chunk`, the ONE place all
-    /// three deep chunk leader sizes are parsed, and confirmed against C++:
+    /// The rejection happens at the FIRST chunk access
+    /// (`read_pixel_sample_counts`), not only at `read_pixels` — C++'s own
+    /// leader validation (`OpenEXRCore/chunk.c::
+    /// read_and_validate_chunk_leader`) is ported into `seek_chunk`, the ONE
+    /// place all three deep chunk leader sizes are parsed, matching C++:
     /// `readPixelSampleCounts` and `readPixels` both call the SAME
     /// `exr_read_scanline_chunk_info` (`ImfDeepScanLineInputFile.cpp:526/547`
     /// vs `:638`), which performs this exact leader validation
@@ -2660,8 +2618,8 @@ mod tests {
         }
     }
 
-    /// Round-4 verifier P1: `raw_pixel_data` (the `copy_pixels` raw-chunk
-    /// path, D-13) must apply the SAME leader bound as the normal decode
+    /// `raw_pixel_data` (the `copy_pixels` raw-chunk
+    /// path) must apply the SAME leader bound as the normal decode
     /// path, not allocate straight from an attacker-controlled on-wire size.
     /// Crafts a chunk whose `packedDataSize` field claims ~16 EiB
     /// (`u64::MAX`) -- if this test completes at all (rather than hanging or
@@ -2684,9 +2642,9 @@ mod tests {
         }
     }
 
-    /// D-01: a HALF file channel read into a FLOAT frame-buffer slice must
+    /// A HALF file channel read into a FLOAT frame-buffer slice must
     /// convert each sample (`f32::from(Half)`), not raw-copy 2 file bytes
-    /// into a 4-byte slot (which used to leave the upper bytes as stale heap
+    /// into a 4-byte slot (which would leave the upper bytes holding stale
     /// content instead of the correct value).
     #[test]
     fn d01_converts_half_file_channel_to_float_slice() {
@@ -2757,15 +2715,15 @@ mod tests {
         }
     }
 
-    /// D-02: a crafted chunk whose declared sizes are internally consistent
+    /// A crafted chunk whose declared sizes are internally consistent
     /// (matching a huge decoded count table) but exceed `INT_MAX` must be
     /// rejected before the multi-gigabyte allocation is attempted.
     ///
-    /// Round-4 verifier P1 fix: `unpacked`/`packedData` here are set to
-    /// `i32::MAX * 6`, over the `i32::MAX` leader bound `seek_chunk` now
+    /// `unpacked`/`packedData` here are set to
+    /// `i32::MAX * 6`, over the `i32::MAX` leader bound `seek_chunk`
     /// enforces (see `rejects_packed_data_over_unpacked`'s doc for why C++
     /// validates the leader on EVERY chunk-info read, including
-    /// `readPixelSampleCounts`) — pass 1 now rejects it too, before pass 2
+    /// `readPixelSampleCounts`) — pass 1 rejects it, before pass 2
     /// (and its would-be giant allocation) is ever reached.
     #[test]
     fn d02_rejects_internally_consistent_but_oversize_chunk() {
@@ -2795,7 +2753,7 @@ mod tests {
         }
     }
 
-    /// D-05: a compressed count table that packs down to zero bytes (every
+    /// A compressed count table that packs down to zero bytes (every
     /// pixel has zero samples) is a valid, all-zero row, not a corrupt chunk.
     #[test]
     fn d05_zero_length_count_table_reads_as_zero_counts() {
@@ -2816,7 +2774,7 @@ mod tests {
         assert_eq!(u32::from_le_bytes(counts.try_into().unwrap()), 0);
     }
 
-    /// D-08: a fill-list slice (no matching file channel) must still have
+    /// A fill-list slice (no matching file channel) must still have
     /// sampling (1,1) — C++ `ImfDeepScanLineInputFile.cpp:928-929` throws
     /// `InputExc` "Expect sampling of 1" at fill time; we reject it at
     /// `set_frame_buffer`.
@@ -2842,7 +2800,7 @@ mod tests {
         }
     }
 
-    /// D-14: `DeepScanLineOutputFile::from_part` must reject a header whose
+    /// `DeepScanLineOutputFile::from_part` must reject a header whose
     /// `type` already names a different (non-deepscanline) part.
     #[test]
     fn d14_from_part_rejects_type_mismatched_header() {
@@ -2864,7 +2822,7 @@ mod tests {
         }
     }
 
-    /// D-03 / `OpenEXRCore/decoding.c:307-318`: a deep scanline part whose
+    /// `OpenEXRCore/decoding.c:307-318`: a deep scanline part whose
     /// `version` attribute is not 1 must be rejected.
     #[test]
     fn d03_rejects_non_unit_version_attribute() {
@@ -2881,7 +2839,7 @@ mod tests {
         }
     }
 
-    /// D-07: once `read_pixel_sample_counts` has succeeded for a range (per
+    /// Once `read_pixel_sample_counts` has succeeded for a range (per
     /// the documented API contract — it must be called before `read_pixels`),
     /// a later corruption of an EARLIER line's own chunk must not prevent
     /// `read_pixels` from reading a later, uncorrupted line — addressing is

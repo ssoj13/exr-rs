@@ -1,4 +1,4 @@
-//! Thread-scaling baseline (team-lead request, 2026-09-24): real wall-clock
+//! Thread-scaling baseline: real wall-clock
 //! scaling of the FLAT (non-deep) scanline and tiled read+write paths at
 //! increasing thread counts, for ZIP and PIZ, on one big synthetic image --
 //! the input for the user's decision on where to push parallelism next
@@ -6,8 +6,7 @@
 //!
 //! Methodology, matching this repo's other ad-hoc A/B tools
 //! (`ours_only_bench.rs`): a real subprocess-free, in-process measurement,
-//! run under `bench.lock` (checked/held by whoever launches this, not by
-//! the binary itself), 2 runs, median+min per cell (median of an even-sized
+//! run with no other benchmark on the machine, 2 runs, median+min per cell (median of an even-sized
 //! sample here means the LARGER of the two values -- `sorted[len/2]`, same
 //! convention this crate's other harnesses use, not a true statistical
 //! median). WRITE timing re-builds a fresh writer from scratch at each
@@ -42,11 +41,11 @@ const WIDTH: usize = 8192;
 const HEIGHT: usize = 4096;
 const TILE_SIZE: u32 = 64;
 const THREAD_COUNTS: &[i32] = &[1, 2, 4, 8, 16, 24]; // 24 = this machine's logical core count
-const REPEATS: usize = 2; // "2 runs" per team-lead's ask
+const REPEATS: usize = 2;
 
 // ---------------------------------------------------------------------------
 // Content generator -- same shape as `benches/parallel.rs`'s, but ALL FOUR
-// channels HALF (team-lead: "half RGBA"), 8 bytes/pixel, not the 2+2+2+4
+// channels HALF ("half RGBA"), 8 bytes/pixel, not the 2+2+2+4
 // RGB-half/A-float layout `benches/parallel.rs` uses.
 // ---------------------------------------------------------------------------
 

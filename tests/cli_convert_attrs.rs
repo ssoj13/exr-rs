@@ -1,4 +1,4 @@
-//! End-to-end gate for W4.1: `exr-rs convert` must not lose header metadata.
+//! End-to-end gate: `exr-rs convert` must not lose header metadata.
 //!
 //! The facade used to rebuild the output header from `Image`'s own fields only,
 //! so every comment / chromaticity / custom / opaque attribute a file carried
@@ -141,7 +141,7 @@ fn convert_preserves_header_metadata() {
 /// Re-encoding a **C++-written** file with the same codec must reproduce it
 /// byte for byte.
 ///
-/// This is the tightest possible statement of W4.1 plus the `type` fix: the
+/// This is the tightest possible statement of the metadata fix plus the `type` fix: the
 /// facade used to (a) drop the source header's attributes and (b) add a
 /// `type:string:13` attribute real C++ never writes for a single-part scanline
 /// file (C++ only *fixes* an existing type, `ImfOutputFile.cpp:775`). Either

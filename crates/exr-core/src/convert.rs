@@ -5,7 +5,7 @@
 //!
 //! Every reader/writer/facade/downstream-crate conversion of one pixel sample
 //! from one [`crate::attr::PixelType`] to another goes through this module
-//! (W4.6 SSOT dedup) instead of a hand-rolled copy — see `misc.rs`'s
+//! instead of a hand-rolled copy — see `misc.rs`'s
 //! `copy_into_frame_buffer` for the highest-traffic caller.
 //!
 //! Port target (pinned tag v3.3.11):

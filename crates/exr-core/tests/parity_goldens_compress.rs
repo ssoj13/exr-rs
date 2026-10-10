@@ -1,10 +1,10 @@
-//! Engagement check for the C++ parity goldens (`.bughunt/engagement_audit.md` U21).
+//! Engagement check for the C++ parity goldens.
 //!
 //! `parity_exr.rs` proves our encoder/decoder is byte-identical to C++ 3.4.15 on
 //! every committed codec golden. That proof is only about the CODEC if the chunks
 //! actually went through it: a chunk that does not shrink is stored raw, and a
-//! raw chunk is byte-identical for any codec (the round-3 7x5 image had exactly
-//! this hole). These tests read each golden as raw chunks and assert that the
+//! raw chunk is byte-identical for any codec (an earlier 7x5 golden image had
+//! exactly this hole). These tests read each golden as raw chunks and assert that the
 //! codec, not the raw-store fallback, produced the stored bytes.
 //!
 //! The expected raw size of a chunk is derived here, independently of

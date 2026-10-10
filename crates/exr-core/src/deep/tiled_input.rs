@@ -14,13 +14,13 @@
 //! cumulative-to-per-pixel count conversion all live inside the C core.  A
 //! literal token-for-token port of the v3.3.11 `.cpp` would have to port the
 //! entire C core first (out of scope) -- exactly the situation of
-//! [`crate::tiled::TiledInputFile`] (Phase 6) and
-//! [`crate::deep::DeepScanLineInputFile`] (W7-3).  This module therefore fuses
-//! those two precisely-ported readers: it mirrors the **Phase 6 tiled reader**'s
+//! [`crate::tiled::TiledInputFile`] and
+//! [`crate::deep::DeepScanLineInputFile`].  This module therefore fuses
+//! those two precisely-ported readers: it mirrors the **tiled reader**'s
 //! container handling (offset-table read + reconstruction, chunk seek, tile /
-//! level validation, chunk-coord sanity check) and the **W7-3 deep scanline
+//! level validation, chunk-coord sanity check) and the **deep scanline
 //! reader**'s two-pass count-then-data algorithm, applied over a tile rectangle.
-//! Both are the exact inverse of the W7-4a
+//! Both are the exact inverse of the
 //! [`DeepTiledOutputFile`][crate::deep::DeepTiledOutputFile] writer, so this
 //! reader round-trips it pixel-exact and count-exact.
 //!
@@ -39,7 +39,7 @@
 //!   sample data and scatters each channel's samples into the caller's
 //!   per-pixel arrays via the [`DeepSlice`][crate::deep::DeepSlice] addressing.
 //!
-//! # The deep tiled chunk byte layout (the inverse of W7-4a `writeTileData`)
+//! # The deep tiled chunk byte layout (the inverse of the writer's `writeTileData`)
 //!
 //! Each chunk is (all multi-byte fields Xdr little-endian):
 //!
@@ -72,9 +72,9 @@
 //! ```
 //!
 //! This is the tile-rectangle analogue of the deep scanline reader's per-line
-//! first difference, and the inverse of the W7-4a writer's per-row accumulation.
+//! first difference, and the inverse of the writer's per-row accumulation.
 //!
-//! # The raw count-table store (the whole-tile-padding gotcha -- see W7-4a)
+//! # The raw count-table store (the whole-tile-padding gotcha)
 //!
 //! The writer's count-table compressor is sized for
 //! `maxSampleCountTableSize = tileDesc.ySize * tileDesc.xSize * 4` -- the WHOLE
@@ -92,7 +92,7 @@
 //!
 //! The C++ deep `base` is a `char**` (per-pixel pointers into a sample heap),
 //! impossible in safe Rust (zero `unsafe`, no FFI).  This reader uses the same
-//! **flat-buffer model** as the W7-4a writer (see its module docs): the caller
+//! **flat-buffer model** as the deep tiled writer (see its module docs): the caller
 //! provides a flat **sample-count buffer** (one `u32` per pixel, addressed by
 //! the sample-count slice's byte strides) and a flat per-channel **sample heap**
 //! in which each pixel's sample array is laid out contiguously in `(x, y)`
@@ -104,13 +104,6 @@
 //! [`crate::deep::sample_table`] helper) -- the exact inverse of the writer's
 //! `gather_tile`.  The bytes consumed are byte-identical to the writer's, so the
 //! round-trip is exact.
-//!
-//! # What this Wave (W7-4b) intentionally does NOT cover (tracked, not faked)
-//!
-//! * `rawTileData` / mem-decode helpers (the `copyPixels` path), multipart
-//!   `partNumber` chunk prefix, threading (`ThreadPool`/`TileBufferTask`).  The
-//!   single-threaded two-pass read here is observationally identical for the
-//!   bytes it consumes.
 
 use crate::attr::name::Name;
 use crate::attr::tile_description::{LevelMode, LevelRoundingMode, TileDescription};
@@ -137,11 +130,10 @@ use imath_rs::{Box2i, V2i};
 /// (the writer writes each running total via `Xdr::write<int>`).
 const SIZE_INT: usize = 4;
 
-/// `raw_tile_data`'s return -- D-13, a named struct (not the 7-element tuple
-/// this used to be) both to keep the signature simple (clippy
-/// `type_complexity`) and because a long `Result` tuple makes a mutation-
-/// testing tool enumerate the PRODUCT of every element's candidate return
-/// values (round-5 audit finding, see `.bughunt`: an even longer tuple in
+/// `raw_tile_data`'s return -- a named struct (not a 7-element tuple) both to
+/// keep the signature simple (clippy `type_complexity`) and because a long
+/// `Result` tuple makes a mutation-testing tool enumerate the PRODUCT of
+/// every element's candidate return values (an even longer tuple in
 /// `tiled::output::TiledOutputFileState::compute` made `cargo mutants --list`
 /// blow up).
 #[derive(Debug)]
@@ -170,7 +162,7 @@ pub struct RawTileData {
 // ---------------------------------------------------------------------------
 
 /// Per-channel deep tiled read descriptor -- the read-side counterpart of the
-/// W7-4a writer's `TOutSliceInfo` and the inverse of the C++ deep tiled decode
+/// deep tiled writer's `TOutSliceInfo` and the inverse of the C++ deep tiled decode
 /// channel handling.
 ///
 /// Built by [`DeepTiledInputFile::set_frame_buffer`] from the file's channel
@@ -218,24 +210,24 @@ struct TInSliceInfo {
 /// [`read_tiles`][DeepTiledInputFile::read_tiles] (fills the samples).
 ///
 /// The reader borrows the caller's [`IStream`] for its whole lifetime.  Its
-/// structure mirrors the W7-4a
+/// structure mirrors the
 /// [`DeepTiledOutputFile`][crate::deep::DeepTiledOutputFile] writer field-for-
 /// field so the read path is the exact inverse of the write path.
 pub struct DeepTiledInputFile<'a> {
     /// Borrowed input stream (the C++ `_streamData->is`).
     stream: &'a mut dyn IStream,
 
-    /// Everything else this reader owns — the read-side S-16 mirror (round 4
-    /// continuation, mirrors `crate::tiled::input::TiledInputFileState`):
-    /// factored into its own, stream-free struct so
-    /// [`crate::multipart::MultiPartInputFile`] can persist it across
-    /// separate `deep_tiled_input_part` calls (once wired — see
-    /// `deep/CLAUDE.md`) instead of rebuilding a fresh reader every call.
+    /// Everything else this reader owns (mirrors
+    /// `crate::tiled::input::TiledInputFileState`): factored into its own,
+    /// stream-free struct so [`crate::multipart::MultiPartInputFile`] can
+    /// persist it across separate `deep_tiled_input_part` calls instead of
+    /// rebuilding a fresh reader every call.
     state: DeepTiledInputFileState,
 }
 
 /// Every field of C++ `DeepTiledInputFile::Data` except the stream — the
-/// reader's **persisted** per-part state (read-side S-16 mirror).
+/// reader's **persisted** per-part state, owned by the multipart file so a
+/// part view resumes where the previous one left off.
 pub(crate) struct DeepTiledInputFileState {
     /// The image header -- C++ `_data->header`.
     header: Header,
@@ -273,7 +265,7 @@ pub(crate) struct DeepTiledInputFileState {
     /// `_data->frameBufferValid`.
     frame_buffer_valid: bool,
     /// The caller's frame buffer, kept for [`frame_buffer`][Self::frame_buffer]
-    /// (D-13) -- C++ `const DeepFrameBuffer& frameBuffer() const`. Cloned in
+    /// -- C++ `const DeepFrameBuffer& frameBuffer() const`. Cloned in
     /// `set_frame_buffer`; `DeepFrameBuffer::new()` (empty) until then.
     caller_frame_buffer: DeepFrameBuffer,
 
@@ -288,7 +280,7 @@ pub(crate) struct DeepTiledInputFileState {
     sample_count_y_stride: i32,
     sample_count_x_tile_coords: bool,
     sample_count_y_tile_coords: bool,
-    /// D-10 fix: a growable per-row sample-count prefix cache (rebuilt by
+    /// A growable per-row sample-count prefix cache (rebuilt by
     /// `begin_range` at the start of every `read_tiles` call, so it is
     /// addressed from that call's tile rectangle), sourced from the caller's
     /// `sample_counts` buffer, so `scatter_tile`/`fill_tile`'s per-pixel
@@ -312,15 +304,12 @@ pub(crate) struct DeepTiledInputFileState {
     /// Persistent (built once at construction) -- see `data_compressor`'s doc.
     count_compressor: Option<Box<dyn Compressor>>,
     /// The **separate** sample-DATA decompressor for the fully SERIAL read
-    /// path (`read_tile_data`), or `None` for NONE. (alloc audit C6-followup,
-    /// 2026-09-24) Used to be rebuilt **per chunk** sized to that chunk's
-    /// exact `unpackedDataSize` (a single tile's sample count is unbounded a
-    /// priori, so a fixed construction-time bound couldn't be chosen) --
-    /// necessary back when a codec's decode capacity could only come from a
-    /// construction-time bound. Now that `Compressor::uncompress` takes an
-    /// explicit `expected_len` per call (alloc audit C6), THIS field is
-    /// built once here (any construction size works) and reused, matching
-    /// C2's "persistent codec, not one per chunk" fix. The genuinely
+    /// path (`read_tile_data`), or `None` for NONE. A single tile's sample
+    /// count is unbounded a priori, so no fixed construction-time bound
+    /// fits; because `Compressor::uncompress` takes an explicit
+    /// `expected_len` per call, THIS field is built once here (any
+    /// construction size works) and reused -- a persistent codec, not one
+    /// per chunk. The genuinely
     /// PARALLEL decode path (`decode_and_scatter_tile`, run from several
     /// rayon threads at once) checks codecs out of a `CodecPool` instead:
     /// about one per worker, reused across tiles.
@@ -335,7 +324,7 @@ pub(crate) struct DeepTiledInputFileState {
     /// part; when `None` there is no such prefix.
     part_number: Option<i32>,
 
-    /// W3.9 phase B: this file's captured thread count — see
+    /// This file's captured thread count — see
     /// [`crate::threading::ThreadCount`] and the deep scanline reader's
     /// identical field. Gates [`Self::read_tiles`]'s parallel path; never
     /// touches [`Self::read_pixel_sample_counts`], mirroring C++ (only
@@ -368,7 +357,7 @@ impl<'a> DeepTiledInputFile<'a> {
     }
 
     /// Same as [`Self::new`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::new`]).
+    /// override (`None` behaves exactly like [`Self::new`]).
     pub fn with_num_threads(stream: &'a mut dyn IStream, num_threads: Option<i32>) -> Result<Self> {
         // ONE prologue reader for the whole crate: magic + version word + the
         // header + the chunk offset table (with reconstruction) — C++ likewise
@@ -423,7 +412,7 @@ impl<'a> DeepTiledInputFile<'a> {
     }
 
     /// Same as [`Self::from_part`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::from_part`]).
+    /// override (`None` behaves exactly like [`Self::from_part`]).
     pub fn from_part_mt(
         stream: &'a mut dyn IStream,
         header: Header,
@@ -690,7 +679,7 @@ impl<'a> DeepTiledInputFile<'a> {
     }
 
     /// Read tile `(dx, dy, lx, ly)`'s chunk RAW (still-packed count table +
-    /// sample data, no decompression). D-13, see
+    /// sample data, no decompression). See
     /// [`DeepTiledInputFileState::raw_tile_data`] for the full doc.
     pub fn raw_tile_data(
         &mut self,
@@ -705,8 +694,8 @@ impl<'a> DeepTiledInputFile<'a> {
 
 // ---------------------------------------------------------------------------
 // DeepTiledInputFileState — the state-only construction + algorithm, shared
-// by the owning `DeepTiledInputFile` and a future borrowing part-reader view
-// (read-side S-16 mirror).
+// by the owning `DeepTiledInputFile` and a borrowing part-reader view (the
+// multipart file owns this state so part views resume across calls).
 // ---------------------------------------------------------------------------
 
 impl DeepTiledInputFileState {
@@ -714,10 +703,10 @@ impl DeepTiledInputFileState {
     /// `DeepTiledInputFile::DeepTiledInputFile(InputPartData*)`. Pure (no
     /// stream access at all): the prologue reader
     /// (`multipart::input::read_prologue`) already parses the header + chunk
-    /// offset table before this ever runs — same finding as the deep
-    /// scanline reader's own `from_part_mt` and fix-scanline's
-    /// `ScanLineInputFileState::from_part_mt`. `num_threads` is the W3.9
-    /// phase B per-file override (`None` = capture the current process-wide
+    /// offset table before this ever runs — same as the deep scanline
+    /// reader's own `from_part_mt` and
+    /// `ScanLineInputFileState::from_part_mt`. `num_threads` is the
+    /// per-file override (`None` = capture the current process-wide
     /// default).
     pub(crate) fn from_part_mt(
         header: Header,
@@ -735,7 +724,7 @@ impl DeepTiledInputFileState {
             )));
         }
 
-        // D-03 / `OpenEXRCore/decoding.c:307-318`: a deep part's `version`
+        // `OpenEXRCore/decoding.c:307-318`: a deep part's `version`
         // attribute (defaulted to 1 when absent — `multipart/input.rs`) must
         // be exactly 1; any other value is rejected at decode-init time in
         // C++. This is the per-part deep `version` ATTRIBUTE, distinct from
@@ -760,7 +749,7 @@ impl DeepTiledInputFileState {
         let (num_x_tiles, num_y_tiles, num_x_levels, num_y_levels) =
             precalculate_tile_info(&tile_desc, min_x, max_x, min_y, max_y)?;
 
-        // D-16: match C++ 3.4's actual open-time tile-size bound exactly —
+        // Match C++ 3.4's actual open-time tile-size bound exactly —
         // `OpenEXRCore/validation.c:593-595` rejects a tile description whose
         // `x_size`/`y_size` EACH exceed `INT_MAX/4` (the legacy-writer-only
         // `tileX*tileY*4 > UINT_MAX` product check this used to run instead
@@ -783,7 +772,7 @@ impl DeepTiledInputFileState {
 
         let compression = header.compression()?;
         let count_compressor = new_compressor(compression, max_sample_count_table_size, &header)?;
-        // (alloc audit C6-followup) Any construction size works now that
+        // Any construction size works because
         // `expected_len` is authoritative per `uncompress()` call -- see
         // `data_compressor`'s doc.
         let data_compressor = new_compressor(compression, 0, &header)?;
@@ -835,7 +824,7 @@ impl DeepTiledInputFileState {
     }
 
     // -----------------------------------------------------------------------
-    // Accessors -- thin wrappers (mirror TiledInputFile + the W7-4a writer)
+    // Accessors -- thin wrappers (mirror TiledInputFile + the deep tiled writer)
     // -----------------------------------------------------------------------
 
     /// The image header -- port of `const Header& header() const`.
@@ -844,8 +833,8 @@ impl DeepTiledInputFileState {
     }
 
     /// The currently set frame buffer -- port of
-    /// `const DeepFrameBuffer& DeepTiledInputFile::frameBuffer() const`
-    /// (D-13). Empty until [`set_frame_buffer`][Self::set_frame_buffer] has
+    /// `const DeepFrameBuffer& DeepTiledInputFile::frameBuffer() const`.
+    /// Empty until [`set_frame_buffer`][Self::set_frame_buffer] has
     /// been called.
     pub fn frame_buffer(&self) -> &DeepFrameBuffer {
         &self.caller_frame_buffer
@@ -961,7 +950,7 @@ impl DeepTiledInputFileState {
     }
 
     /// Total number of tiles across every level -- port of
-    /// `DeepTiledInputFile::totalTiles() const` (D-13). Mirrors the flat
+    /// `DeepTiledInputFile::totalTiles() const`. Mirrors the flat
     /// `TiledInputFile`: Σ over every `(lx, ly)` pair of `numXTiles(lx) *
     /// numYTiles(ly)` (`ONE_LEVEL`/`MIPMAP_LEVELS` pair `lx == ly`;
     /// `RIPMAP_LEVELS` is the full cross product).
@@ -990,7 +979,7 @@ impl DeepTiledInputFileState {
 
     /// The `(dx, dy, lx, ly)` of every tile actually present in the file, in
     /// file (on-disk chunk) order -- port of `DeepTiledInputFile::getTileOrder(...)`
-    /// (D-13). Delegates to the same `TileOffsets::get_tile_order` the flat
+    /// Delegates to the same `TileOffsets::get_tile_order` the flat
     /// `TiledInputFile::tile_order` uses (this port always returns the FULL
     /// list sorted by file offset, per that method's own doc note).
     pub fn tile_order(&self) -> Result<crate::tiled::input::TileOrder> {
@@ -1110,8 +1099,8 @@ impl DeepTiledInputFileState {
                 "Invalid base pointer, please set a proper sample count slice.".into(),
             ));
         }
-        // D-08 / `ImfDeepTiledInputFile.cpp:1212`: the sample-count slice's
-        // sampling was never checked (the loop above only walks the named
+        // `ImfDeepTiledInputFile.cpp:1212`: the sample-count slice's
+        // sampling needs its own check (the loop above only walks the named
         // deep slices, which does not include the count slice) — "Tiled data
         // should not have subsampling." applies to it too.
         if sc_slice.x_sampling != 1 || sc_slice.y_sampling != 1 {
@@ -1301,7 +1290,7 @@ impl DeepTiledInputFileState {
             }
         }
 
-        // W3.9 phase B gate: parallel only when there is more than one tile
+        // Parallel only when there is more than one tile
         // AND the captured thread count is `> 1`, matching the flat tiled
         // reader and mirroring C++'s asymmetry that only `readTiles`,
         // never `readPixelSampleCounts`, is ever threaded.
@@ -1372,7 +1361,7 @@ impl DeepTiledInputFileState {
 
         // Serial pre-pass: one shared per-tile `samples_before_pixel` matrix
         // (reused across every channel — see the scope-restriction doc
-        // above), extending the persisted `RowPrefixCache` (D-10) in the
+        // above), extending the persisted `RowPrefixCache` in the
         // SAME row-major order `coords` was built in (ty outer, tx inner),
         // which keeps its row-level extension monotonic in `y` — preserving
         // the amortized-linear guarantee exactly as the deep scanline
@@ -1392,7 +1381,7 @@ impl DeepTiledInputFileState {
 
         // Fetch every tile's chunk (leader + count table decode + packed
         // sample-data bytes) on the calling thread, and verify each tile's
-        // counts against the caller's buffer (D-15) while still serial.
+        // counts against the caller's buffer while still serial.
         let mut raws = Vec::with_capacity(coords.len());
         for (&(tx, ty), tr) in coords.iter().zip(&tile_ranges) {
             let raw = self.fetch_tile(stream, tx, ty, lx, ly)?;
@@ -1415,8 +1404,8 @@ impl DeepTiledInputFileState {
         let slices = &self.slices;
         let count = self.num_threads;
 
-        // (alloc audit follow-up, 2026-09-25) A real checkout/checkin
-        // `CodecPool` instead of `map_init` -- see `Compressor`'s trait
+        // A real checkout/checkin `CodecPool` instead of `map_init` (which
+        // builds a codec per item) -- see `Compressor`'s trait
         // doc and `crate::compressor::CodecPool`'s own doc.
         let codec_pool = crate::compressor::CodecPool::new();
         let codec_pool = &codec_pool;
@@ -1449,14 +1438,14 @@ impl DeepTiledInputFileState {
         Ok(true)
     }
 
-    /// W3.9 phase B: fetch tile `(dx, dy, lx, ly)`'s chunk — leader + count
+    /// Fetch tile `(dx, dy, lx, ly)`'s chunk — leader + count
     /// table + packed sample-data bytes — WITHOUT decompressing the sample
     /// data or scattering. Mirrors the deep scanline reader's `fetch_line` —
     /// see its doc for why the count table is decoded here rather than
     /// deferred. `tile_range` is passed in (already computed by the caller)
     /// to avoid recomputing it.
     ///
-    /// (alloc audit C6-followup, 2026-09-24) `&mut self`, using the
+    /// `&mut self`, using the
     /// persistent `self.count_compressor` — exactly ONE caller
     /// (`read_tiles_parallel`'s serial pre-pass for-loop, itself `&mut
     /// self`), fetching every tile ONE AFTER ANOTHER on the calling thread
@@ -1699,12 +1688,11 @@ impl DeepTiledInputFileState {
         let packed_data = xdr::read_u64(&mut *stream)?;
         let unpacked = xdr::read_u64(&mut *stream)?;
 
-        // Round-4 verifier P1 fix (D-02 reopened, tiled sibling of the
-        // scanline fix in `scanline_input.rs::seek_chunk`): this is the ONE
-        // place all three deep tile chunk leader sizes are parsed, feeding
-        // BOTH the normal decode path AND the raw `copy_pixels` path
-        // (`raw_tile_data`, added later for D-13, which allocated straight
-        // from these sizes with no cap). Ported C++'s own leader-parse
+        // Tiled sibling of the scanline bound in
+        // `scanline_input.rs::seek_chunk`: this is the ONE place all three
+        // deep tile chunk leader sizes are parsed, feeding BOTH the normal
+        // decode path AND the raw `copy_pixels` path (`raw_tile_data`, which
+        // allocates straight from these sizes). Ported C++'s own leader-parse
         // bounds (`OpenEXRCore/chunk.c:1360-1432`,
         // `read_and_validate_chunk_leader`'s deep-tiled branch) exactly:
         // unlike the scanline leader, C++ does NOT cap the sample-table size
@@ -1742,10 +1730,10 @@ impl DeepTiledInputFileState {
     /// Read tile `(dx, dy, lx, ly)`'s chunk RAW -- the packed (still
     /// compressed, or already-raw for NONE/no-shrink) count-table and
     /// sample-data bytes, without decompressing or scattering into a frame
-    /// buffer -- D-13, port of `void rawTileData(int& dx, int& dy, int& lx,
+    /// buffer -- port of `void rawTileData(int& dx, int& dy, int& lx,
     /// int& ly, char* pixelData, uint64_t& pixelDataSize)`
     /// (`ImfDeepTiledInputFile.cpp`). Same exact-coordinate contract as the
-    /// flat writer's `TiledInputFileState::raw_tile_data` (T-15 re-audit):
+    /// flat reader's `TiledInputFileState::raw_tile_data`:
     /// `copyPixels` always supplies coordinates it has itself already
     /// computed (from `tile_order()` or `next_tile_coord`), so there is no
     /// "next tile" cursor semantics to port, only the exact-coordinate form.
@@ -1775,7 +1763,7 @@ impl DeepTiledInputFileState {
         }
         // `seek_chunk` already bounds `packed_data`/`unpacked` to `i32::MAX`
         // and both `packed_count`/`packed_data` to the remaining bytes of the
-        // file (round-4 verifier P1 fix); `try_filled_vec` (fallible
+        // file; `try_filled_vec` (fallible
         // `try_reserve`) is still used rather than `vec![0u8; n]`, matching
         // every other attacker-controlled-size allocation in this crate.
         let (packed_count, packed_data, unpacked) = self.seek_chunk(stream, dx, dy, lx, ly)?;
@@ -1829,7 +1817,7 @@ impl DeepTiledInputFileState {
 
         let (packed_count, packed_data, unpacked) = self.seek_chunk(stream, dx, dy, lx, ly)?;
 
-        // F1: reject an implausible count-table size BEFORE allocating a buffer
+        // Reject an implausible count-table size BEFORE allocating a buffer
         // from the untrusted on-wire `packed_count`.  The writer stores the count
         // table either compressed (strictly smaller than `maxSampleCountTableSize`)
         // or raw padded to exactly `maxSampleCountTableSize`, so `packed_count` can
@@ -1850,7 +1838,7 @@ impl DeepTiledInputFileState {
         stream.read(&mut packed)?;
 
         // Decompress the count table with its OWN decompressor, mirroring the
-        // W7-4a writer's TWO raw-store mechanisms (same as the deep scanline
+        // deep tiled writer's TWO raw-store mechanisms (same as the deep scanline
         // reader's `read_count_table`):
         //   * the writer's OUTER "no-shrink (or no compressor)" branch stores the
         //     raw table padded with zeroes out to EXACTLY `maxSampleCountTableSize`
@@ -1865,7 +1853,7 @@ impl DeepTiledInputFileState {
         // In BOTH raw cases the stored bytes are the uncompressed cumulative
         // table (its first `table_data_size` bytes); only a genuinely smaller
         // `packed` is a real compressed stream.
-        // D-05 / C++ `OpenEXRCore/decoding.c:625-662`, `chunk.c:1379-1382`: a
+        // C++ `OpenEXRCore/decoding.c:625-662`, `chunk.c:1379-1382`: a
         // NONE-compressed count table only needs to be a multiple of 4 bytes
         // (it need not cover the full tile rectangle) — a short table is the
         // raw cumulative ints for the leading rows/pixels, zero-padded for
@@ -1886,7 +1874,7 @@ impl DeepTiledInputFileState {
             buf.resize(table_data_size, 0);
             buf
         } else if packed_count_usize == 0 {
-            // D-05: an absent (zero-length) compressed count table is an
+            // An absent (zero-length) compressed count table is an
             // all-zero row, not an error.
             vec![0u8; table_data_size]
         } else if let Some(c) = self.count_compressor.as_mut() {
@@ -1974,7 +1962,7 @@ impl DeepTiledInputFileState {
     }
 
     /// Read one tile's sample data and scatter it into the caller's flat
-    /// per-channel sample heap -- the inverse of the W7-4a writer's `gather_tile`
+    /// per-channel sample heap -- the inverse of the writer's `gather_tile`
     /// and the port of the deep tiled `readTileData` decode scatter.
     #[allow(clippy::too_many_arguments)]
     fn read_tile_data(
@@ -1997,8 +1985,8 @@ impl DeepTiledInputFileState {
         let mut packed = vec![0u8; packed_data_usize];
         stream.read(&mut packed)?;
 
-        // Decompress with the SEPARATE, persistent data decompressor (alloc
-        // audit C6-followup: `self.data_compressor`, reused across tiles --
+        // Decompress with the SEPARATE, persistent data decompressor
+        // (`self.data_compressor`, reused across tiles --
         // see its field doc), same raw-store rule: if the stored bytes
         // already equal the unpacked size they are raw. Deep is NONE/RLE/
         // ZIPS -- all rectangle-insensitive -- so the scanline `uncompress`
@@ -2036,7 +2024,7 @@ impl DeepTiledInputFileState {
     }
 
     /// De-interleave one tile's decompressed sample data into the caller's flat
-    /// per-channel heap -- the inverse of the W7-4a writer's `gather_tile`.
+    /// per-channel heap -- the inverse of the writer's `gather_tile`.
     ///
     /// Walks the tile rectangle row-major (outer `y`, then each file channel,
     /// then each pixel `x`), exactly as the writer gathered it.  File channels
@@ -2058,7 +2046,7 @@ impl DeepTiledInputFileState {
         sample_data: &mut [u8],
     ) -> Result<()> {
         // Clone the (small) channel list + slice table so the loop body can
-        // call `self.sample_prefix.before_pixel` (`&mut self`, for the D-10
+        // call `self.sample_prefix.before_pixel` (`&mut self`, for the
         // prefix cache) without holding a borrow of `self.header`/`self.slices`
         // alive across it.
         let channels = self.header.channels()?.clone();
@@ -2093,7 +2081,7 @@ impl DeepTiledInputFileState {
                                 ExrError::Input("Per-pixel count index out of range.".into())
                             })? as i64;
                             // Pixel start in the flat per-channel heap (raster
-                            // order over the whole data window).  D-10: O(1)
+                            // order over the whole data window).  O(1)
                             // amortized via the growable `RowPrefixCache`
                             // instead of re-summing from `(min_x, min_y)` on
                             // every single pixel of every channel of every tile.
@@ -2192,7 +2180,7 @@ impl DeepTiledInputFileState {
                 let cnt = *per_pixel.get(row_base + col).ok_or_else(|| {
                     ExrError::Input("Per-pixel count index out of range.".into())
                 })? as i64;
-                // D-10: O(1) amortized via the growable `RowPrefixCache`.
+                // O(1) amortized via the growable `RowPrefixCache`.
                 let pixel_start = self.sample_start(sample_counts, tile_range, slice.x_tile_coords, slice.y_tile_coords, x, y)? as i64
                     * slice.sample_stride as i64;
                 for i in 0..cnt {
@@ -2242,9 +2230,9 @@ impl DeepTiledInputFileState {
                 let off = self.sample_count_base_offset
                     + (y - y_off_sc) as i64 * self.sample_count_y_stride as i64
                     + (x - x_off_sc) as i64 * self.sample_count_x_stride as i64;
-                // D-15: a negative/out-of-range count address used to be
-                // silently skipped (`continue`), contradicting the F3
-                // hard-error policy (`sample_count_at`'s own rule) — this is
+                // A negative/out-of-range count address is a hard error, not
+                // silently skipped, matching the hard-error policy of
+                // `sample_count_at` — this is
                 // a Rust-only guard with no C++ equivalent, so it must be at
                 // least as strict as the rest of the crate, not more lenient.
                 if off < 0 {
@@ -2275,7 +2263,7 @@ impl DeepTiledInputFileState {
 }
 
 // ---------------------------------------------------------------------------
-// W3.9 phase B -- pure per-tile pipeline functions (deep tiled reader)
+// Pure per-tile pipeline functions (deep tiled reader, parallel path)
 // ---------------------------------------------------------------------------
 
 /// One tile's fetched-but-not-decoded deep chunk: the count table already
@@ -2311,11 +2299,11 @@ fn local_deep_tile_addr(abs_addr: usize, base: usize) -> Result<usize> {
 /// when every slice agrees on its tile-coords flags) instead of calling the
 /// stateful `RowPrefixCache` (unsafe to share across threads).
 ///
-/// (alloc audit follow-up, 2026-09-24) Was a single combined `dest`/
-/// `dest_base` -- see `decode_and_scatter_line`'s identical doc for why
-/// that's wrong for 2+ active channels.
+/// Not a single combined `dest`/`dest_base` -- see
+/// `decode_and_scatter_line`'s identical doc for why that's wrong for 2+
+/// active channels.
 ///
-/// (alloc audit C6-followup, 2026-09-24) Takes the compressor BY REFERENCE
+/// Takes the compressor BY REFERENCE
 /// (see `decode_and_scatter_line`'s identical doc) — each worker checks one
 /// out of the call site's `CodecPool`, not one per tile.
 fn decode_and_scatter_tile(
@@ -2397,7 +2385,7 @@ fn decode_and_scatter_tile(
                                     "Deep sample address is out of range (negative).".into(),
                                 ));
                             }
-                            // (alloc audit follow-up) One destination per
+                            // One destination per
                             // (slice, row), matching `deep_tile_write_interval`'s
                             // flat (slice-major, row-minor) emission order.
                             let dest = dests.get_mut(slice_idx * tile_h + row).ok_or_else(|| {
@@ -2452,7 +2440,7 @@ fn decode_and_scatter_tile(
 /// `dest_base`-generalised form of
 /// [`DeepTiledInputFileState::fill_tile`].
 ///
-/// (alloc audit follow-up, 2026-09-24) `dests` is ONE destination PER ROW
+/// `dests` is ONE destination PER ROW
 /// of the tile for THIS slice (`dests[row]`, `tile_h` entries) instead of a
 /// single combined destination -- see `deep_tile_write_interval`'s doc,
 /// bug #3, for why a multi-row tile is not one contiguous byte range even
@@ -2509,7 +2497,7 @@ fn fill_tile_into(
 /// placeholder). [`decode_and_scatter_tile`] indexes this same
 /// `[slice_idx * tile_h + row]` scheme to find its destination.
 ///
-/// (alloc audit follow-up, 2026-09-24) THREE bugs fixed at once, the first
+/// THREE pitfalls this avoids, the first
 /// two documented in `deep::scanline_input`'s `deep_line_write_interval`
 /// (this is its tiled counterpart, same underlying issues):
 /// 1. Despite this doc's own prior "exact, not an over-approximation"
@@ -2607,7 +2595,7 @@ fn write_fill_value(dst: &mut [u8], type_: PixelType, fill_value: f64) -> Result
 }
 
 // ---------------------------------------------------------------------------
-// Tests -- write (W7-4a) -> read (W7-4b) round-trip (the key correctness gate)
+// Tests -- write -> read round-trip (the key correctness gate)
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -2756,7 +2744,7 @@ mod tests {
         fb
     }
 
-    /// Write `img` (whole level 0) to an in-memory deep tiled EXR via W7-4a.
+    /// Write `img` (whole level 0) to an in-memory deep tiled EXR via `DeepTiledOutputFile`.
     fn write_deep_tiled(img: &DeepImg, comp: Compression, td: TileDescription, lo: LineOrder) -> Vec<u8> {
         let header = make_header(img, comp, td, lo);
         let (sc, xs, ys) = build_count_buffer(img);
@@ -2784,7 +2772,7 @@ mod tests {
         }
     }
 
-    /// Full whole-level-0 round-trip: write via W7-4a, read back two-pass, and
+    /// Full whole-level-0 round-trip: write, read back two-pass, and
     /// assert (a) per-pixel COUNTS bit-exact and (b) EVERY sample bit-exact.
     fn round_trip(img: &DeepImg, comp: Compression, td: TileDescription, lo: LineOrder) {
         let bytes = write_deep_tiled(img, comp, td, lo);
@@ -2836,7 +2824,7 @@ mod tests {
         round_trip(&img, Compression::NoCompression, td_one(2, 2), LineOrder::IncreasingY);
     }
 
-    /// W3.9 phase B: read the SAME multi-tile deep tiled file with
+    /// Read the SAME multi-tile deep tiled file with
     /// `num_threads` in {0, 1, 2, 3, 8, 17} and assert every thread count
     /// produces byte-identical sample data (and matching counts) — the deep
     /// tiled analogue of the flat tiled reader's parallel determinism test.
@@ -2845,7 +2833,7 @@ mod tests {
     /// pattern exercising the per-pixel `samples_before` addressing across
     /// tile boundaries.
     ///
-    /// (alloc audit follow-up, 2026-09-24) ONE channel ("A") -- the
+    /// ONE channel ("A") -- the
     /// "1-channel" half of the required coverage (see
     /// `Probe::PlanDisjointAccepted`); the 2+-channel
     /// counterpart is `parallel_read_zips_matches_across_thread_counts`
@@ -2896,7 +2884,7 @@ mod tests {
         }
     }
 
-    /// T1: slices that disagree on `y_tile_coords` make the parallel read
+    /// Slices that disagree on `y_tile_coords` make the parallel read
     /// decline (it shares one per-tile prefix matrix across channels) and
     /// read serially with identical results. One tile row starting at y=0
     /// makes tile-relative and absolute y coincide, so the mixed frame
@@ -2993,12 +2981,9 @@ mod tests {
         }
     }
 
-    /// (alloc audit C6-followup, 2026-09-24; interval fix landed
-    /// 2026-09-24) Tiled counterpart of `deep::scanline_input`'s
+    /// Tiled counterpart of `deep::scanline_input`'s
     /// `read_pixels_builds_few_compressors_not_one_per_line` test -- see its
-    /// doc for the full rationale. Originally exercised only the SERIAL
-    /// path (before `deep_tile_write_interval`'s exact-range, per-slice,
-    /// per-row fix), but now that the parallel fast path genuinely engages
+    /// doc for the full rationale. The parallel fast path genuinely engages
     /// too (see `parallel_read_is_byte_identical_to_serial_across_thread_counts`/
     /// `parallel_read_zips_matches_across_thread_counts` above, which
     /// assert engagement directly), this test's own `with_num_threads`
@@ -3019,7 +3004,7 @@ mod tests {
         let expected_heap = build_sample_heap(&img).0;
 
         let mut is = MemIStream::new(bytes.clone());
-        // T8: pin the serial path; the per-thread probe only sees construction on
+        // Pin the serial path; the per-thread probe only sees construction on
         // this thread, so a global thread count > 1 would pass vacuously.
         let mut inf = DeepTiledInputFile::with_num_threads(&mut is, Some(0)).unwrap();
         inf.set_frame_buffer(&fb).unwrap();
@@ -3410,7 +3395,7 @@ mod tests {
         }
     }
 
-    // -- F1: allocation-guard rejection paths (malformed chunk size fields) -----
+    // -- Allocation-guard rejection paths (malformed chunk size fields) -----
 
     /// Byte offset of the (single) tile chunk in a one-tile deep tiled file:
     /// parse the header length, then read the first tile-offset slot.  Chunk
@@ -3504,9 +3489,9 @@ mod tests {
     /// A `packedDataSize` larger than `unpackedDataSize` (here `u64::MAX`) must be
     /// rejected before allocating.
     ///
-    /// Round-4 verifier P1 fix: like the scanline sibling of this test
+    /// Like the scanline sibling of this test
     /// (`scanline_input.rs::rejects_packed_data_over_unpacked`), rejection
-    /// now happens at the FIRST chunk access (`read_pixel_sample_counts`) —
+    /// happens at the FIRST chunk access (`read_pixel_sample_counts`) —
     /// `seek_chunk` ports C++'s leader validation
     /// (`OpenEXRCore/chunk.c::read_and_validate_chunk_leader`'s deep-tiled
     /// branch), which both `readPixelSampleCounts` and `readTiles` call via
@@ -3533,8 +3518,8 @@ mod tests {
         }
     }
 
-    /// Round-4 verifier P1: `raw_tile_data` (the `copy_pixels` raw-chunk
-    /// path, D-13) must apply the SAME leader bound as the normal decode
+    /// `raw_tile_data` (the `copy_pixels` raw-chunk
+    /// path) must apply the SAME leader bound as the normal decode
     /// path, not allocate straight from an attacker-controlled on-wire size.
     /// Crafts a tile chunk whose `packedDataSize` field claims ~16 EiB
     /// (`u64::MAX`) -- if this test completes at all with an `Err`, the
@@ -3557,7 +3542,7 @@ mod tests {
         }
     }
 
-    /// D-01: a HALF file channel read into a FLOAT frame-buffer slice must
+    /// A HALF file channel read into a FLOAT frame-buffer slice must
     /// convert each sample, not raw-copy the file's 2 bytes into a 4-byte slot.
     #[test]
     fn d01_converts_half_file_channel_to_float_slice() {
@@ -3608,7 +3593,7 @@ mod tests {
         }
     }
 
-    /// D-05: a compressed count table that packs down to zero bytes (every
+    /// A compressed count table that packs down to zero bytes (every
     /// pixel of the tile has zero samples) is a valid all-zero row.
     #[test]
     fn d05_zero_length_count_table_reads_as_zero_counts() {
@@ -3630,7 +3615,7 @@ mod tests {
         assert!(counts.iter().all(|&b| b == 0), "expected all-zero counts");
     }
 
-    /// D-08: the sample-count slice's sampling was never checked (the
+    /// The sample-count slice's sampling needs its own check (the
     /// `set_frame_buffer` loop only walks the named deep slices). A count
     /// slice with non-unit sampling must be rejected.
     #[test]
@@ -3662,7 +3647,7 @@ mod tests {
         }
     }
 
-    /// D-14: `DeepTiledOutputFile::from_part` must reject a header whose
+    /// `DeepTiledOutputFile::from_part` must reject a header whose
     /// `type` already names a different (non-deeptile) part.
     #[test]
     fn d14_from_part_rejects_type_mismatched_header() {
@@ -3685,7 +3670,7 @@ mod tests {
         }
     }
 
-    /// D-03 / `OpenEXRCore/decoding.c:307-318`: a deep tiled part whose
+    /// `OpenEXRCore/decoding.c:307-318`: a deep tiled part whose
     /// `version` attribute is not 1 must be rejected.
     #[test]
     fn d03_rejects_non_unit_version_attribute() {
@@ -3701,19 +3686,18 @@ mod tests {
         }
     }
 
-    /// D-16: the reader's own tile-size bound must match C++ 3.4's real
+    /// The reader's own tile-size bound must match C++ 3.4's real
     /// open-time gate (`OpenEXRCore/validation.c:593-595`, `x_size`/`y_size`
-    /// each `<= INT_MAX/4`), not the ad-hoc `tileX*tileY*4 > u32::MAX`
-    /// product check the old code emulated from the LEGACY WRITER's
+    /// each `<= INT_MAX/4`), not an ad-hoc `tileX*tileY*4 > u32::MAX`
+    /// product check emulating the LEGACY WRITER's
     /// `maxSampleCountTableSize` guard (`ImfDeepTiledOutputFile.cpp:1210`,
-    /// a writer-only concern the audit found had no reader counterpart in
-    /// C++ at all). A per-dimension `x_size` of 0 is invalid either way.
+    /// a writer-only concern with no reader counterpart in C++). A per-dimension `x_size` of 0 is invalid either way.
     #[test]
     fn d16_rejects_zero_tile_dimension() {
         let img = one_tile_img();
         let header = make_header(&img, Compression::NoCompression, td_one(0, 4), LineOrder::IncreasingY);
         let mut is = MemIStream::new(Vec::new());
-        // C-18 E9: readers route `sanity_check` through `sanity_check_at_open`,
+        // Readers route `sanity_check` through `sanity_check_at_open`,
         // which reclassifies a non-"missing attribute" `Arg` to `Input`
         // (`ImfContext.cpp:127-138`, verified) — this is "Invalid tile size in
         // image header.", not a missing attribute, so it becomes `Input`.
@@ -3724,7 +3708,7 @@ mod tests {
         }
     }
 
-    /// D-16: a tile dimension within `INT_MAX/4` is accepted even though its
+    /// A tile dimension within `INT_MAX/4` is accepted even though its
     /// product with the OTHER dimension times 4 would overflow `u32::MAX` —
     /// proving this is a per-dimension bound, not the old product check
     /// (which would have wrongly rejected this legitimate large-but-valid
@@ -3741,13 +3725,11 @@ mod tests {
             .expect("a within-bound tile dimension pair must be accepted");
     }
 
-    /// D-10 perf regression, rewritten (round-4 continuation) to be
-    /// build-mode and load INDEPENDENT: the original version asserted a
-    /// wall-clock bound (`elapsed.as_secs_f64() < 2.0`), which is inherently
-    /// flaky -- it failed under a debug build / a loaded machine even though
-    /// the actual O((W*H)^2) quadratic-addressing bug it guards against was
-    /// NOT present (verified: this test passes in that scenario, but the
-    /// wall-clock version did not).
+    /// Addressing perf regression test, build-mode and load INDEPENDENT: a
+    /// wall-clock bound (`elapsed.as_secs_f64() < 2.0`) is inherently
+    /// flaky -- it fails under a debug build / a loaded machine even when
+    /// the O((W*H)^2) quadratic-addressing bug it guards against is NOT
+    /// present.
     ///
     /// Instead this counts real operations via
     /// [`crate::deep::sample_table::sample_count_at_calls`] -- a `#[cfg(test)]`
@@ -3765,7 +3747,7 @@ mod tests {
     /// no wall clock at all.
     ///
     /// Manual verification that this test actually catches the regression
-    /// (per team-lead instruction, not committed as a permanent fixture):
+    /// (not committed as a permanent fixture):
     /// temporarily reverting `RowPrefixCache::before_pixel`/`before_line` to
     /// re-walk `[min_x, x)`/`[min_y, y)` from scratch on every call (the old
     /// O((W*H)^2) `samples_before_pixel` free function this module used to
@@ -3775,7 +3757,7 @@ mod tests {
     #[test]
     fn d10_addressing_is_linear_not_quadratic() {
         fn sample_count_at_calls_for(w: i32, h: i32) -> u64 {
-            // D-10 fix (W3.9 deep-parallelism prerequisite): `sample_count_at`'s
+            // `sample_count_at`'s
             // call counter is `#[cfg(test)]` THREAD-LOCAL (see
             // `sample_table.rs`), which is what gives every concurrently
             // running `cargo test` its own isolated count — a SHARED atomic
@@ -3834,7 +3816,7 @@ mod tests {
         );
     }
 
-    /// D-13: `frame_buffer()` returns the last frame buffer installed via
+    /// `frame_buffer()` returns the last frame buffer installed via
     /// `set_frame_buffer`, matching C++ `frameBuffer() const`.
     #[test]
     fn d13_frame_buffer_accessor_returns_installed_buffer() {
@@ -3854,7 +3836,7 @@ mod tests {
         assert!(inf.frame_buffer().find_slice("A").is_some());
     }
 
-    /// D-13: `total_tiles()` / `tile_order()` for a MIPMAP file: total tiles
+    /// `total_tiles()` / `tile_order()` for a MIPMAP file: total tiles
     /// sums every level's `numXTiles * numYTiles`, and `tile_order()` lists
     /// exactly that many tiles (every tile is present since the whole file
     /// was written).

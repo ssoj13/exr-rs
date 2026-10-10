@@ -1,8 +1,8 @@
-//! Ad-hoc A/B tool (team-lead request, 2026-09-24): time OUR OWN
+//! Ad-hoc A/B tool: time OUR OWN
 //! compress/uncompress for one codec, one repeat, no C++ oracle involved --
 //! meant to be built at two different commits (two worktrees) and invoked
 //! alternately so the same machine noise hits both sides equally, answering
-//! "did the alloc_audit/codec-simd work regress our own codec speed"
+//! "did the allocation/codec-simd work regress our own codec speed"
 //! without a noisy machine muddying an ours-vs-C++ comparison.
 //!
 //! Data generation, header, and chunk layout are copied verbatim from
@@ -18,25 +18,20 @@
 //!
 //! 1. `git worktree add --detach ../exr-old-bench <old-commit>` (a SEPARATE
 //!    checkout, so the old commit's crate builds without disturbing this
-//!    one; use a path outside any other agent's active clone).
+//!    one).
 //! 2. Build both: `cargo build -p exr-core --release --example
 //!    ours_only_bench` in each worktree (the NEW checkout already has this
-//!    file; the OLD one needs it copied in first if the commit predates it
-//!    -- this file's own git history is exactly that copy).
-//! 3. Acquire `bench.lock` (the repo's one-benchmark-at-a-time convention;
-//!    a plain lockfile in the shared agent temp dir, checked/written by
-//!    whoever launches the run, not by this binary).
+//!    file; the OLD one needs it copied in first if the commit predates it).
+//! 3. Make sure no other benchmark is running on the machine.
 //! 4. Alternate `old.exe <codec> 1` / `new.exe <codec> 1` per repeat (never
 //!    run all of one side then all of the other -- interleaving means
 //!    background machine load hits both sides equally within each repeat).
 //!    5 repeats x 2 runs is the project's usual minimum; compute the
 //!    new/old ratio's MEDIAN and MIN per direction per run. A ratio > 1.05
 //!    that repeats across BOTH runs (not just one) is a real regression,
-//!    not noise -- see `.bughunt/alloc_audit.md`'s bisect entries for a
-//!    worked example.
-//! 5. Release `bench.lock` when done; `git worktree remove` the old
-//!    checkout once it's no longer needed (or leave it for a follow-up
-//!    bisect step at an even older commit).
+//!    not noise.
+//! 5. `git worktree remove` the old checkout once it's no longer needed (or
+//!    leave it for a further bisect step at an even older commit).
 
 use std::time::Instant;
 

@@ -91,7 +91,7 @@ const LENGTH_MAXBITS: u32 = DEFLATE_MAX_LITLEN_CODEWORD_LEN + DEFLATE_MAX_EXTRA_
 /// Fast-path variant (no subtable needed).
 const LENGTH_MAXFASTBITS: u32 = LITLEN_TABLEBITS + DEFLATE_MAX_EXTRA_LENGTH_BITS;
 
-/// F14 (plan4): C ports this as `STATIC_ASSERT(CAN_CONSUME_AND_THEN_PRELOAD(
+/// C ports this as `STATIC_ASSERT(CAN_CONSUME_AND_THEN_PRELOAD(
 /// LENGTH_MAXFASTBITS, OFFSET_TABLEBITS))` (`decompress_template.h:503`) right
 /// before the fastloop's offset decode — a compile-time check that our fixed
 /// 64-bit bitbuf / table-bit constants can always consume a fast-path length
@@ -245,7 +245,7 @@ pub struct Decompressor {
     precode_lens: [u8; DEFLATE_NUM_PRECODE_SYMS],
 
     /// Combined litlen + offset + overrun codeword length array.
-    /// Mirrors `u.l.lens[]`. F14 (plan4): C sizes this exactly
+    /// Mirrors `u.l.lens[]`. C sizes this exactly
     /// `DEFLATE_NUM_LITLEN_SYMS + DEFLATE_NUM_OFFSET_SYMS +
     /// DEFLATE_MAX_LENS_OVERRUN` (`deflate_decompress.c:657-659`) -- the
     /// port previously had a `+ 1` here with no cited reason; removed (dead
@@ -694,15 +694,15 @@ fn bitmask(n: u32) -> u64 {
 /// `.min(LITLEN_ENOUGH - 1)` clamp is a true no-op (the real value is always
 /// `<= bitmask(11) = 2047 < 2342` by construction) but gives LLVM an explicit,
 /// provable upper bound it can use to elide the bounds check on the array
-/// access — investigated per team-lead's decompress-fastloop bounds-check
-/// audit (2026-09-24); verify empirically via disassembly before trusting
+/// access — found while auditing the decompress fastloop's bounds checks;
+/// verify empirically via disassembly before trusting
 /// this actually helps.
 /// `.min(LITLEN_ENOUGH - 1)` was tried against a `& 0x7FF` alternative
-/// (team-lead's suggestion: `litlen_tablemask` is always `<= bitmask(11) =
+/// (the idea: `litlen_tablemask` is always `<= bitmask(11) =
 /// 0x7FF` by construction, so ANDing with the compile-time constant `0x7FF`
 /// is a true no-op on the value and should be cheaper codegen than a
-/// compare-and-conditional-move). Measured via the same disasm-diff method
-/// as the original F16 fix (git-stash A/B on the identical
+/// compare-and-conditional-move). Measured via a disasm diff
+/// (A/B on the identical
 /// `deflate_decompress_impl_bmi2` binary, symbol at the same line both
 /// times): `& 0x7FF` was WORSE, not better -- 30 potential-panic call sites
 /// (13 panic_bounds_check + 17 slice_index_fail) versus `.min()`'s 27, body
@@ -787,7 +787,7 @@ pub(crate) fn deflate_decompress_ex_with_fastloop(
     deflate_decompress_dispatch(d, input, out, use_fastloop)
 }
 
-/// F3 (plan4): route every entry point through the BMI2 runtime dispatch,
+/// Route every entry point through the BMI2 runtime dispatch,
 /// mirroring `arch_select_decompress_func` (`x86/decompress_impl.h`).
 ///
 /// `deflate_decompress_impl` is the single source of truth either way; the
@@ -906,7 +906,7 @@ pub(crate) fn deflate_decompress_impl(
         // BTYPE: bits 2-1
         let block_type = (bitbuf >> 1) & 3;
 
-        // U13 (engagement audit): one hit per DEFLATE block header actually
+        // Engagement probe: one hit per DEFLATE block header actually
         // reached here -- proves a multi-block stream really decoded more
         // than one block (a `fastloop_hit_eob` regression could silently
         // stop after the first block; see `probe::Probe::BlocksDecoded`'s
@@ -1175,7 +1175,7 @@ pub(crate) fn deflate_decompress_impl(
         let mut fastloop_hit_eob = false;
 
         if use_fastloop && in_pos < in_fastloop_end && out_pos < out_fastloop_end {
-            // RULE-2 (audit finding): the fastloop's unchecked `out[..]` writes
+            // The fastloop's unchecked `out[..]` writes
             // (literals, match copies) are sound only because entry here
             // guarantees at least `fastloop_max_bytes_written` bytes remain
             // past `out_pos` — this is the exact margin `out_fastloop_end`
@@ -1193,7 +1193,7 @@ pub(crate) fn deflate_decompress_impl(
             let mut entry = d.litlen_decode_table[litlen_idx(bitbuf, litlen_tablemask)];
 
             'fastloop: loop {
-                // U13 (engagement audit): one hit per fastloop ITERATION --
+                // Engagement probe: one hit per fastloop ITERATION --
                 // proves the fastloop's body actually ran at least once on
                 // this input, not just that `FASTLOOP_ENABLED` is `true`
                 // (see `probe::Probe::FastloopIters`'s own doc).
@@ -1628,7 +1628,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// F5: `deflate_decompress_ex` reports the exact input consumed even when
+    /// `deflate_decompress_ex` reports the exact input consumed even when
     /// trailing bytes follow the raw DEFLATE stream.
     #[test]
     fn ex_reports_consumed_with_trailing_bytes() {
@@ -1762,14 +1762,14 @@ mod tests {
             ));
         }
 
-        // U13 (engagement audit): a fast path can silently stop running while
+        // A fast path can silently stop running while
         // every result-equality assertion below still passes (that is
         // EXACTLY the `fastloop_hit_eob` bug class this test was written to
         // catch, per its own module doc) -- so also assert the relevant
         // PROBE actually fired for these two representative inputs, not just
         // that their output matches the generic loop's.
         //
-        // FINDING (verified, not assumed -- team-lead's original ask was
+        // FINDING (verified, not assumed -- the original plan was to
         // "assert iters>0 on text_90k/prng_64k", but `prng_64k` genuinely
         // never engages the fastloop at ANY of the 6 levels tested):
         // `prng_64k`'s bytes (`(rng >> 16) as u8` from a GLIBC-style LCG) are
@@ -1858,7 +1858,7 @@ mod tests {
         );
     }
 
-    /// V3 (plan4): exhaustive truncation + output-window fuzz, targeting exact
+    /// Exhaustive truncation + output-window fuzz, targeting exact
     /// `bitsleft` boundaries at fastloop entry/refill.
     ///
     /// `fastloop_matches_generic_loop_on_varied_inputs` above tries only a
@@ -1900,7 +1900,7 @@ mod tests {
             ("prng", lcg_bytes(0x9E37_79B9, 20_000)),
         ];
 
-        // U13 (engagement audit): a multi-block bug (e.g. reverting the
+        // A multi-block bug (e.g. reverting the
         // `fastloop_hit_eob` fix) could silently decode only the FIRST block
         // of `text_multiblock` and still pass every result-equality check
         // below on a truncated/short read -- so also assert the block-loop

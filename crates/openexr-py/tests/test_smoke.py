@@ -2,7 +2,7 @@
 
 Run after `python bootstrap.py b p` by installing the wheel (or `maturin develop`).
 A subset of the reference test surface; the full reference `tests/` are the gate
-for later phases (see crates/openexr-py/CLAUDE.md).
+for the rest.
 """
 
 import os
@@ -112,7 +112,7 @@ def test_layer_3channel_reference_names():
 
 
 def test_prefixed_rgba_grouping():
-    # r3_surfaces.md item 1: the default (non-separate) read must group a PREFIXED
+    # The default (non-separate) read must group a PREFIXED
     # R/G/B/A set too (e.g. "left.R/G/B"), not only the bare top-level "R/G/B[/A]" —
     # matching the reference's channelNameToRGBA, which names the group "left" (NOT
     # "leftRGBA").
@@ -143,7 +143,7 @@ def test_prefixed_rgba_grouping_with_alpha():
 
 
 def test_lineorder_roundtrip():
-    # r3_surfaces.md item 9: lineOrder used to be dropped on write (never copied onto
+    # lineOrder used to be dropped on write (never copied onto
     # the Image), so it always came back INCREASING_Y regardless of what was set.
     h, w = 6, 5
     z = np.random.rand(h, w).astype("float32")
@@ -156,7 +156,7 @@ def test_lineorder_roundtrip():
 
 
 def test_write_unknown_compression_raises():
-    # r3_surfaces.md item 8: an out-of-range compression code used to be silently
+    # An out-of-range compression code used to be silently
     # reinterpreted as ZIP instead of raising.
     h, w = 3, 3
     z = np.random.rand(h, w).astype("float32")
@@ -207,8 +207,8 @@ def test_helper_classes():
     pi = E.PreviewImage(4, 3)
     assert pi.width() == 4 and pi.height() == 3
     # `.pixels` is a (H, W) structured array with r/g/b/a uint8 fields, matching
-    # the reference's own `array_t<PreviewRgba>` shape/dtype (team-lead correction
-    # 2026-09-23) -- NOT a flat (H, W, 4) array.
+    # the reference's own `array_t<PreviewRgba>` shape/dtype
+    # -- NOT a flat (H, W, 4) array.
     assert pi.pixels.shape == (3, 4)
     assert pi.pixels.dtype.names == ("r", "g", "b", "a")
 
@@ -469,7 +469,7 @@ def test_deep_separate():
 
 
 def test_deep_mismatched_channel_counts_raise():
-    # Bug S2: every deep channel at a pixel must share the same sample count.
+    # Every deep channel at a pixel must share the same sample count.
     # A differing count, or None-vs-samples, must be rejected before writing
     # (it would otherwise corrupt the on-disk heap layout).
     h, w = 2, 2
@@ -527,7 +527,7 @@ def test_deep_rgb_grouping():
 
 
 def test_deep_grouped_rgb_write():
-    # r3_surfaces.md item 7 (second half): write_deep used to only accept an
+    # write_deep used to only accept an
     # already-flat, ungrouped (H,W) object array per channel; a GROUPED array
     # (each pixel an (nsamples, 3) array, exactly what a deep read's own "RGB"
     # channel hands back) failed with a confusing obj_shape/indexing error
@@ -578,7 +578,7 @@ def test_deep_nonorigin_window():
 
 
 def test_deep_negative_and_large_origin():
-    # Bug S1: the local-raster count buffer must round-trip a negative-origin and
+    # The local-raster count buffer must round-trip a negative-origin and
     # a large-positive-origin data window without a panic (negative absolute
     # address) or a huge allocation (origin-sized buffer).
     for minx, miny in [(-8, -5), (1024, -1024), (100000, 100000)]:
@@ -694,7 +694,7 @@ def test_legacy_byte_api():
 
 
 def test_legacy_uint_to_half_overflow_boundary():
-    # design_r5.md W4.6: legacy UINT->HALF conversion used to go through the
+    # Legacy UINT->HALF conversion used to go through the
     # generic float_to_half rounding rule (rounds 65505..65519 down to the
     # largest finite half, 65504), but C++'s uintToHalf (ImfConvert.cpp) is
     # stricter: ANY value > HALF_MAX (65504) becomes +inf, with no rounding
@@ -722,7 +722,7 @@ def test_legacy_uint_to_half_overflow_boundary():
 
 
 def test_legacy_scanline_range_validation():
-    # Bug S4: InputFile.channel must reject an inverted or out-of-window scanline
+    # InputFile.channel must reject an inverted or out-of-window scanline
     # range instead of underflow-panicking inside the native extension.
     # Exception class updated to TypeError (was ValueError) to match the
     # reference exactly -- PyOpenEXR_old.cpp:407-419 raises TypeError for all
@@ -754,7 +754,7 @@ def test_legacy_scanline_range_validation():
 
 
 def test_legacy_exception_classes_match_reference():
-    # design_r5.md: the legacy API (PyOpenEXR_old.cpp v3.4.15) uses a specific
+    # The legacy API (PyOpenEXR_old.cpp v3.4.15) uses a specific
     # exception-class split that differs from the new API's RuntimeError/
     # ValueError split -- TypeError for argument/structural errors, IOError for
     # actual I/O or file-format failures, OverflowError for allocation-size
@@ -1004,7 +1004,7 @@ def test_multipart_corrupted_chunk_data_skips_only_that_part():
 
 
 def test_nonutf8_names_raise_unicode_decode_error():
-    """C-08: a non-UTF-8 channel/attribute name must raise `UnicodeDecodeError`
+    """A non-UTF-8 channel/attribute name must raise `UnicodeDecodeError`
     when the header is decoded to a Python dict, matching real C++ PyOpenEXR
     (`PyOpenEXR.cpp` converts every attribute/channel name with `py::str(name)`
     on the raw `std::string` C++ `Header`/`ChannelList` never UTF-8-checks —
@@ -1014,7 +1014,7 @@ def test_nonutf8_names_raise_unicode_decode_error():
     where `name = a.name()`; channel names: `py::str(py_channel_name)` where
     `py_channel_name = c.name()`), not predicted.
 
-    The fixture is the C-08 oracle golden (`golden_nonutf8_names.exr`): a
+    The fixture is the oracle golden (`golden_nonutf8_names.exr`): a
     channel named "Z\xE9" and an attribute named "\xFFattr", both invalid
     UTF-8, written by real C++ OpenEXR 3.4.15
     (`crates/exr-core/tests/parity/oracle.cpp`'s `write-nonutf8-names`).

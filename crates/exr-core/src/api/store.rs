@@ -173,7 +173,7 @@ impl Planes {
         for (name, c) in &self.chans {
             let (cols, _) = sample_dims(window, c.xs, c.ys)?;
             fb.insert(name.as_str(), plane_slice(c.data.pixel_type(), buffer.len(), window, (c.xs, c.ys), cols)?)?;
-            // Native bytes straight into `buffer` (alloc audit V2): the writer's gather
+            // Native bytes straight into `buffer`: the writer's gather
             // re-encodes to XDR.
             match &c.data {
                 ChannelData::Half(v) => buffer.extend(v.iter().flat_map(|h| h.bits().to_ne_bytes())),
@@ -220,7 +220,7 @@ impl ReadPlan {
                 // Structured kind (not a string): consumers route on it.
                 return Err(ExrError::Unsupported(Unsupported::Subsampled));
             }
-            // C-08 step 3 (design_r5.md §2.5): `api::Image` stays `String`-keyed — a hard
+            // `api::Image` stays `String`-keyed — a hard
             // error, never a lossy conversion, on a non-UTF-8 channel name.
             let name = name
                 .to_str()

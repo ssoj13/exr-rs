@@ -46,7 +46,7 @@ thread_local! {
     /// See `cryptomatte/tests/inject.rs::inject_half_channels_scales_linearly`
     /// (rewritten from a wall-clock threshold, which flaked under debug
     /// builds / machine load, to an operation-count ratio using this
-    /// counter — the same fix pattern as exr-core's D-10).
+    /// counter — the same fix pattern as exr-core's `sample_count_at_calls`).
     static CHANNEL_AS_F32_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
@@ -73,7 +73,7 @@ pub fn channel_as_f32(data: &ChannelData) -> Result<Cow<'_, [f32]>> {
     CHANNEL_AS_F32_CALLS.with(|c| c.set(c.get() + 1));
     match data {
         // Zero-copy fast path for the common case (a real FLOAT ID/coverage
-        // channel); HALF widening delegates to the W4.6 SSOT
+        // channel); HALF widening delegates to the canonical
         // `ChannelData::to_f32` instead of a duplicate `.map(f32::from)`.
         ChannelData::Float(v) => Ok(Cow::Borrowed(v.as_slice())),
         ChannelData::Half(_) => Ok(Cow::Owned(data.to_f32())),

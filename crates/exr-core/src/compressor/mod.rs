@@ -1,11 +1,11 @@
 //! Port of OpenEXR `ImfCompressor.h` / `ImfCompressor.cpp` — the abstract
 //! compressor interface, codec factory, and NONE (uncompressed) path.
 //!
-//! This module defines the seam that Phase 5 real codecs (RLE, ZIP, PIZ, …)
-//! plug into.  `RLE` is implemented ([`rle::RleCompressor`]); every other
-//! not-yet-ported codec branch returns
-//! `Err(ExrError::Arg("… not yet implemented (Phase 5)"))` — **not** a panic —
-//! so the rest of the crate can call the factory and handle the error cleanly.
+//! This module defines the seam that the codecs (RLE, ZIP, PIZ, …) plug into.
+//! Every codec in [`Compression::ALL`] has a factory branch; only
+//! `Compression::Invalid` returns an `Err(ExrError::Arg(..))` — **not** a
+//! panic — so the rest of the crate can call the factory and handle the error
+//! cleanly.
 //!
 //! # Design notes vs C++
 //!
@@ -93,10 +93,9 @@ pub enum Format {
 ///
 /// # Error handling
 /// All methods return `Result`.  No method may panic, call `unwrap`, or call
-/// `todo!`/`unimplemented!` — Phase-5-pending codecs return
-/// `Err(ExrError::Arg("… not yet implemented (Phase 5)"))` instead.
+/// `todo!`/`unimplemented!` — failures are reported as `Err(ExrError::..)`.
 ///
-/// # `Send` (W3.9 phase B)
+/// # `Send`
 /// A `Box<dyn Compressor>` crosses thread boundaries in the four parallel
 /// read/write call sites (`scanline::input`/`output`, `tiled::input`/
 /// `output`), so the trait must be `Send`. Every codec struct holds only
@@ -109,13 +108,13 @@ pub enum Format {
 /// — **not** once per worker thread and not once per item, only
 /// APPROXIMATING (never guaranteeing) C++'s `ScanLineProcessGroup`/
 /// per-thread `lineBuffers` pool. The measurement this doc used to say
-/// would justify a real `CodecPool` happened (deflate-fast, 2026-09-25,
-/// `.bughunt/alloc_audit.md`'s CodecPool entry): a `#[cfg(test)]`
+/// would justify a real `CodecPool` happened:
+/// a `#[cfg(test)]`
 /// construction counter showed `map_init` constructing a FRESH codec for
 /// essentially EVERY chunk/tile at every thread count (256/256 scanline
 /// chunks, ~8192/8192 tiles) — rayon's adaptive splitting was fine-grained
 /// enough that "once per job split" was, in practice, indistinguishable
-/// from the pre-`map_init` "once per chunk" bug (alloc-audit finding C2)
+/// from the pre-`map_init` "once per chunk" bug
 /// it was meant to fix. [`CodecPool`] is that real pool: checkout/checkin
 /// around EACH item (not tied to rayon's split granularity at all), used by
 /// all four flat call sites plus deep scanline/tiled read and write.
@@ -158,7 +157,7 @@ pub trait Compressor: Send {
     /// scanline/tiled, where every chunk in a file shares one worst-case
     /// size, but wrong for deep, where the sample-count/data-table sizes
     /// genuinely vary chunk to chunk, forcing a FRESH compressor per chunk
-    /// (alloc audit C6) just to get the right buffer size. Every codec now
+    /// just to get the right buffer size. Every codec now
     /// derives its output capacity from `expected_len` per call instead, so
     /// ONE persistent compressor can serve every chunk regardless of size.
     /// A self-describing format (RLE: decode runs until the input is
@@ -172,7 +171,7 @@ pub trait Compressor: Send {
     fn uncompress(&mut self, data: &[u8], min_y: i32, expected_len: usize) -> Result<&[u8]>;
 
     /// Hand the codec's output buffer to the caller without a copy, then
-    /// refill it from `pooled` (alloc audit C4) — a caller with its own
+    /// refill it from `pooled` — a caller with its own
     /// buffer pool (the parallel encode paths in `scanline::output`/
     /// `tiled::output`) uses this to avoid the `pool.take() + .to_vec()`
     /// copy after `compress()`/`compress_tile()`: `pooled` becomes the
@@ -254,7 +253,7 @@ pub trait Compressor: Send {
 /// This struct exists for completeness and testing: it simply passes bytes
 /// through unchanged, returns `Format::Xdr`, and reports 1 scan line per chunk
 /// — exactly the values `ImfCompressor.cpp` would produce if a NONE compressor
-/// object existed.  Phase 5 scanline I/O uses `Ok(None)` from the factory and
+/// object existed.  Scanline I/O uses `Ok(None)` from the factory and
 /// never instantiates this directly.
 pub struct NoneCompressor {
     /// Internal scratch buffer; compress/uncompress store the input slice copy
@@ -311,8 +310,7 @@ impl Compressor for NoneCompressor {
 }
 
 // ---------------------------------------------------------------------------
-// CodecPool — checkout/checkin reuse for Box<dyn Compressor> (alloc audit
-// follow-up, 2026-09-25)
+// CodecPool — checkout/checkin reuse for Box<dyn Compressor>
 // ---------------------------------------------------------------------------
 
 /// A thread-safe pool of reusable `Box<dyn Compressor>` instances -- the
@@ -536,7 +534,7 @@ mod codec_pool_tests {
         // `created()` counts every `make` fallback call, including the
         // `Ok(None)` ones -- this asserts the SHAPE (both went through
         // `make`, neither came from a nonexistent free-list entry), not a
-        // specific count team-lead needs to reason about separately.
+        // specific count.
         assert_eq!(pool.probes().get(crate::probe::Probe::CodecCreated), 2);
     }
 }
@@ -550,8 +548,8 @@ mod codec_pool_tests {
 /// Returns `Ok(None)` when `compression` is `NoCompression`, because the caller
 /// writes raw scan-line bytes directly — there is no compressor object.
 ///
-/// Returns `Err(ExrError::Arg("… not yet implemented (Phase 5)"))` for every
-/// codec that is not yet ported.  **Never panics.**
+/// Returns `Err(ExrError::Arg(..))` for `Compression::Invalid` and propagates
+/// codec-constructor errors.  **Never panics.**
 ///
 /// Mirrors `Compressor* newCompressor(Compression, size_t, const Header&)`
 /// (ImfCompressor.cpp lines 278–346).
@@ -560,8 +558,8 @@ mod codec_pool_tests {
 /// * `compression` — codec selector from the file header.
 /// * `max_scan_line_size` — maximum uncompressed bytes per scan line; passed
 ///   to the codec constructor so it can pre-allocate output buffers.
-/// * `_header` — file header; reserved for Phase 5 codec constructors that
-///   need it (e.g. PIZ needs the channel list).
+/// * `_header` — file header, passed to the codec constructors that need it
+///   (e.g. PIZ needs the channel list).
 pub fn new_compressor(
     compression: Compression,
     max_scan_line_size: usize,
@@ -667,7 +665,6 @@ pub fn new_compressor(
 /// Clamp the buffer-sizing inputs to `new_tile_compressor` to what any single
 /// tile of `header`'s image could ever actually need.
 ///
-/// T-05 remainder (round-4 tiled audit, `.bughunt/progress_fix_tiled.md`):
 /// `tile_line_size`/`num_tile_lines` are the RAW nominal `tileDesc.xSize` /
 /// `ySize` from the header, before clipping to any real tile's range. Every
 /// per-codec constructor below sizes internal scratch / decode-capacity
@@ -704,8 +701,7 @@ fn clamp_tile_buffer_dims(
 
 /// Construct a compressor for `compression` type for a **tiled** image.
 ///
-/// Returns `Ok(None)` for `NoCompression`; `Err` for every codec not yet
-/// ported.
+/// Returns `Ok(None)` for `NoCompression`; `Err` for `Compression::Invalid`.
 ///
 /// Mirrors `Compressor* newTileCompressor(Compression, size_t, size_t,
 /// const Header&)` (ImfCompressor.cpp lines 363–427).
@@ -714,14 +710,14 @@ fn clamp_tile_buffer_dims(
 /// * `compression` — codec selector.
 /// * `_tile_line_size` — max uncompressed bytes per line within a tile.
 /// * `_num_tile_lines` — max lines per tile.
-/// * `_header` — file header; reserved for Phase 5 codec constructors.
+/// * `_header` — file header, passed to the codec constructors that need it.
 pub fn new_tile_compressor(
     compression: Compression,
     tile_line_size: usize,
     num_tile_lines: usize,
     header: &Header,
 ) -> Result<Option<Box<dyn Compressor>>> {
-    // T-05 remainder: clamp before any per-codec constructor runs — see
+    // Clamp before any per-codec constructor runs — see
     // `clamp_tile_buffer_dims`'s doc comment.
     let (tile_line_size, num_tile_lines) =
         clamp_tile_buffer_dims(header, tile_line_size, num_tile_lines)?;
@@ -928,8 +924,8 @@ pub(crate) fn finish_chunk(
     Ok(raw)
 }
 
-/// The grow-or-truncate scratch-buffer policy (alloc audit E3-E6/E9/E10/
-/// E12/C3/C4) moved to [`crate::buf::ensure_len`] -- a neutral module, since
+/// The grow-or-truncate scratch-buffer policy
+/// moved to [`crate::buf::ensure_len`] -- a neutral module, since
 /// this helper is used far outside the compressor (scanline/tiled read/
 /// write, `exr-gpu`'s upload/readback). Re-exported here `pub(crate)` for
 /// the many existing internal call sites inside this module tree that still
@@ -966,7 +962,7 @@ mod tests {
         Header::new()
     }
 
-    /// (alloc audit C6/C4) `Compressor::swap_out`'s default impl swaps the
+    /// `Compressor::swap_out`'s default impl swaps the
     /// codec's `out` buffer with the caller's pooled one with NO element
     /// copy, then clears whichever buffer is now `self.out` (the pooled
     /// buffer's OLD, stale content) -- NOT the buffer handed back to the
@@ -1025,12 +1021,12 @@ mod tests {
         );
     }
 
-    /// T-05 remainder: a crafted header whose `tiles` attribute declares a
+    /// A crafted header whose `tiles` attribute declares a
     /// nominal tile far larger than the actual data window must have its
     /// buffer-sizing inputs clamped down to the image's own extent, not the
     /// raw nominal tile size — see `clamp_tile_buffer_dims`'s doc comment.
-    /// This is the exact repro shape from `.bughunt/progress_fix_tiled.md`
-    /// T-05: `tiles = 32768x32767` over a 4x4 image.
+    /// Repro shape:
+    /// `tiles = 32768x32767` over a 4x4 image.
     #[test]
     fn clamp_tile_buffer_dims_bounds_a_crafted_oversized_nominal_tile() {
         use crate::attr::{
@@ -1139,7 +1135,7 @@ mod tests {
 
     #[test]
     fn zip_returns_compressor_16_lines() {
-        // ZIP is implemented (Phase 5 Wave 2): 16 scan lines per chunk, Xdr.
+        // ZIP: 16 scan lines per chunk, Xdr.
         let hdr = make_header();
         let c = new_compressor(Compression::Zip, 1024, &hdr).unwrap();
         let c = c.expect("ZIP factory must return a compressor");
@@ -1159,7 +1155,7 @@ mod tests {
 
     #[test]
     fn rle_returns_compressor() {
-        // RLE is implemented (Phase 5 Wave 1): the factory yields a codec.
+        // RLE: the factory yields a codec.
         let hdr = make_header();
         let c = new_compressor(Compression::Rle, 1024, &hdr).unwrap();
         let c = c.expect("RLE factory must return a compressor");
@@ -1176,7 +1172,7 @@ mod tests {
 
     #[test]
     fn pxr24_returns_compressor_16_lines() {
-        // PXR24 is implemented (Phase 5 Wave 3): 16 scan lines per chunk, Xdr.
+        // PXR24: 16 scan lines per chunk, Xdr.
         let hdr = make_header();
         let c = new_compressor(Compression::Pxr24, 1024, &hdr).unwrap();
         let c = c.expect("PXR24 factory must return a compressor");
@@ -1186,7 +1182,7 @@ mod tests {
 
     #[test]
     fn piz_returns_compressor_32_lines() {
-        // PIZ is implemented (Phase 5 Wave 4): 32 scan lines per chunk, Xdr.
+        // PIZ: 32 scan lines per chunk, Xdr.
         let hdr = make_header();
         let c = new_compressor(Compression::Piz, 1024, &hdr).unwrap();
         let c = c.expect("PIZ factory must return a compressor");
@@ -1196,7 +1192,7 @@ mod tests {
 
     #[test]
     fn b44_and_b44a_return_compressor_32_lines() {
-        // B44/B44A are implemented (Phase 5 Wave 5): 32 scan lines per chunk, Xdr.
+        // B44/B44A: 32 scan lines per chunk, Xdr.
         let hdr = make_header();
         for codec in [Compression::B44, Compression::B44a] {
             let c = new_compressor(codec, 1024, &hdr).unwrap();
@@ -1208,7 +1204,7 @@ mod tests {
 
     #[test]
     fn dwaa_dwab_return_compressor_with_correct_block_height() {
-        // DWAA/DWAB are implemented (Phase 5 Wave 6): 32 / 256 scan lines, Xdr.
+        // DWAA/DWAB: 32 / 256 scan lines, Xdr.
         let hdr = make_header();
         for (codec, lines) in [(Compression::Dwaa, 32), (Compression::Dwab, 256)] {
             let c = new_compressor(codec, 1024, &hdr).unwrap();
@@ -1325,7 +1321,7 @@ mod tests {
 
     #[test]
     fn stored_chunk_stores_raw_at_equal_size() {
-        // The C1 case: the encoding is exactly the uncompressed size, so it is
+        // The encoding is exactly the uncompressed size, so it is
         // indistinguishable from a raw chunk on disk — the raw bytes must win.
         let raw = [1u8, 2, 3, 4];
         let compressed = [9u8, 9, 9, 9];

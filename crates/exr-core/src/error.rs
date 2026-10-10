@@ -269,20 +269,20 @@ impl From<std::io::Error> for ExrError {
 /// `Result<T, ExrError>`).
 pub type Result<T> = core::result::Result<T, ExrError>;
 
-/// E7 (C-18 design §3.4): reclassify a codec failure at the **decode** seam
+/// Reclassify a codec failure at the **decode** seam
 /// as [`ExrError::Io`] "Unable to run decoder: …", matching every reader's
 /// decode pipeline in C++ 3.4.15 (`ImfScanLineInputFile.cpp:562-613`,
 /// `ImfTiledInputFile.cpp:878-914`, `ImfDeepScanLineInputFile.cpp:743-868`,
 /// `ImfDeepTiledInputFile.cpp:1066`, threaded via `IlmThreadProcessGroup.h:138`
 /// — all `IoExc`). Call as `c.uncompress(..).map_err(decode_err)` at every
 /// read seam that runs a [`crate::compressor::Compressor`]. This is also
-/// the seam W3.9's rayon workers call, so its error class is stable across
+/// the seam the rayon workers call, so its error class is stable across
 /// thread counts.
 pub fn decode_err(e: ExrError) -> ExrError {
     ExrError::Io(format!("Unable to run decoder: {e}"))
 }
 
-/// E8 (C-18 design §3.4): reclassify a codec failure at the **encode** seam
+/// Reclassify a codec failure at the **encode** seam
 /// as [`ExrError::Io`] "Failed to write pixel data to image file. …",
 /// matching every writer's encode pipeline in C++ 3.4.15
 /// (`ImfOutputFile.cpp:1197-1225`, `ImfTiledOutputFile.cpp:1383`,

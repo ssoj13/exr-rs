@@ -38,7 +38,7 @@ fn err(e: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
 }
 
-/// `w*h` as a validated `usize` (r3_surfaces.md item 13). `w`/`h` come from either
+/// `w*h` as a validated `usize`. `w`/`h` come from either
 /// an untrusted numpy `object` array shape (write) or an untrusted file's
 /// `dataWindow` (read) — plain `(w * h) as usize` computes the product in native
 /// `i32` first, which overflows (panic in debug, silently wraps in release) before
@@ -64,7 +64,7 @@ fn checked_count_bytes(w: i32, h: i32) -> PyResult<usize> {
         .ok_or_else(|| PyValueError::new_err("deep count buffer size overflow"))
 }
 
-/// design_r5.md W4.6: routes through the exr-core SSOT (`misc::pixel_type_size`)
+/// Routes through the canonical exr-core helper (`misc::pixel_type_size`)
 /// instead of a hand-rolled copy; a deep channel can only genuinely be
 /// HALF/FLOAT/UINT, so the invalid `NumPixelTypes` sentinel (a corrupted
 /// on-disk channel type) raises instead of pretending to have a byte size.
@@ -164,7 +164,7 @@ pub fn write_deep(
         // (`finish_deep`) now returns `Channel`s the same way a flat read does, so
         // `File(deep_path).write(other_path)` (round-tripping what `channels()` just
         // returned) must accept a `Channel` here too, not only a bare ndarray
-        // (r3_surfaces.md item 7 / `test_deep_rgba`'s `infile.write(...)`).
+        // (`test_deep_rgba`'s `infile.write(...)`).
         let arr = match v.cast::<crate::file::Channel>() {
             Ok(ch) => ch.borrow().pixels.clone_ref(v.py()).into_bound(v.py()),
             Err(_) => v,
@@ -174,7 +174,7 @@ pub fn write_deep(
         // array, e.g. what `finish_deep` hands back from a read, or a write
         // constructed directly with a stacked array) is split into its R/G/B[/A]
         // component channels here, the deep-write inverse of `build_grouped`
-        // (r3_surfaces.md item 7, second half — `write_deep` used to only accept
+        // (`write_deep` used to only accept
         // an already-flat, ungrouped `(H,W)` `dtype=object` array per channel and
         // failed with a confusing `obj_shape`/indexing error on a grouped one).
         if let Some(n_comp) = grouped_component_count(py, &arr)? {
@@ -324,7 +324,7 @@ fn tile_desc_from_header(header: &Bound<'_, PyDict>, _py: Python<'_>) -> PyResul
     Ok(td)
 }
 
-/// design_r5.md W4.6: an unknown/invalid code used to silently become ZIPS. Raise
+/// An unknown/invalid code used to silently become ZIPS. Raise
 /// instead, like the flat path's `comp_to_py`/`header_compression` (`file.rs`) —
 /// only an ABSENT key defaults (to ZIPS, the deep default, since plain ZIP isn't
 /// deep-valid), and only a genuinely `is_valid_deep()` code is otherwise accepted.
@@ -422,7 +422,7 @@ fn dw_min(header: &Bound<'_, PyDict>, _py: Python<'_>) -> PyResult<(i32, i32)> {
 /// per-channel arrays.
 ///
 /// Dispatches on the file's own header `type` attribute, NOT a
-/// try-the-tiled-reader-then-fall-back-on-any-error probe (r3_surfaces.md S3): that
+/// try-the-tiled-reader-then-fall-back-on-any-error probe: that
 /// used to swallow a real deeptile parse error and re-attempt the file as
 /// deepscanline, producing a confusing secondary error instead of the real one.
 ///
@@ -544,7 +544,7 @@ fn finish_deep(
     let out = PyDict::new(py);
     let has = |prefix: &str, comp: char| names.iter().any(|n| *n == crate::file::rgba_full_name(prefix, comp));
     // Every maximal R/G/B[/A] group, same rule as `file.rs::build_channels`
-    // (r3_surfaces.md item 1 — this used to only group bare top-level R/G/B/A, not a
+    // (this used to only group bare top-level R/G/B/A, not a
     // prefixed group like "left.R/G/B").
     let mut prefixes: Vec<&str> = names.iter().filter_map(|n| crate::file::rgba_prefix(n)).collect();
     prefixes.sort_unstable();
@@ -742,8 +742,8 @@ fn grouped_component_count(py: Python<'_>, arr: &Bound<'_, PyAny>) -> PyResult<O
 
 /// Split a GROUPED `(H, W)` object array (each pixel an `(nsamples, n_comp)` numpy
 /// array, or `None`) into `n_comp` per-component `(H, W)` object arrays of
-/// `(nsamples,)` 1-D arrays — the write-side inverse of `build_grouped` (r3_surfaces
-/// item 7, second half). `elem[:, ci]` is built as `elem[(slice(None), ci)]` since
+/// `(nsamples,)` 1-D arrays — the write-side inverse of `build_grouped`.
+/// `elem[:, ci]` is built as `elem[(slice(None), ci)]` since
 /// PyO3 has no numpy-fancy-indexing sugar.
 fn split_grouped(py: Python<'_>, arr: &Bound<'_, PyAny>, n_comp: usize) -> PyResult<Vec<Py<PyAny>>> {
     let (h, w) = obj_shape(arr)?;

@@ -1,4 +1,4 @@
-//! Tile renderer (`.bughunt/design_tiling.md` §3.5): one instanced quad per
+//! Tile renderer: one instanced quad per
 //! visible tile, drawn straight into egui's render pass through an
 //! `egui_wgpu` paint callback.
 //!

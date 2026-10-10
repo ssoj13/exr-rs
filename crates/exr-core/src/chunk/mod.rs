@@ -184,7 +184,7 @@ fn part_kind(h: &Header) -> Result<PartKind> {
 
 /// Validate one part's header and classify it as scanline- or tile-framed —
 /// the raw-chunk-passthrough analogue of `multipart::input::validate_read_part`
-/// (C-01/C-02/S-06 fix: this used to be its own weaker, unvalidated heuristic
+/// (this used to be its own weaker, unvalidated heuristic
 /// — no required-attribute defaulting, no fatal name/type checks for a
 /// multipart/deep part, and storage read straight off `has_type()`/
 /// `has_tile_description()` with no cross-check against the version flags).
@@ -196,7 +196,7 @@ fn validate_and_classify_part(
     non_image: bool,
     multipart: bool,
 ) -> Result<PartKind> {
-    // C-02: required-attribute defaulting + the fatal multipart/deep
+    // Required-attribute defaulting + the fatal multipart/deep
     // name/type checks, shared with every other reader constructor
     // (`Header::validate_for_read`, used by `multipart::input::read_prologue`
     // and `Header::read_checked`). `auto_add_type = true` mirrors
@@ -297,7 +297,7 @@ impl RawImage {
     /// table, then seeks to and reads each chunk verbatim (`[coord][dataSize]
     /// [compressed bytes]`, with the multipart `partNumber` prefix verified
     /// against the part index, and each chunk's own coordinate against the
-    /// offset-table slot that addressed it -- S-05).  Chunks are returned in
+    /// offset-table slot that addressed it).  Chunks are returned in
     /// ascending SLOT order (== ascending file order for a normally-written
     /// file; a `DECREASING_Y` scanline file's slots are still ordered by
     /// ascending `y`, matching `ImfOutputFile.cpp`'s `lineOffsets` indexing).
@@ -316,7 +316,7 @@ impl RawImage {
             return Err(ExrError::Input("File is not an OpenEXR file.".into()));
         }
         let version_word = xdr::read_i32(stream)?;
-        // C-01/S-06: the ONE shared version-word validator (supported version
+        // The ONE shared version-word validator (supported version
         // number, known flags, and the "single-part TILED can't also be
         // deep/multipart" combo) — this used to be its own weaker check here
         // (no version-number check at all, and no combo check).
@@ -330,7 +330,7 @@ impl RawImage {
         // Single-part: exactly one header.  Multipart: a header list terminated
         // by a second empty attribute name (C++ `parse_header.c`, mirrored by
         // `MultiPartInputFile::new`).
-        // F5 (MIGRATION audit-4): the multipart READ path below is currently
+        // The multipart READ path below is currently
         // proven only by the in-crate self-write/self-read loop in
         // `tests/chunk_passthrough.rs`; cross-validation against a real C++
         // `MultiPartOutputFile` golden is pending a multipart golden from
@@ -354,7 +354,7 @@ impl RawImage {
         }
 
         // --- validate + classify every part --------------------------------
-        // C-02/S-06: required-attribute defaulting, the fatal multipart/deep
+        // Required-attribute defaulting, the fatal multipart/deep
         // name/type checks, the flags-vs-type storage derivation, the
         // non-strict type fix-up, and `sanity_check` — the same validation
         // every other reader constructor runs, via the shared
@@ -381,7 +381,7 @@ impl RawImage {
             offset_tables.push(table.offsets);
         }
 
-        // S-03 fix: an incomplete table used to be silently truncated here (the
+        // An incomplete table used to be silently truncated here (the
         // caller got a `RawImage` missing every chunk whose slot was lost, and
         // `RawImage::write` then wrote a file with holes). C++ instead
         // RECONSTRUCTS the table by scanning the chunk region
@@ -422,7 +422,7 @@ impl RawImage {
             }
         }
 
-        // S-05: per-slot framing (needed to verify each chunk's leader
+        // Per-slot framing (needed to verify each chunk's leader
         // coordinate maps back to the slot that addressed it), built before
         // `headers` is consumed below.
         let framings: Vec<offsets::Framing> = headers
@@ -441,7 +441,7 @@ impl RawImage {
             .zip(framings.iter())
             .enumerate()
         {
-            // S-07 (RawImage half, P1): the per-line uncompressed byte count,
+            // The per-line uncompressed byte count,
             // used to bound each scanline chunk's `dataSize` against the
             // exact unpacked size for the lines it covers (accounting for
             // y-subsampling) -- C++ `chunk.c:1084-1096` rejects `packed >
@@ -456,7 +456,7 @@ impl RawImage {
                 None
             };
 
-            // S-07 (tile case): the same `unpacked_size_per_chunk` bound, but
+            // Tile case: the same `unpacked_size_per_chunk` bound, but
             // C++ computes it for tiles as the FULL nominal tile's byte size
             // (`tileDesc.x_size * tileDesc.y_size` per channel, never clipped
             // by an edge tile's smaller actual rect) -- `parse_header.c:2531-2543`.
@@ -556,7 +556,7 @@ impl RawImage {
             // the C++ single-image `MultiPartOutputFile` branch and this crate's
             // single-part writers, so single-part bytes stay byte-identical.
             //
-            // F5 (MIGRATION audit-4): cross-validating this multipart output
+            // Cross-validating this multipart output
             // against a real C++ `MultiPartInputFile` golden is still pending a
             // multipart case in the `cargo xtask parity-exr` oracle; until
             // then the multipart path is proven only by the in-crate self-loop.
@@ -606,7 +606,7 @@ impl RawImage {
 /// SLOT order — the per-part loop of `copyPixels`, which reads chunks via
 /// `rawPixelData` / `rawTileData`.
 ///
-/// S-05 (round-4 audit) fix: this used to sort+dedup the raw offsets and read
+/// This used to sort+dedup the raw offsets and read
 /// whatever coordinate the leader claimed, with no check that it matched the
 /// SLOT that addressed it — so two offset-table slots cross-linked to the
 /// same physical offset silently read the same chunk twice (and the other
@@ -626,9 +626,9 @@ struct PartChunkDescriptor<'a> {
     framing: &'a offsets::Framing,
     part_index: i32,
     multipart: bool,
-    /// The per-line uncompressed byte count (S-07), scanline parts only.
+    /// The per-line uncompressed byte count, scanline parts only.
     bytes_per_line: Option<&'a [usize]>,
-    /// S-07 (tile case): the FULL nominal tile's uncompressed byte count —
+    /// Tile case: the FULL nominal tile's uncompressed byte count —
     /// `Σ_channels pixel_size(c) * tileDesc.x_size * tileDesc.y_size` — the
     /// exact bound C++ uses for EVERY tile chunk regardless of whether that
     /// specific tile is edge-clipped smaller (`parse_header.c:2531-2543`
@@ -725,7 +725,7 @@ fn read_part_chunks(
             )));
         }
 
-        // S-07 (P1): bound the packed size against the EXACT unpacked size
+        // Bound the packed size against the EXACT unpacked size
         // for the lines this scanline chunk covers (accounting for
         // y-subsampling), not just the whole-stream size -- C++
         // `chunk.c:1084-1096` (`packed > part->unpacked_size_per_chunk` is a
@@ -749,7 +749,7 @@ fn read_part_chunks(
             }
         }
 
-        // S-07 (tile case): same bound, using the FULL nominal tile's
+        // Tile case: same bound, using the FULL nominal tile's
         // uncompressed byte size (see `bytes_per_tile`'s doc comment for why
         // this is not clipped per edge tile — it matches C++ exactly).
         if let (PartKind::Tile, Some(bound)) = (kind, bytes_per_tile)
@@ -762,7 +762,7 @@ fn read_part_chunks(
             )));
         }
 
-        // S-10 residual (round-4 audit): fallible, not `vec![..]` -- see
+        // Fallible, not `vec![..]` -- see
         // `misc::try_filled_vec`'s docs. `data_size` is already bounded by
         // the real stream size above, so this is defense-in-depth for a
         // legitimately huge file rather than an amplification fix.
@@ -1027,8 +1027,8 @@ mod tests {
     }
 
     /// A single-part NONE tiled file, one FLOAT channel, `TS`x`TS` tiles over
-    /// a `W`x`H` (both multiples of `TS`) data window — used by the S-07
-    /// tile-case test.
+    /// a `W`x`H` (both multiples of `TS`) data window — used by the
+    /// tile-case packed-size test.
     fn write_tiled(tile_size: u32) -> Vec<u8> {
         use crate::attr::tile_description::{LevelMode, LevelRoundingMode};
         use crate::attr::TileDescriptionAttribute;
@@ -1179,7 +1179,7 @@ mod tests {
         assert!(msg.contains("unpacked size"), "unexpected error: {msg}");
     }
 
-    /// S-03: a scanline file whose chunk offset table was zeroed (e.g. by an
+    /// A scanline file whose chunk offset table was zeroed (e.g. by an
     /// interrupted write) must have every chunk RECOVERED by the reconstruction
     /// sweep, not silently dropped. Before this fix `RawImage::read` returned
     /// `Ok` with the (empty) table's chunks filtered out entirely.
@@ -1206,7 +1206,7 @@ mod tests {
         assert_eq!(img.parts[0].chunks, good_img.parts[0].chunks);
     }
 
-    /// S-03: when a chunk is genuinely missing (truncated file, not just an
+    /// When a chunk is genuinely missing (truncated file, not just an
     /// unwritten offset table), reconstruction cannot recover it, and
     /// `RawImage::read` must error — never return `Ok` with fewer chunks than
     /// the header's `chunkCount` implies.
@@ -1263,7 +1263,7 @@ mod tests {
         assert!(!img.parts[0].chunks.is_empty());
     }
 
-    /// S-05 (round-4 audit): a chunk offset table with two slots cross-linked
+    /// A chunk offset table with two slots cross-linked
     /// to the SAME physical offset must be rejected, not silently read twice
     /// (dropping the other slot's rightful chunk). Matches C++
     /// `chunk.c:985-996` ("BAD_CHUNK_LEADER" -- a chunk's own coordinate must
@@ -1289,7 +1289,7 @@ mod tests {
         let _ = format!("{err}"); // a real, displayable error
     }
 
-    /// S-07 (round-4 audit, P1 half): a chunk's declared packed size must not
+    /// A chunk's declared packed size must not
     /// exceed the EXACT unpacked size for the lines it covers -- C++
     /// `chunk.c:1084-1096`. Patches one chunk's on-disk `dataSize` (the i32
     /// right after its `y`) to claim more bytes than the line actually holds
@@ -1322,7 +1322,7 @@ mod tests {
         assert!(msg.contains("unpacked size"), "unexpected error: {msg}");
     }
 
-    /// S-07 (round-4 audit, tile case): the same `unpacked_size_per_chunk`
+    /// Tile case: the same `unpacked_size_per_chunk`
     /// bound, but for a TILED part — C++ `parse_header.c:2531-2543` computes
     /// it once, per part, as the FULL nominal tile's uncompressed byte size
     /// (never clipped by an edge tile's smaller actual rect). Patches tile

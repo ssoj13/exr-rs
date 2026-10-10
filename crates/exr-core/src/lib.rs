@@ -6,8 +6,8 @@
 //! converge to the C++ 1:1. This crate itself writes NO `unsafe`: SIMD hot
 //! paths behind a byte-identical safe scalar fallback live in `deflate-rs`
 //! (this workspace) and in `codec-simd` (the `compressor::predictor`
-//! decode-side transform's dependency, a safe API — see root `CLAUDE.md`'s
-//! "Key invariants"). Output is verified
+//! decode-side transform's dependency, a safe API; exr-core itself writes no
+//! `unsafe`). Output is verified
 //! byte-for-byte (and, for lossy codecs, decode-exact) against real C++
 //! OpenEXR 3.4 by the parity harness, and read against the official
 //! `openexr-images` corpus.
@@ -111,28 +111,28 @@ pub use error::{decode_err, encode_err, ExrError, IexClass, Result};
 // `OutputFile::copyPixels` / `TiledOutputFile::copyPixels`.
 pub use chunk::{ChunkCoord, RawChunk, RawImage, RawPart};
 
-// Idiomatic image facade (Phase 10 W10-1) — the ergonomic common-case API over
+// Idiomatic image facade — the ergonomic common-case API over
 // the verified low-level core. Deep / multipart use the low-level types above.
 pub use api::{ChannelData, Image, Unsupported, classify_unsupported, read, write_rgba_file};
 
-// Deep data model (Phase 7 W7-1) + deep I/O (W7-2..W7-4)
+// Deep data model + deep I/O
 pub use deep::{
     DeepFrameBuffer, DeepScanLineInputFile, DeepScanLineOutputFile, DeepSlice,
     DeepTiledInputFile, DeepTiledOutputFile,
 };
 
-// Multipart container (Phase 8 W8-1)
+// Multipart container
 pub use multipart::{MultiPartInputFile, MultiPartOutputFile};
 
 pub use rgba::{Rgba, RgbaImage, RgbaInputFile, RgbaOutputFile};
 
-// Multi-view channel/view helpers (Phase 8 W8-3 — ImfMultiView)
+// Multi-view channel/view helpers (ImfMultiView)
 pub use multi_view::{
     are_counterparts, channel_in_all_views, channel_in_other_view, channels_in_no_view,
     channels_in_view, default_view_name, insert_view_name, remove_view_name, view_from_channel_name,
 };
 
-// Attribute base + scalar/math typed attributes (Wave 2)
+// Attribute base + scalar/math typed attributes
 pub use attr::{
     AttrValue, Attribute, Box2fAttribute, Box2iAttribute, DoubleAttribute, FloatAttribute,
     FloatVectorAttribute, IntAttribute, M33dAttribute, M33fAttribute, M44dAttribute, M44fAttribute,
@@ -141,7 +141,7 @@ pub use attr::{
     new_attribute, register_attribute_type, unregister_attribute_type,
 };
 
-// Wave 3a support types
+// Support types
 pub use attr::{
     Chromaticities, ChromaticitiesAttribute,
     Compression, CompressionAttribute,
@@ -154,10 +154,10 @@ pub use attr::{
     TimeCode, TimeCodeAttribute, TimeCodePacking,
 };
 
-// C-08: byte-exact name type (attribute/channel/part identity).
+// Byte-exact name type (attribute/channel/part identity).
 pub use attr::Name;
 
-// Wave 3b types
+// Channel list, preview, opaque and ID-manifest types
 pub use attr::{
     Channel, ChannelList, ChannelListAttribute, PixelType,
     ChannelGroupManifest, CompressedIDManifest, CUSTOMHASH, IDManifest, IDManifestAttribute,
@@ -166,7 +166,7 @@ pub use attr::{
     PreviewImage, PreviewImageAttribute, PreviewRgba,
 };
 
-// OpenEXR 3.4 additions (C-11, C-16)
+// OpenEXR 3.4 additions
 pub use attr::{
     Bytes, BytesAttribute,
     fps_23_976, fps_24, fps_25, fps_29_97, fps_30, fps_47_952, fps_48, fps_50, fps_59_94, fps_60,
@@ -184,7 +184,7 @@ pub use container::{
     is_single_part_general, is_tiled, make_not_tiled, make_tiled, supports_flags,
 };
 
-// isOpenExrFile family (C-16)
+// isOpenExrFile family
 pub use container::{
     ExrFileProbe, is_deep_open_exr_file, is_deep_open_exr_file_stream, is_multi_part_open_exr_file,
     is_multi_part_open_exr_file_stream, is_open_exr_file, is_open_exr_file_stream,

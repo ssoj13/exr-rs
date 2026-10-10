@@ -8,7 +8,7 @@
 //! exactly the uncompressed size is read back scrambled by every implementation.
 //!
 //! Before the writer seam existed, a 32x32 two-FLOAT B44 file hit that case
-//! exactly (`.bughunt/r3_verify_codecs.md`, claim C1): our reader **and** real
+//! exactly: our reader **and** real
 //! C++ OpenEXR both read it scrambled.  The tests below pin the fix:
 //!
 //! * `*_equal_size_chunk_is_stored_raw` — coverage guards: the file really does

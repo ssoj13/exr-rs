@@ -213,8 +213,8 @@ impl RgbaLut {
 // ---------------------------------------------------------------------------
 
 /// C++'s `int(double)` cast, on the MSVC x64/SSE2 target this crate pins for
-/// float-path parity (see `compressor/CLAUDE.md`'s DWA notes for the same
-/// "match the platform's actual instruction, not the C standard's UB" rule):
+/// float-path parity (the DWA codec follows the same "match the
+/// platform's actual instruction, not the C standard's UB" rule):
 /// `cvttsd2si` returns the "integer indefinite" `0x8000_0000` (`i32::MIN`)
 /// for a NaN or an out-of-`i32`-range double, rather than saturating toward
 /// the input's sign the way Rust's `as i32` does. `round12log`'s `int(...)`

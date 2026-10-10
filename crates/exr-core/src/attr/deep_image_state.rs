@@ -36,7 +36,7 @@ impl DeepImageState {
     ///
     /// `v` is assumed already validated to be `< 4` (see
     /// [`read_value`][AttrValue::read_value], which now rejects out-of-range
-    /// values before calling this — D-04). The `_ => Messy` arm only exists so
+    /// values before calling this). The `_ => Messy` arm only exists so
     /// the function stays total; it is unreachable via the attribute reader.
     pub fn from_u8(v: u8) -> Self {
         match v {
@@ -69,7 +69,7 @@ impl AttrValue for DeepImageState {
         // (`OpenEXRCore/parse_header.c:432-453`): `attrsz != 1` ->
         // EXR_ERR_ATTR_SIZE_MISMATCH, `value >= 4` -> EXR_ERR_INVALID_ATTR.
         // Both fail the attribute (the header reader's non-strict loop then
-        // drops it) instead of silently remapping the byte (D-04).
+        // drops it) instead of silently remapping the byte.
         // <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXRCore/parse_header.c#L445>
         if size != 1 {
             return Err(crate::error::ExrError::Input(format!(
@@ -128,7 +128,7 @@ mod tests {
         }
     }
 
-    /// D-04 — an out-of-range raw value must be rejected, not silently
+    /// An out-of-range raw value must be rejected, not silently
     /// remapped to `Messy`.
     #[test]
     fn read_value_rejects_out_of_range() {
@@ -136,7 +136,7 @@ mod tests {
         assert!(DeepImageState::read_value(&mut i, 1, 0).is_err());
     }
 
-    /// D-04 — a declared size other than 1 must be rejected.
+    /// A declared size other than 1 must be rejected.
     #[test]
     fn read_value_rejects_wrong_size() {
         let mut i = MemIStream::new(vec![0u8, 0u8]);

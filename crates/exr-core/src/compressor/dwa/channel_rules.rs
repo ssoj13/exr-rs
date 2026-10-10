@@ -121,14 +121,14 @@ fn write_rule(rule: &Rule, out: &mut Vec<u8>) {
 /// size field).  An all-rules-miss image yields a 2-byte section (size == 2).
 ///
 /// # Errors
-/// W-11: if the section would need more than `u16::MAX` bytes, C++
+/// If the section would need more than `u16::MAX` bytes, C++
 /// `DwaCompressor_writeRelevantChannelRules` returns `EXR_ERR_OUT_OF_MEMORY`
 /// (`internal_dwa_compressor.h:1554`, its `nOut` overflow check) rather than
 /// truncating the size field — this cannot happen with the 15 default rules
 /// (well under 2 KB total), but silently clamping instead of erroring would
 /// have written a size field that undercounts the actual bytes.
 pub fn write_for_channels(channels: &ChannelList, out: &mut Vec<u8>) -> Result<()> {
-    // Collect (suffix, type) of every channel for matching. C-08b: matches on
+    // Collect (suffix, type) of every channel for matching. Matches on
     // raw bytes, exactly like C++ (`Classifier_find_suffix`/`Classifier_match`
     // operate on `const char*`, never checking encoding), so a non-UTF-8
     // channel name classifies the same way a UTF-8 one does.
@@ -189,7 +189,7 @@ pub fn read_channel_rules(data: &[u8], offset: &mut usize) -> Result<Vec<Rule>> 
     let mut p = *offset + 2; // past the size field
     let mut remaining = section_size - 2;
 
-    // Parse each record while more than 2 bytes remain — W-11: C++
+    // Parse each record while more than 2 bytes remain — C++
     // `DwaCompressor_readChannelRules`'s loop condition is `*nAvail > 2`
     // (`internal_dwa_compressor.h:1570`), the minimum a record can be (a
     // 0-length suffix's null terminator + 1 flags byte + 1 type byte). A
@@ -216,7 +216,7 @@ pub fn read_channel_rules(data: &[u8], offset: &mut usize) -> Result<Vec<Rule>> 
         let flags = data[flags_pos];
         let type_byte = data[flags_pos + 1];
 
-        // C-08b: the suffix is a raw byte string on the wire, matching C++
+        // The suffix is a raw byte string on the wire, matching C++
         // `Classifier_read`, which reads it via `memcpy` into `char[]` with no
         // encoding check at all.
         let suffix = &data[start..null_pos];
@@ -277,7 +277,7 @@ mod tests {
     /// `DwaCompressor_readChannelRules` condition `*nAvail > 2`
     /// (OpenEXRCore v3.4.15, `internal_dwa_compressor.h:1570`), not this
     /// port's own historical `remaining <= 3` check (already fixed, see the
-    /// W-11 comment above the loop) - a trailing 2-byte gap after the last
+    /// comment above the loop) - a trailing 2-byte gap after the last
     /// real record must end the loop cleanly, not be misread as a new
     /// record. A section with one real record followed by exactly 2
     /// non-null trailing bytes exercises this exact boundary.
@@ -344,7 +344,7 @@ mod tests {
         // R,G,B(half)+A(float). The flags byte packs `(cscIdx+1)<<4 | scheme<<2`
         // with the C++ `CompressorScheme` order UNKNOWN=0/LOSSY_DCT=1/RLE=2, so
         // R/G/B (LOSSY_DCT) -> scheme 1 (low nibble 0x4|cscIdx<<4) and A (RLE) ->
-        // scheme 2 (0x08).  This is the W6-4b regression: a wrong enum mapping
+        // scheme 2 (0x08).  This guards a past regression: a wrong enum mapping
         // here made genuine C++ reject our tiled-DWAA chunks as CORRUPT.
         assert_eq!(
             out,

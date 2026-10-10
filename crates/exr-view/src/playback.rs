@@ -1,11 +1,11 @@
-//! Playback clock (VW-3), driven over the frames ACTUALLY PRESENT on disk.
+//! Playback clock, driven over the frames ACTUALLY PRESENT on disk.
 //!
-//! The clock idea is **lifted from the operator's debugged `playa`**
+//! The clock idea is **lifted from the debugged `playa` player**
 //! (`playa-engine/src/core/player.rs::update`): an FPS-based, real-time clock
 //! that advances by `elapsed * fps` each tick, looping or clamping at the ends.
 //! We take ONLY the clock — none of playa's `Project`/event-bus/comp machinery.
 //!
-//! What changed for the scanseq port (VW-3 bug fix): playback no longer walks a
+//! What changed for the scanseq port: playback no longer walks a
 //! contiguous `first..=last` integer range. It steps over the **present frame
 //! set** — `scanseq::Seq::indices` — so missing frames (gaps) are simply skipped
 //! and an unpadded sequence (`heart.0.exr … heart.249.exr`) plays its real

@@ -143,13 +143,13 @@ pub fn make_not_tiled(version: u32) -> u32 {
 }
 
 /// Port of `Imf::getLibraryVersion` (`ImfMisc.h/.cpp`) — the OpenEXR release
-/// this port's on-disk format and behaviour targets (C-16 follow-up).
+/// this port's on-disk format and behaviour targets.
 ///
 /// C++ returns its own build's `OPENEXR_VERSION_STRING`; since this is a
 /// from-scratch Rust port rather than a build of the C++ library, there is no
 /// analogous compiled-in constant — this reports the version this crate's
-/// container/attribute/codec layer is written against (the R4 audit's
-/// "behavioural target = C++ 3.4.15" policy decision), which is exactly what
+/// container/attribute/codec layer is written against (the behavioural target is C++
+/// 3.4.15), which is exactly what
 /// a caller checking `getLibraryVersion()` for compatibility purposes wants.
 ///
 /// [`Imf::WidenFilename`](https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXR/ImfMisc.cpp)
@@ -186,7 +186,7 @@ pub fn get_library_version() -> &'static str {
 ///
 /// Every header-only entry point that does not otherwise route through a
 /// reader's `read_prologue` (`Header::read_checked`, the raw-chunk
-/// passthrough) must call this alongside [`supports_flags`] (C-01) — the
+/// passthrough) must call this alongside [`supports_flags`] — the
 /// reader constructors already reject these inputs via
 /// `multipart::input::read_prologue`.
 pub fn validate_version_word(version_word: u32) -> crate::error::Result<()> {
@@ -321,14 +321,14 @@ mod tests {
         assert_eq!(get_version(nt), EXR_VERSION);
     }
 
-    /// C-01 — a version number other than 2 must be rejected.
+    /// A version number other than 2 must be rejected.
     #[test]
     fn validate_version_word_rejects_bad_version() {
         assert!(validate_version_word(3).is_err());
         assert!(validate_version_word(EXR_VERSION).is_ok());
     }
 
-    /// C-01 — TILED combined with NON_IMAGE or MULTI_PART is an invalid
+    /// TILED combined with NON_IMAGE or MULTI_PART is an invalid
     /// combination of flags.
     #[test]
     fn validate_version_word_rejects_bad_flag_combo() {

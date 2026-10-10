@@ -1,4 +1,4 @@
-// C++ Imath golden-parity oracle for exr-rs (Wave 7).
+// C++ Imath golden-parity oracle for exr-rs.
 //
 // Computes reference values for representative ops across every Imath module
 // using the *real* C++ Imath library (vcpkg, Imath 3.2.2) and prints them as
@@ -156,7 +156,7 @@ static void emit_half()
         pu64("half.f32_to_u16.roundtrip.fnv1a64", hsum);
     }
 
-    // NaN / infinity payloads for float->half. CLAUDE.md claims the port is
+    // NaN / infinity payloads for float->half. The port claims to be
     // bit-exact "including NaN payloads"; these are the C++ values backing it.
     {
         const uint32_t nanbits[] = {

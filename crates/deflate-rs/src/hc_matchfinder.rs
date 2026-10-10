@@ -107,7 +107,7 @@ impl HcMatchfinder {
 
     /// Allocate the backing storage WITHOUT running `init()` on it.
     ///
-    /// D1: `Compressor::new` (the allocator) always calls `.init()` itself
+    /// `Compressor::new` (the allocator) always calls `.init()` itself
     /// right before the first `deflate_compress_greedy`/`lazy_generic` call
     /// on the compressor it just built, so calling the self-initialising
     /// `new()` there ran `matchfinder_init` (a full sweep filling
@@ -325,7 +325,7 @@ pub fn hc_matchfinder_longest_match(
 
     // Search for length >= 5 matches.
     //
-    // F6 (plan4): mirrors C's UNALIGNED_ACCESS_IS_FAST fast filter
+    // Mirrors C's UNALIGNED_ACCESS_IS_FAST fast filter
     // (hc_matchfinder.h:296-306), not the portable 1-byte-check fallback
     // (`matchptr[best_len] == in_next[best_len]`) this used to port instead.
     // The fast filter compares TWO u32s: the 4 bytes ending at `best_len`
@@ -623,7 +623,7 @@ mod tests {
         }
     }
 
-    /// V4 (plan4): at least one input > `MATCHFINDER_WINDOW_SIZE` (32 KiB) per
+    /// At least one input > `MATCHFINDER_WINDOW_SIZE` (32 KiB) per
     /// matchfinder test, actually crossing a `slide_window()` call, with the
     /// match verified byte-for-byte (not just "something was found") —
     /// current unit tests here never exceeded a few hundred bytes, so a
@@ -631,8 +631,7 @@ mod tests {
     /// `next_tab`/hash entries referencing pre-slide positions, wrong
     /// `cutoff` sign handling, etc.) had zero unit-level coverage.
     ///
-    /// MUTATION CHECKED (per user/team-lead's test-quality requirement --
-    /// the byte comparison must catch a real wrong answer, not just "no
+    /// MUTATION CHECKED (the byte comparison must catch a real wrong answer, not just "no
     /// panic"): temporarily changed the length-4 match's `best_match_abs =
     /// match_abs;` (this file, in the length-4-then-extend branch) to
     /// `match_abs + 1` and reran this test — it went RED with "matchfinder

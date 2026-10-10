@@ -1,5 +1,5 @@
 //! Process-global maximum image/tile size state
-//! (`Header::{set_,}max_{image,tile}_size`, C-14) — tests that MUTATE this
+//! (`Header::{set_,}max_{image,tile}_size`) — tests that MUTATE this
 //! state live in their OWN process, here, not in the `-p exr-core --lib`
 //! unit-test binary.
 //!
@@ -49,7 +49,7 @@ impl Drop for ResetGuard {
     }
 }
 
-/// C-14 (ported verbatim from `header::tests::max_image_and_tile_size_round_trip`).
+/// Ported verbatim from `header::tests::max_image_and_tile_size_round_trip`.
 #[test]
 fn max_image_and_tile_size_round_trip() {
     let _lock = lock().lock().unwrap();
@@ -60,7 +60,7 @@ fn max_image_and_tile_size_round_trip() {
     assert_eq!(Header::max_tile_size(), (64, 128));
 }
 
-/// C-14 (ported verbatim from `header::tests::sanity_check_enforces_max_image_width`)
+/// (Ported verbatim from `header::tests::sanity_check_enforces_max_image_width`)
 /// — `sanity_check` rejects a data window wider than the process-global
 /// maximum image width.
 #[test]
@@ -75,7 +75,7 @@ fn sanity_check_enforces_max_image_width() {
     assert!(h.sanity_check(false, false).is_err());
 }
 
-/// C-14 (ported verbatim from `header::tests::sanity_check_enforces_max_tile_width`)
+/// (Ported verbatim from `header::tests::sanity_check_enforces_max_tile_width`)
 /// — `sanity_check` rejects a tile wider than the process-global maximum
 /// tile width.
 #[test]

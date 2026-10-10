@@ -1,4 +1,4 @@
-//! C-15 structured `IDManifest` cross-check against real C++ OpenEXR.
+//! Structured `IDManifest` cross-check against real C++ OpenEXR.
 //!
 //! Two directions, both gated on `EXR_ORACLE_EXE` (skip-with-note
 //! standalone, per `tests/support/mod.rs`):

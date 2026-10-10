@@ -241,7 +241,7 @@ mod tests {
         }
     }
 
-    /// C14: type `A` must not claim type `A1`'s `A100.*` (rank index is exactly
+    /// Type `A` must not claim type `A1`'s `A100.*` (rank index is exactly
     /// two digits), nor one- or three-digit suffixes.
     #[test]
     fn rank_suffix_is_exactly_two_digits() {

@@ -1,5 +1,5 @@
 // oracle.cpp — C++ OpenEXR (IlmImf) reference for the exr-core uncompressed
-// scanline read/write parity gate (Phase 4, Wave 5).
+// scanline read/write parity gate.
 //
 // Built and driven by `cargo run -p xtask -- parity-exr`.  It speaks the real
 // vcpkg OpenEXR 3.4 IlmImf API and has two modes:
@@ -42,7 +42,7 @@
 // Why 67x43 and not the original 7x5: a 7x5 image is ONE chunk for every codec
 // and so small that PIZ / DWAA / DWAB / HTJ2K all failed to shrink it, so the
 // writer stored those chunks RAW -- their goldens exercised the raw-store rule
-// and the header and NOTHING of the codec (.bughunt/r3_tests.md 4.1). 67x43 is
+// and the header and NOTHING of the codec. 67x43 is
 // multi-chunk for ZIP (16 lines), B44 (4), DWA (32) and PIZ, is not a multiple
 // of 4/8/16/32, and compresses. The UINT channel gives the UINT pixel path its
 // first C++-verified test; the flat rect gives B44A its flat-block path (the
@@ -78,7 +78,7 @@
 #include <ImfDeepFrameBuffer.h>
 #include <ImfCompositeDeepScanLine.h>
 #include <ImfDeepCompositing.h>
-// Multipart (Phase 8, Wave W8-4): the C++ MultiPart container + the typed
+// Multipart: the C++ MultiPart container + the typed
 // per-part wrappers (same read/write interface as the single-part files).
 #include <ImfArray.h>
 #include <IexBaseExc.h>
@@ -109,9 +109,8 @@
 #include <ImfRationalAttribute.h>
 #include <ImfKeyCodeAttribute.h>
 #include <ImfIntAttribute.h>
-// C-15: structured IDManifest cross-check (fix-container's additive mode —
-// write-idmanifest / dump-idmanifest). Every other mode in this file is
-// unchanged.
+// Structured IDManifest cross-check (the additive write-idmanifest /
+// dump-idmanifest modes).
 #include <ImfIDManifest.h>
 #include <ImfIDManifestAttribute.h>
 #include <ImfBoxAttribute.h>
@@ -176,14 +175,14 @@ static Compression comp_from_name(const char* name)
     return NO_COMPRESSION;
 }
 
-// K-06: `zipLevel` is additive and defaults to -1 ("do not touch the header's
+// `zipLevel` is additive and defaults to -1 ("do not touch the header's
 // zipCompressionLevel() at all -- let OpenEXR use its own built-in default"),
 // so every EXISTING call site (which passes only `path`/`comp`) is completely
 // unaffected. When >= 0, sets `header.zipCompressionLevel()` before opening the
 // OutputFile, mirroring `Imf::Header::zipCompressionLevel()`'s per-header
 // override (`ImfHeader.h:281`, `ImfHeader.cpp:68-183`) -- it is a header-side
-// ephemeral setting, not a file attribute, and (per `internal_pxr24.c:219-226`
-// / the fix-codecs K-06 investigation) PXR24 ignores it and always uses the
+// ephemeral setting, not a file attribute, and (per `internal_pxr24.c:219-226`)
+// PXR24 ignores it and always uses the
 // process-global default, so this is only meaningful for ZIP/ZIPS.
 static int do_write(const char* path, Compression comp, int zipLevel = -1)
 {
@@ -240,7 +239,7 @@ static int do_write(const char* path, Compression comp, int zipLevel = -1)
     return 0;
 }
 
-// W2.7 "header wire bytes": the KNOWN image (NO_COMPRESSION, so the whole
+// "Header wire bytes": the KNOWN image (NO_COMPRESSION, so the whole
 // file including every chunk is deterministic) plus three ADDITIONAL
 // structured attribute types the base `write` mode's header does not carry
 // (chromaticities: 4 packed V2f; rational: i32 + u32; keyCode: 7 packed
@@ -386,7 +385,7 @@ static int do_read(const char* path)
     return 0;
 }
 
-// S-01 (round-4 audit): read EVERY channel of `path` into a HALF slice
+// Read EVERY channel of `path` into a HALF slice
 // regardless of its on-disk pixel type -- this forces the UINT->HALF and
 // FLOAT->HALF conversion paths in real C++ OpenEXR's core reader
 // (OpenEXRCore/unpack.c -> internal_coding.h::float_to_half/uint_to_half),
@@ -435,7 +434,7 @@ static int do_read_half(const char* path)
     return 0;
 }
 
-// W2.7 S-08 (both directions): open `path` -- which may be a TRUNCATED file
+// Incomplete files (both directions): open `path` -- which may be a TRUNCATED file
 // -- and report, machine-readably, whether C++ itself follows the
 // documented `isComplete()` contract: open succeeds even for a file some
 // chunks are missing from, `isComplete()` is false, present scanlines read
@@ -492,7 +491,7 @@ static int do_read_truncated(const char* path)
     return 0;
 }
 
-// W2.7: read EVERY channel of `path` into a UINT slice regardless of its
+// Read EVERY channel of `path` into a UINT slice regardless of its
 // on-disk type -- the mirror of `do_read_half` above, but for the
 // HALF->UINT and FLOAT->UINT conversion paths (`OpenEXRCore/unpack.c` ->
 // `internal_coding.h::half_to_uint`/`float_to_uint`), which have their own
@@ -541,7 +540,7 @@ static int do_read_as_uint(const char* path)
 }
 
 // ===========================================================================
-// TILED parity (Phase 6, Wave W6-4b)
+// TILED parity
 // ===========================================================================
 //
 // The KNOWN tiled image (must be reproduced bit-for-bit by the Rust side):
@@ -785,7 +784,7 @@ static int do_read_tiled(const char* path)
 }
 
 // ===========================================================================
-// DEEP parity (Phase 7, Wave W7-5)
+// DEEP parity
 // ===========================================================================
 //
 // The KNOWN deep image (must be reproduced bit-for-bit by the Rust side):
@@ -1011,7 +1010,7 @@ static int do_read_deep_scanline(const char* path)
 }
 
 // ---------------------------------------------------------------------------
-// write-deep-composite / composite-deep-scanline modes (D-12 oracle gate)
+// write-deep-composite / composite-deep-scanline modes (CompositeDeepScanLine oracle gate)
 // ---------------------------------------------------------------------------
 // Two small deep scanline "sources" (variant 'a'/'b') with a KNOWN,
 // deterministic pattern chosen to exercise: some pixels where only ONE
@@ -1137,7 +1136,7 @@ static int do_composite_deep_scanline(const char* pathA, const char* pathB, cons
 
 // read-deep-via-inputfile <path> <out>
 //
-// W3.4 oracle gate: opens `path` (a deep-scanline file with Z/A/R channels,
+// Oracle gate: opens `path` (a deep-scanline file with Z/A/R channels,
 // e.g. one of the `write-deep-composite` sources above) with the REAL,
 // GENERIC `Imf::InputFile` -- NOT `DeepScanLineInputFile` directly -- sets a
 // flat Z/A/R output FrameBuffer, calls `readPixels`, and dumps the flattened
@@ -1146,7 +1145,7 @@ static int do_composite_deep_scanline(const char* pathA, const char* pathB, cons
 // `CompositeDeepScanLine` (single source, front-to-back accumulate, no
 // cross-source sort needed) pair `composite-deep-scanline` above drives
 // directly -- this mode instead goes through the GENERIC reader, which is
-// what exr-rs's own `scanline::InputFile` (W3.4) ports. Same output grammar
+// what exr-rs's own `scanline::InputFile` ports. Same output grammar
 // as `composite-deep-scanline` (one source instead of two, so `PIX` lines
 // cover every pixel of the single file's data window).
 //
@@ -1385,7 +1384,7 @@ static int do_read_deep_tiled(const char* path)
 }
 
 // ===========================================================================
-// MULTIPART parity (Phase 8, Wave W8-4)
+// MULTIPART parity
 // ===========================================================================
 //
 // The KNOWN multipart image (must be reproduced bit-for-bit by the Rust side):
@@ -1717,7 +1716,7 @@ static int do_read_multipart(const char* path)
 }
 
 // ---------------------------------------------------------------------------
-// write-idmanifest / dump-idmanifest — C-15 structured IDManifest cross-check
+// write-idmanifest / dump-idmanifest — structured IDManifest cross-check
 // ---------------------------------------------------------------------------
 // `write-idmanifest <path>` writes a tiny single-channel EXR whose header
 // carries a real C++-built `IDManifestAttribute` (byte-exact deflate output,
@@ -2224,7 +2223,7 @@ static int do_lut_dump (const char* out, int n)
 // (it blows up near values that cross zero). Until now the only exact check was
 // "run the oracle and compare", which meant 11 tests silently degraded to a
 // pixel COUNT whenever the oracle was absent -- i.e. in every plain `cargo
-// test` (.bughunt/r3_tests.md 2.2).
+// test`.
 //
 // So the oracle's decode is committed. The layout is deliberately trivial so
 // the Rust side can rebuild it byte-for-byte:
@@ -2291,7 +2290,7 @@ static int do_dump (const char* path, const char* out)
 }
 
 // ---------------------------------------------------------------------------
-// write-nonutf8-names / dump-nonutf8-attr — C-08 byte-exact Name oracle proof.
+// write-nonutf8-names / dump-nonutf8-attr — byte-exact Name oracle proof.
 //
 // `Imf::Name` is a raw `char[256]` (`ImfName.h`): construction is
 // `strncpy(_text, text, MAX_LENGTH); _text[MAX_LENGTH] = 0` — cut at the
@@ -2401,9 +2400,8 @@ static int do_dump_nonutf8_attr (const char* path, const char* out)
 }
 
 // ---------------------------------------------------------------------------
-// write-dwa-sub / dump-dwa-sub — W-06 subsampled-channel DWA scanline oracle
-// (`.bughunt/r4_audit_dwa_htj2k.md`; additive, does not touch the KNOWN 67x43
-// image or any existing golden).
+// write-dwa-sub / dump-dwa-sub — subsampled-channel DWA scanline oracle
+// (additive, does not touch the KNOWN 67x43 image or any existing golden).
 //
 // Channels (alphabetical, as IlmImf stores them): A (HALF, xSampling=2,
 // ySampling=1 -> RLE, the classifier's "A" rule), B/G/R (HALF, unsampled ->
@@ -2480,7 +2478,7 @@ static int do_write_dwa_sub (const char* path, Compression comp)
 
 // ---------------------------------------------------------------------------
 // write-sub / dump-sub — generic per-codec x per-sampling matrix oracle.
-// (`.bughunt/progress_htj2k_ysub.md` follow-up: the HTJ2K y-subsampling bug
+// (An HTJ2K y-subsampling bug
 // slipped through because no test ever exercised x/y channel sub-sampling for
 // most of the 12 codecs. This is additive -- it does not touch the KNOWN
 // image, `write-dwa-sub`, or any existing golden.)
@@ -2538,7 +2536,7 @@ static int do_write_sub (const char* path, Compression comp, int xs, int ys)
 // bytes in (channel, then row-major over ITS OWN reduced grid) order. Not
 // specific to DWA — any subsampled scanline fixture can reuse this — but the
 // convention matches `channel_dims`/`active_row_count` (`compressor/dwa/mod.rs`)
-// on the Rust side exactly, which is what W-06's cross-check needs.
+// on the Rust side exactly, which is what the subsampled DWA cross-check needs.
 static int do_dump_subsampled (const char* path, const char* out)
 {
     InputFile     in (path);
@@ -2626,9 +2624,9 @@ static int do_dump_tiled (const char* path, const char* out)
 }
 
 // ---------------------------------------------------------------------------
-// bench-io — W3.9 phase B "as C++ or better" wall-time comparison
+// bench-io — "as C++ or better" wall-time comparison
 // ---------------------------------------------------------------------------
-// Team-lead follow-up: a whole-file scanline write + read wall-time
+// A whole-file scanline write + read wall-time
 // comparison at a real 16k-class size, with `setGlobalThreadCount(threads)`
 // so C++'s own IlmThread pool is sized the same as our `num_threads`. This
 // is a THROUGHPUT comparison, not a byte-parity one (unlike every other mode
@@ -2721,8 +2719,8 @@ static int do_bench_io(const char* pixels, const char* path, Compression comp, i
 
     // Warm-up read (untimed): puts the file in the OS page cache so the
     // TIMED read below is not paying for a page-cache-cold first touch --
-    // matches the Rust side's own warm-up-then-time pattern (team-lead
-    // follow-up: reduce cross-run noise).
+    // matches the Rust side's own warm-up-then-time pattern (reduces
+    // cross-run noise).
     {
         InputFile warm(path);
         warm.setFrameBuffer(rfb);
@@ -2745,9 +2743,8 @@ static int do_bench_io(const char* pixels, const char* path, Compression comp, i
 }
 
 // ---------------------------------------------------------------------------
-// bench-scatter -- W3.9 phase B follow-up: "what does C++ generic_unpack give
-// on the SAME data" (team-lead review of the scatter_chunk_only_throughput
-// finding -- comparing our scatter against a raw memcpy was the wrong
+// bench-scatter -- "what does C++ generic_unpack give on the SAME data"
+// (comparing our scatter against a raw memcpy was the wrong
 // baseline; 4 strided sub-pixel passes are inherently slower than one
 // contiguous copy, on EITHER side of the language boundary).
 // ---------------------------------------------------------------------------
@@ -2828,9 +2825,9 @@ static int do_bench_scatter(Compression comp, int width, int height, int threads
 }
 
 // ---------------------------------------------------------------------------
-// bench-codec -- W3.9 phase B: codec-in-isolation comparison (team-lead
-// priority: "the cleanest answer to codec or pipeline" for ZIP/PIZ/DWAA,
-// where the whole-file comparisons show the biggest remaining gap).
+// bench-codec -- codec-in-isolation comparison: the cleanest answer to
+// "codec or pipeline?" for ZIP/PIZ/DWAA, where the whole-file comparisons
+// show the biggest remaining gap.
 // ---------------------------------------------------------------------------
 // Times ONLY Imf::Compressor::compress/uncompress (ImfCompressor.h's public
 // API, the same shape our own Compressor trait mirrors) on synthetic,
@@ -3109,16 +3106,16 @@ int main(int argc, char** argv)
     // Modes:
     //   write       <path> [compression]
     //   read        <path>
-    //   read-half   <path>   (S-01: every channel read into a HALF slice)
+    //   read-half   <path>   (every channel read into a HALF slice)
     //   write-tiled <path> <compression> <levelmode> [minX minY]
     //   read-tiled  <path>
     //   write-deep-scanline <path> <codec> [minX minY]
     //   read-deep-scanline  <path>
     //   write-deep-tiled    <path> <codec> <levelmode>
     //   read-deep-tiled     <path>
-    //   write-deep-composite <path> <a|b>       (D-12: one of 2 deep composite sources)
-    //   composite-deep-scanline <pathA> <pathB> <out>  (D-12: real CompositeDeepScanLine dump)
-    //   read-deep-via-inputfile <path> <out>    (W3.4: real generic Imf::InputFile flatten dump)
+    //   write-deep-composite <path> <a|b>       (one of 2 deep composite sources)
+    //   composite-deep-scanline <pathA> <pathB> <out>  (real CompositeDeepScanLine dump)
+    //   read-deep-via-inputfile <path> <out>    (real generic Imf::InputFile flatten dump)
     //   dump            <path> <out>   (C++ decode of a flat golden, raw bytes)
     //   dump-tiled      <path> <out>   (same, every level)
     //   write-yc        <path>      (luminance-chroma, subsampled RY/BY)
@@ -3128,17 +3125,17 @@ int main(int argc, char** argv)
     //   rgba-read       <path> [out]  (Imf::RgbaInputFile decode, bits per pixel; [out] = binary dump)
     //   write-multipart <path>
     //   read-multipart  <path>
-    //   write-idmanifest <path>          (C-15: a real C++-built IDManifest attribute)
-    //   dump-idmanifest  <path> <out>    (C-15: text dump of a decoded idmanifest attribute)
-    //   write-zip-level <path> <compression> <level>  (K-06: Header::zipCompressionLevel() override)
-    //   bench-io <pixels> <path> <compression> <width> <height> <threads>  (W3.9 phase B:
+    //   write-idmanifest <path>          (a real C++-built IDManifest attribute)
+    //   dump-idmanifest  <path> <out>    (text dump of a decoded idmanifest attribute)
+    //   write-zip-level <path> <compression> <level>  (Header::zipCompressionLevel() override)
+    //   bench-io <pixels> <path> <compression> <width> <height> <threads>  (
     //       whole-file scanline write+read wall-time comparison of the raw image <pixels>
     //       (written by the Rust side), setGlobalThreadCount(threads);
     //       prints "write_ms=... read_ms=..." -- NOT a byte-parity mode)
-    //   bench-scatter <compression> <width> <height> <threads>  (W3.9 phase B: in-memory-stream
+    //   bench-scatter <compression> <width> <height> <threads>  (in-memory-stream
     //       (no disk I/O) scatter-only throughput, NONE compression makes decode a no-op;
     //       prints "scatter_ms=... gbps=..." -- NOT a byte-parity mode)
-    //   bench-codec <compression> <width> <height>  (W3.9 phase B: codec-in-isolation --
+    //   bench-codec <compression> <width> <height>  (codec-in-isolation --
     //       Imf::Compressor::compress/uncompress only, no I/O, no scatter; prints
     //       "compress_ms=... uncompress_ms=..." -- NOT a byte-parity mode)
     if (argc < 3) {
@@ -3189,7 +3186,7 @@ int main(int argc, char** argv)
             int height = std::atoi(argv[4]);
             return do_bench_codec(comp, width, height);
         }
-        // K-06: write-zip-level <path> <compression> <level>
+        // write-zip-level <path> <compression> <level>
         // Additive mode -- writes the SAME known image as `write`, but with
         // `Header::zipCompressionLevel()` overridden to `<level>` before
         // opening the OutputFile, so a golden can pin the on-disk deflate
@@ -3232,7 +3229,7 @@ int main(int argc, char** argv)
             //             [round=up] [order=random|decreasing]
             // The trailing key=value options keep the positional form stable
             // while letting a golden vary ONE header field (rounding mode /
-            // line order) -- the coverage gaps r3_tests.md 8 lists.
+            // line order), covering paths no golden exercised before.
             LevelRoundingMode rounding = ROUND_DOWN;
             LineOrder         order    = INCREASING_Y;
             int positional = 0, minX = 0, minY = 0;

@@ -59,7 +59,7 @@ pub fn count_byte_offset(
 /// **hard error** ([`ExrError::Arg`]) — the caller-supplied buffer is untrusted,
 /// and a zero fallback here would conflate "invalid memory" with "a legitimate
 /// zero-sample pixel", silently producing a structurally-valid but
-/// semantically-corrupt deep image (bug F3).
+/// semantically-corrupt deep image.
 pub fn sample_count_at(
     buf: &[u8],
     base_offset: i64,
@@ -125,8 +125,8 @@ pub fn samples_before_pixel(
 }
 
 /// A **growable** per-row sample-count prefix cache, giving
-/// [`samples_before_pixel`]-equivalent addressing in **O(1) amortized** — the
-/// round-4 D-10 fix (with D-07 folded in for the readers — see below).
+/// [`samples_before_pixel`]-equivalent addressing in **O(1) amortized** (the
+/// readers' sourcing rule is described below).
 ///
 /// Before this, every deep tiled gather/scatter (and the deep scanline
 /// writer's per-channel `samples_before_line`) recomputed the running total
@@ -142,11 +142,12 @@ pub fn samples_before_pixel(
 /// Unlike a fixed eager whole-window table, this never reads a row that was
 /// never queried — required because the deep tiled **writer** intentionally
 /// allows a per-level sample-count buffer that only covers the rows a given
-/// mip level needs (see `deep/CLAUDE.md` "Per-level count buffers"); eagerly
+/// mip level needs (a file is written one level at a time, and
+/// `sample_count_at` is the single authoritative bound); eagerly
 /// scanning up to the file's global `max_y` would spuriously fail a
 /// legitimately short per-level buffer.
 ///
-/// D-07: both deep **readers** source this cache from the caller-supplied
+/// Both deep **readers** source this cache from the caller-supplied
 /// `sample_counts` buffer (already fully populated, independently per chunk,
 /// by the mandatory first `read_pixel_sample_counts` pass) rather than by
 /// re-decoding each earlier chunk's own count-table bytes from the stream —
@@ -364,8 +365,8 @@ pub fn decode_cumulative_row(bytes: &[u8], base: usize, n: usize, out: &mut [u32
 
 /// Validate a deep chunk's declared **sample-data** sizes BEFORE any buffer is
 /// allocated from the (untrusted) on-wire `packed_data` / `unpacked` u64 fields —
-/// the guard for bug F1 (memory-exhaustion DoS via an attacker-declared chunk
-/// size).
+/// the guard against memory exhaustion via an attacker-declared chunk
+/// size.
 ///
 /// `per_pixel` are the chunk's already-decoded per-pixel sample counts (one entry
 /// per chunk pixel — a whole scanline for the deep scanline reader, a tile
@@ -410,7 +411,7 @@ pub fn check_sample_data_sizes(
         ExrError::Input("Deep chunk unpacked-size computation overflows u64.".into())
     })?;
 
-    // D-06 / C++ `OpenEXRCore/decoding.c:231-247` (`unpack_sample_table`):
+    // C++ `OpenEXRCore/decoding.c:231-247` (`unpack_sample_table`):
     // `totsamp >= INT32_MAX` is rejected outright (our per-pixel counts are
     // already individually validated non-negative by `decode_cumulative_row`,
     // but the SUM across the whole chunk needs its own cap — the writer never
@@ -421,7 +422,7 @@ pub fn check_sample_data_sizes(
              on-wire i32 limit (corrupt chunk)."
         )));
     }
-    // D-06: C++ rejects only `totsamp * combSampSize > unpacked_size`
+    // C++ rejects only `totsamp * combSampSize > unpacked_size`
     // (`decoding.c:270`) — an `unpacked` LARGER than `expected` (e.g. a
     // writer that pads) is accepted, not just an exact match. We used to
     // require exact equality, which rejected valid third-party files.
@@ -431,7 +432,7 @@ pub fn check_sample_data_sizes(
              {expected} implied by the decoded sample counts (corrupt chunk)."
         )));
     }
-    // D-06: C++ enforces `packed == unpacked` only for `EXR_COMPRESSION_NONE`
+    // C++ enforces `packed == unpacked` only for `EXR_COMPRESSION_NONE`
     // (`OpenEXRCore/chunk.c` cross-check after the deep/non-deep leader
     // parse, shared by scanline and tiled); for a compressed chunk there is
     // no leader-level relationship between `packed` and `unpacked` at all
@@ -446,7 +447,7 @@ pub fn check_sample_data_sizes(
              {unpacked} (corrupt chunk)."
         )));
     }
-    // D-02 / C++ `OpenEXRCore/chunk.c:1019-1037,1397-1420`: both size fields
+    // C++ `OpenEXRCore/chunk.c:1019-1037,1397-1420`: both size fields
     // must fit an `int` (`<= INT_MAX`). Without this cap, an internally
     // *consistent* pair of huge sizes (declared `unpacked` == the huge
     // `expected` computed from a crafted count table) would otherwise sail
@@ -673,7 +674,7 @@ mod tests {
     #[test]
     fn row_prefix_out_of_range_address_is_hard_error() {
         // A cache scoped wider than the buffer must error, not silently
-        // treat the missing rows as zero (F3 policy).
+        // treat the missing rows as zero (hard-error policy).
         let counts = [1u32, 1];
         let (buf, xs, ys) = count_buf(&counts, 2);
         let mut cache = RowPrefixCache::new(0, 1, 0);

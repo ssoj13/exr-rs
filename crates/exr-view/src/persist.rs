@@ -231,7 +231,7 @@ impl Budgets {
 }
 
 impl Default for Budgets {
-    /// The design decision of 2026-09-29 (`.bughunt/design_tiling.md`): 75% RAM,
+    /// Default budgets: 75% RAM,
     /// 50% VRAM, 64 MiB of uploads per frame.
     fn default() -> Self {
         Self { ram: 0.75, vram: 0.5, upload_mib: 64 }

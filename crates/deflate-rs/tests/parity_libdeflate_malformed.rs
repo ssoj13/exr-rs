@@ -1,4 +1,4 @@
-//! plan4 V2 — malformed-input differential vs the live C libdeflate oracle.
+//! Malformed-input differential vs the live C libdeflate oracle.
 //!
 //! `tests/parity_libdeflate.rs` only ever feeds VALID compressed streams to
 //! both sides. This test feeds corrupted, truncated and bit-flipped zlib
@@ -68,8 +68,8 @@ fn malformed_input_matches_libdeflate() {
     // A few valid streams to corrupt, at different levels (different block
     // structures / bit-alignments) and sizes. Kept small: this test spawns
     // one subprocess PER CASE (no in-process oracle), so input size and the
-    // sampling step below directly bound the wall-clock cost -- unlike V3's
-    // in-process fastloop fuzz, which can afford exhaustive per-byte
+    // sampling step below directly bound the wall-clock cost -- unlike the
+    // in-process fastloop fuzz in `deflate_decompress.rs`, which can afford exhaustive per-byte
     // coverage for free.
     let base_inputs: Vec<(&str, Vec<u8>)> = vec![
         ("short", b"hello, deflate-rs vs libdeflate! this needs to compress reasonably.".to_vec()),

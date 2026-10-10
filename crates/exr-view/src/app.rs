@@ -1,5 +1,5 @@
 //! Application shell: winit `ApplicationHandler` + egui-winit/egui-wgpu glue +
-//! egui_dock layout + the flat GPU image viewport (VW-2).
+//! egui_dock layout + the flat GPU image viewport.
 //!
 //! A raw winit window drives a wgpu surface; egui renders each frame through
 //! `egui-wgpu` into an `egui_dock` dock space. No eframe: the viewer owns its
@@ -291,7 +291,7 @@ struct CryptoLayerCatalog {
     ranked: Vec<RankedLayer>,
     /// Sorted object/material names for the combo.
     names: Vec<String>,
-    /// W4.6 (design_r5.md §4.4): the full `Manifest`, not a bare
+    /// The full `Manifest`, not a bare
     /// `by_name` `HashMap` — `Manifest::id_for_name` is the canonical
     /// name->id resolver (manifest hit, else hash fallback; the hash IS the
     /// id definition per spec 1.2.0 p.3), so the viewer must not reimplement
@@ -445,7 +445,7 @@ fn open_blocking(path: PathBuf, detect_sequence: bool, backing: u64) -> OpenOutc
     }
 }
 
-/// The three GPU scope panels (VW-4): histogram / waveform / vectorscope.
+/// The three GPU scope panels: histogram / waveform / vectorscope.
 /// Each owns its compute pipelines + output texture and is driven once per
 /// frame from the displayed image's linear `Rgba32Float` texture (zero copy).
 /// Persisted on [`AppState`] so the pipelines are built once and reused.
@@ -458,7 +458,7 @@ pub struct Scopes {
 
 /// A live frame sequence: the detected model + the playback clock + the decode
 /// cache. The displayed frame is `cache.get_mut(playback.current())`; the worker
-/// keeps it (and neighbours) decoded so the UI never blocks (VW-3).
+/// keeps it (and neighbours) decoded so the UI never blocks.
 pub struct SequenceState {
     #[cfg(feature = "ofx")]
     source_epoch: Option<u64>,
@@ -659,15 +659,15 @@ pub struct AppState {
     pub status: String,
     /// Path requested on launch (consumed by the load seam on the first frame).
     pub pending_path: Option<PathBuf>,
-    /// A single loaded image (VW-2 path). `None` for a sequence or before load.
+    /// A single loaded image. `None` for a sequence or before load.
     pub image: Option<ImageBackend>,
-    /// A loaded sequence (VW-3 path) with its playback clock + decode cache.
+    /// A loaded sequence with its playback clock + decode cache.
     pub seq: Option<SequenceState>,
     /// Persistent view navigation (pan/zoom/pick) — survives sequence frame swaps.
     pub nav: ViewNav,
     /// Display controls (exposure / gamma / channel) → GPU colour pass.
     pub controls: ViewControls,
-    /// GPU scope panels (VW-4) — histogram / waveform / vectorscope.
+    /// GPU scope panels — histogram / waveform / vectorscope.
     pub scopes: Scopes,
     /// The single, persistent GPU display target (linear + display textures + the
     /// reused egui `TextureId`), shared by the viewport and the scopes and reused
@@ -832,7 +832,7 @@ impl AppState {
     ///
     /// Decides single-image vs sequence: `scanseq::Scanner::from_file` +
     /// `frame_count > 1` opens a sequence (playback clock + decode cache +
-    /// worker), else the VW-2 single image. `view <dir>` detects from any frame
+    /// worker), else the single image. `view <dir>` detects from any frame
     /// in that dir; `view <frame>` detects from that frame. A bad / deep /
     /// multipart EXR becomes a status message, never a panic.
     fn load_pending(&mut self) {
@@ -1185,7 +1185,7 @@ impl AppState {
         }
         // Already tried this selection on this frame and it failed — do NOT
         // retry (each attempt re-materializes and re-uploads the whole image).
-        // `set_frame` / a new selection clears the memo (V7).
+        // `set_frame` / a new selection clears the memo.
         if want.is_some() && img.coverage_failed() == want.as_ref() {
             return;
         }
@@ -1241,7 +1241,7 @@ impl AppState {
         }
     }
 
-    /// Draw the viewport tab: routes single-image vs sequence to the SAME VW-2
+    /// Draw the viewport tab: routes single-image vs sequence to the SAME
     /// [`viewport::show`] (single source of responsibility for GPU display).
     ///
     /// For a sequence, the current frame's backend comes from the cache; the
@@ -1260,7 +1260,7 @@ impl AppState {
         let crypto = self.crypto.clone();
         #[cfg(feature = "ofx")]
         let effects = &mut self.effects;
-        // Single image (VW-2): the backend owns its own nav.
+        // Single image: the backend owns its own nav.
         if let Some(img) = self.image.as_mut() {
             // Single image: no sequence — no scrub/playhead (LMB pins a pixel).
             Self::sync_crypto_overlay(crypto.as_ref(), &crypto_layer, &crypto_name, img);
@@ -1298,7 +1298,7 @@ impl AppState {
             return;
         }
 
-        // Sequence (VW-3): pull the current frame's backend from the cache.
+        // Sequence: pull the current frame's backend from the cache.
         if let Some(s) = self.seq.as_mut() {
             let cur = s.playback.current();
             let pos = s.playback.position();
@@ -1378,7 +1378,7 @@ impl AppState {
         });
     }
 
-    /// Draw a GPU scope tab (histogram / waveform / vectorscope, VW-4).
+    /// Draw a GPU scope tab (histogram / waveform / vectorscope).
     ///
     /// Feeds the scope from the SAME linear `Rgba32Float` texture the viewport
     /// uses (via [`ImageBackend::ensure_linear`] — zero re-upload). The scope
@@ -2992,7 +2992,7 @@ fn build_ui(
     });
 
     // Transport bar (sequence playback) sits just above the status bar; only
-    // shown when a sequence is loaded — single-image view is unchanged (VW-2).
+    // shown when a sequence is loaded — single-image view is unchanged.
     // Playback keys are handled at the top of `build_ui` (so they work in cinema
     // mode where this bar is hidden).
     if app_state.seq.is_some() {

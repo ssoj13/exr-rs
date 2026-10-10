@@ -386,7 +386,7 @@ pub struct B44Compressor {
     max_y: i32,
     /// Scratch buffer holding the result of the last call (the C++ output buffer).
     out: Vec<u8>,
-    /// Per-channel-contiguous re-gather/decode scratch (alloc audit E6):
+    /// Per-channel-contiguous re-gather/decode scratch:
     /// reused across calls instead of a fresh `vec![0u8; total_bytes]` each
     /// time. Grown/truncated via [`super::ensure_len`], never unconditionally
     /// zero-filled -- see `compress`/`uncompress`'s comments for why every
@@ -402,7 +402,7 @@ pub struct B44Compressor {
     /// clear" policy does not apply here).
     chan_line: Vec<usize>,
     /// [`Self::channel_regions`]'s output buffer, reused across calls
-    /// (alloc audit E6, the `Vec::with_capacity` per call at the old
+    /// (instead of a `Vec::with_capacity` per call in the old
     /// `channel_regions`) — cleared and re-pushed every call, which is cheap
     /// (no zero-fill) and reuses the allocation once warmed up.
     regions: Vec<ChannelRegion>,
@@ -466,7 +466,7 @@ impl B44Compressor {
 
     /// Layout of each channel's region inside the per-channel-contiguous
     /// scratch (in bytes) — written into `self.regions`
-    /// (`self.regions[c] = (byte_start, nx, ny)`, alloc audit E6: reused
+    /// (`self.regions[c] = (byte_start, nx, ny)`, reused
     /// across calls instead of a fresh `Vec::with_capacity` each time) —
     /// plus the total byte count, returned directly.
     fn channel_regions(&mut self, block_min_y: i32, block_height: i32) -> Result<usize> {
@@ -519,7 +519,7 @@ impl Compressor for B44Compressor {
 
         // --- Re-gather the line-interleaved Xdr line buffer into the per-channel-
         //     contiguous `tmp` byte array (C: `scratch_buffer_1` fill loop).
-        // `ensure_len` (alloc audit E6): the loop below writes every byte of
+        // `ensure_len`: the loop below writes every byte of
         // every channel's region exactly once (each (y, channel) pair's
         // `copy_from_slice` covers `[dst, dst+bpl)`, and the regions/lines
         // partition `[0, total_bytes)` with no gaps -- verified by the
@@ -560,7 +560,7 @@ impl Compressor for B44Compressor {
         }
 
         // --- Pack channels: FLOAT/UINT raw-copy, HALF 4×4-block pack.
-        // (audit block D) Filled directly into self.out instead of a
+        // Filled directly into self.out instead of a
         // throwaway local Vec later move-assigned — the same out/scratch
         // policy every other codec's compress AND uncompress path follows.
         self.out.clear();
@@ -634,7 +634,7 @@ impl Compressor for B44Compressor {
 
     /// Uncompress one B44 chunk — port of `uncompress_b44_impl`.
     ///
-    /// `expected_len` (alloc audit C6) is unused: B44's decode size is
+    /// `expected_len` is unused: B44's decode size is
     /// already driven entirely by `channel_regions(min_y, block_height)`,
     /// never a construction-time upper bound.
     fn uncompress(&mut self, data: &[u8], min_y: i32, _expected_len: usize) -> Result<&[u8]> {
@@ -646,7 +646,7 @@ impl Compressor for B44Compressor {
         let block_height = self.block_height(min_y);
         let total_bytes = self.channel_regions(min_y, block_height)?;
 
-        // K-09 (audit note, NOT applied): `internal_exr_undo_b44` itself has no
+        // `internal_exr_undo_b44` itself has no
         // raw-passthrough check (`compression.c:416-421`) — real reader seams
         // detect `dataSize == uncompressedSize` one level up before calling the
         // codec (see `crate::compressor::stored_chunk`'s rustdoc). But this
@@ -655,7 +655,7 @@ impl Compressor for B44Compressor {
         // and `compress` legitimately returns the raw bytes verbatim on the
         // "no-shrink" path — so `uncompress` must still accept them standalone.
         // Removing this check breaks those tests; kept, with this note so a
-        // future cleanup doesn't repeat the K-09 audit's "just delete it" advice
+        // future cleanup doesn't "just delete it"
         // without re-verifying it first.
         if data.len() == total_bytes {
             self.out.clear();
@@ -664,14 +664,14 @@ impl Compressor for B44Compressor {
         }
 
         // --- Decode blocks per channel into the per-channel-contiguous `tmp`.
-        // `ensure_len` (alloc audit E6): every byte in `[0, total_bytes)` is
+        // `ensure_len`: every byte in `[0, total_bytes)` is
         // written before being read back, on BOTH branches below --
         // non-HALF via a full `copy_from_slice`, HALF via the 4x4-block
         // write-back loop, whose per-block valid extents (`n`, `rows_valid`,
         // both clipped to the channel's remaining width/height) partition the
         // channel's full `nx * ny` grid exactly, with no gaps and no overlap
-        // -- so no unconditional zero-fill is needed (audit's "verify with a
-        // poison test" note: see `poison_reused_scratch_matches_fresh_instance`
+        // -- so no unconditional zero-fill is needed (verified with a
+        // poison test: see `poison_reused_scratch_matches_fresh_instance`
         // below).
         super::ensure_len(&mut self.tmp, total_bytes);
         let mut in_i = 0usize;
@@ -824,10 +824,10 @@ mod tests {
         hdr
     }
 
-    /// W1.7 (C10): an all-zero 14-byte block underflows `unpack14`'s running
+    /// An all-zero 14-byte block underflows `unpack14`'s running
     /// differences.  That is C's defined-by-wrapping behaviour, not an error —
     /// real OpenEXR 3.4.15 decodes an all-zero B44 chunk to exactly these bits
-    /// (verifier hash `a31022cf56ee0f83`).  Only overflow-checked builds used to
+    /// (output hash `a31022cf56ee0f83`).  Only overflow-checked builds used to
     /// panic here (`b44/mod.rs:261`, "attempt to subtract with overflow"), so
     /// this test only means anything in a debug/test profile — which is what it
     /// runs in.
@@ -844,7 +844,7 @@ mod tests {
         assert_eq!(s[12], 0x7fa0);
     }
 
-    /// W1.7: `shift` is read straight off the wire (`b[2] >> 2`, so 0..=63).
+    /// `shift` is read straight off the wire (`b[2] >> 2`, so 0..=63).
     /// `0x20u32 << 63` is a shift-overflow panic in a checked build and a
     /// 5-bit-masked shift in release / in C on x86; `wrapping_shl` makes every
     /// profile agree with C.  Sweeping every shift must not unwind.
@@ -863,7 +863,7 @@ mod tests {
         }
     }
 
-    /// W1.7 end to end: a zeroed B44 chunk must decode (to garbage) rather than
+    /// End to end: a zeroed B44 chunk must decode (to garbage) rather than
     /// panic, in every build profile.
     #[test]
     fn zeroed_b44_chunk_decodes_without_panicking() {
@@ -1010,8 +1010,8 @@ mod tests {
         assert_eq!(restored, line, "B44 constant round-trip mismatch");
     }
 
-    /// Alloc audit E6's explicit "before dropping the zero-fill, verify with
-    /// a poison test" instruction: `self.tmp` used to be a fresh
+    /// Before dropping the zero-fill, verify with
+    /// a poison test: `self.tmp` used to be a fresh
     /// `vec![0u8; total_bytes]` per call; it is now reused via `ensure_len`
     /// (grow/truncate, no zero-fill). If any byte of a channel's region were
     /// EVER left un-written by the compress/decode loops, this test would

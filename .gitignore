@@ -18,8 +18,8 @@ __pycache__/
 
 # Files the vendored official openexr-py tests write during a run (relative
 # paths, so they land wherever pytest's cwd is — usually the repo root).
-# Several of these were accidentally committed in b6681aa / earlier and then
-# got silently overwritten by every test run; see .bughunt/progress_py_parity.md.
+# Several of these were once committed by accident and then got silently
+# overwritten by every test run.
 # Keep test.exr / unfinished_multipart.exr (real upstream v3.4.15 fixtures) and
 # golden_multipart.exr (exr-core parity fixture) OUT of this list — they are
 # read-only inputs, never written by a test.
@@ -51,5 +51,5 @@ AGENTS.md
 CLAUDE.md
 /docs/history/
 /docs/plans/
-# OpenEXR bug findings incl. memory-safety issues: private until reported upstream
+# Private notes on upstream OpenEXR issues, kept out until reported upstream
 /docs/openexr-bugs.md

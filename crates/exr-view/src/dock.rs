@@ -1,6 +1,6 @@
 //! Dock layout (egui_dock 0.19).
 //!
-//! A central `Viewport` (the flat GPU image, VW-2) plus `Metadata` and
+//! A central `Viewport` (the flat GPU image) plus `Metadata` and
 //! `PixelInfo` side panels. The `Viewport` tab needs GPU access (to run the
 //! colour pass + register the display texture), so the tab viewer also carries a
 //! [`TabGpu`] handle alongside the shared [`AppState`].
@@ -21,11 +21,11 @@ pub enum DockTab {
     Metadata,
     /// Pixel inspector / readout.
     PixelInfo,
-    /// GPU histogram scope (VW-4).
+    /// GPU histogram scope.
     Histogram,
-    /// GPU waveform scope (VW-4).
+    /// GPU waveform scope.
     Waveform,
-    /// GPU vectorscope (VW-4).
+    /// GPU vectorscope.
     Vectorscope,
     /// OpenFX effect over the shown image: plug-in, parameters (feature `ofx`; without it the tab
     /// says so, so a saved layout loads in either build).
@@ -52,7 +52,7 @@ impl DockTab {
         }
     }
 
-    /// The three GPU scope tabs (VW-4), reconciled each frame so a closed one frees its VRAM.
+    /// The three GPU scope tabs, reconciled each frame so a closed one frees its VRAM.
     pub const SCOPES: [DockTab; 3] = [Self::Histogram, Self::Waveform, Self::Vectorscope];
 
     /// Every tab, in the order the Window menu lists them (a test pins that each has a command).
@@ -94,7 +94,7 @@ pub fn default_dock_state() -> DockState<DockTab> {
     let [_meta, info] = dock
         .main_surface_mut()
         .split_below(right, 0.4, vec![DockTab::PixelInfo]);
-    // Stack the three GPU scopes (VW-4) as tabs below the pixel-info panel so
+    // Stack the three GPU scopes as tabs below the pixel-info panel so
     // they share one slot by default; drag them out to view side-by-side.
     dock.main_surface_mut().split_below(
         info,
@@ -129,12 +129,12 @@ impl TabViewer for DockTabViewer<'_> {
         // Every tab is a keyboard panel, keys or not: it takes the keyboard from the previous owner.
         commands::panel(ui, commands::Scope::of(tab), |ui| match tab {
             // Single source of responsibility for GPU display: both the single
-            // image and the sequence's current frame route through this (VW-3).
+            // image and the sequence's current frame route through this.
             DockTab::Viewport => self.state.ui_viewport(ui, self.gpu),
             DockTab::Metadata => self.state.ui_metadata(ui),
             DockTab::PixelInfo => self.state.ui_pixel_info(ui),
-            // GPU scopes (VW-4): each computes into its own texture from the
-            // VW-2 linear texture and paints it (egui-wgpu native texture).
+            // GPU scopes: each computes into its own texture from the
+            // linear display texture and paints it (egui-wgpu native texture).
             scope @ (DockTab::Histogram | DockTab::Waveform | DockTab::Vectorscope) => {
                 self.state.display_scope(ui, scope, self.gpu)
             }

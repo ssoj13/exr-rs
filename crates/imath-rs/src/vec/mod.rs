@@ -33,7 +33,7 @@
 //! structural reflection, the exr-rs port defines its own vector types and never
 //! needs to adopt a third-party layout, and OpenEXR/IlmImf has no consumer of this
 //! feature. This is the SAME decision already recorded for the `ImathTypeTraits.h`
-//! detection traits in Wave 1a (see `crate::traits`). It is the ONLY thing skipped
+//! detection traits (see `crate::traits`). It is the ONLY thing skipped
 //! from ImathVec.h; everything else is ported 1:1.
 
 pub mod vec2;

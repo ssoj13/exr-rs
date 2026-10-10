@@ -88,7 +88,7 @@ impl HtMatchfinder {
     }
 
     /// Allocate the backing storage WITHOUT running `init()` on it.
-    /// D1: see `HcMatchfinder::new_uninit` -- same rationale, used only by
+    /// See `HcMatchfinder::new_uninit` -- same rationale, used only by
     /// `Compressor::new`, which always calls `.init()` itself right before
     /// the first `compress_fastest` call.
     pub(crate) fn new_uninit() -> Self {
@@ -446,7 +446,7 @@ mod tests {
         }
     }
 
-    /// V4 (plan4): at least one input > `MATCHFINDER_WINDOW_SIZE` (32 KiB),
+    /// At least one input > `MATCHFINDER_WINDOW_SIZE` (32 KiB),
     /// actually crossing a `slide_window()` call, with the match verified
     /// byte-for-byte. See the identical rationale on
     /// `hc_matchfinder::tests::hc_finds_correct_match_across_window_slide`.

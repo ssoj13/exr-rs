@@ -1,8 +1,8 @@
-//! Phase 9 — `assert-bytes` scaffold: scalar codec reference over varied inputs.
+//! `assert-bytes` scaffold: scalar codec reference over varied inputs.
 //!
 //! # Why this exists (and what it will become)
-//! Phase 9 adds SIMD tiers to the hot codecs. The non-negotiable rule
-//! (CLAUDE.md / the Phase 9 plan) is that **every SIMD tier is byte-identical to
+//! SIMD tiers are added to the hot codecs. The non-negotiable rule
+//! is that **every SIMD tier is byte-identical to
 //! the scalar source-of-truth** — a one-bit difference is a bug, not a tradeoff.
 //! This file is the harness that proves it: it runs the codecs over a fuzz-ish
 //! set of input images (varied sizes + content patterns) and asserts the

@@ -3,7 +3,7 @@
 //!
 //! Every file a tool or library writes goes through `exr_core::io::write_file`, which writes a
 //! temporary file, checks the flush and renames it, so a failing run leaves no half-written output
-//! (`src/cli/AGENTS.md`, "Outputs are all-or-nothing"). A direct `StdOfStream::create` elsewhere
+//! (outputs are all-or-nothing). A direct `StdOfStream::create` elsewhere
 //! would silently bypass that. The scan is lexical (comments, strings and `#[cfg(test)]` items are
 //! skipped), so it needs no parser dependency and fails with `file:line` for each offender.
 

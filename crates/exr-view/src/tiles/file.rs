@@ -1,4 +1,4 @@
-//! Out-of-core tile source (`.bughunt/design_tiling.md` §3.2, phase 2): the
+//! Out-of-core tile source: the
 //! file stays on disk; a tile row of a level is produced by decoding the
 //! level-0 rows it covers in bands, shading only the channels the view needs
 //! to RGBA ([`Shade`]: the active layer's [`Mapping`], or a Cryptomatte

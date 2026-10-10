@@ -1,4 +1,4 @@
-//! GPU tile atlas (`.bughunt/design_tiling.md` §3.4): `Rgba16Float` pages of
+//! GPU tile atlas:`Rgba16Float` pages of
 //! `TILE x TILE` slots, allocated lazily up to a VRAM budget, recycled
 //! least-recently-used.
 //!

@@ -57,7 +57,7 @@ pub enum CscIndex {
 /// `suffix` is a `Cow` so the static tables stay allocation-free while rules
 /// read from a chunk ([`super::channel_rules::read_channel_rules`]) own theirs.
 ///
-/// (alloc audit E11) `PartialEq` lets `decompress_dwa` compare the just-read
+/// `PartialEq` lets `decompress_dwa` compare the just-read
 /// per-chunk rule set against the previous chunk cached one, so the
 /// expensive `classify_channels` output can be reused when the rules truly
 /// match -- see `DwaScratch::plan`'s doc. Structural equality only.
@@ -65,7 +65,7 @@ pub enum CscIndex {
 pub struct Rule {
     /// Channel-name suffix this rule matches (`Classifier::_suffix`).
     ///
-    /// C-08b: bytes, not `str` — C++ `Classifier::_suffix` is a raw byte
+    /// Bytes, not `str` — C++ `Classifier::_suffix` is a raw byte
     /// buffer (`Classifier_construct` takes `const char* suffix`; channel
     /// names are never UTF-8-checked anywhere in OpenEXR), so suffix matching
     /// must work on a non-UTF-8 channel name the same way it works on any
@@ -131,7 +131,7 @@ static LEGACY_RULES: &[Rule] = &[
 
 /// `Classifier_find_suffix`: the part of `name` after the last `.`, else `name`.
 ///
-/// C-08b: operates on raw bytes so a non-UTF-8 channel name still splits
+/// Operates on raw bytes so a non-UTF-8 channel name still splits
 /// correctly on the ASCII `.` byte, matching C++'s `strrchr(name, '.')`.
 pub fn find_suffix(name: &[u8]) -> &[u8] {
     match name.iter().rposition(|&b| b == b'.') {
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn legacy_lowercase_only_under_legacy_rules() {
-        // W1.5: the DEFAULT (encode) rules are case-sensitive, so lowercase and
+        // The DEFAULT (encode) rules are case-sensitive, so lowercase and
         // long-form names classify as UNKNOWN there.  Chaining the legacy table
         // in made us write chunks real OpenEXR rejects as CORRUPT_CHUNK.
         for n in ["r", "green", "blu", "red", "b", "a"] {

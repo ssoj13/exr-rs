@@ -6,10 +6,10 @@
 //! comes first. Comparison is `strcmp`, which is unsigned-byte lexicographic.
 //! There is no encoding requirement anywhere in the C++ type or its use in
 //! `parse_header.c`'s `read_text` — attribute, type and channel names are byte
-//! strings, not necessarily UTF-8 (C-08). `Name` here is that same byte
+//! strings, not necessarily UTF-8. `Name` here is that same byte
 //! string: no allocation-free unsized borrowed form is provided (that would
 //! need an `unsafe` `repr(transparent)` cast, which this crate avoids outside
-//! SIMD; see root `CLAUDE.md`), so a borrowed name is just `&[u8]` and lookups
+//! SIMD), so a borrowed name is just `&[u8]` and lookups
 //! take `impl AsRef<[u8]>`.
 
 use std::borrow::Borrow;
@@ -32,7 +32,7 @@ impl Name {
     /// `strncpy(_text, text, MAX_LENGTH)` truncation: cut at the first NUL
     /// byte (a C string never contains one past the terminator), then at
     /// [`Self::MAX_LENGTH`] bytes. Unlike the old `xdr::truncate_name`, this
-    /// cuts at the exact byte, not at a UTF-8 character boundary (C-09).
+    /// cuts at the exact byte, not at a UTF-8 character boundary.
     pub fn new(text: impl AsRef<[u8]>) -> Self {
         Name(Self::normalize(text.as_ref()).into())
     }

@@ -36,7 +36,7 @@ impl Envmap {
     ///
     /// Returns `None` for any value `>= EXR_ENVMAP_LAST_TYPE` (2). The
     /// attribute reader ([`read_value`][AttrValue::read_value]) now rejects
-    /// such values before they reach the header map (C-07), matching C++ 3.4
+    /// such values before they reach the header map, matching C++ 3.4
     /// core `extract_attr_uint8(.., EXR_ENVMAP_LAST_TYPE)`
     /// (`OpenEXRCore/parse_header.c`), rather than silently defaulting an
     /// out-of-range byte to `LatLong`.
@@ -80,7 +80,7 @@ pub mod lat_long_map {
     ///
     /// Uses Imath's `V3f::length()` (denormal-safe `lengthTiny` fallback) and
     /// `sign()` (0 for zero *and* NaN) rather than a plain `sqrt`/`signum`,
-    /// matching C++ exactly for denormal-range or NaN directions (C-20):
+    /// matching C++ exactly for denormal-range or NaN directions:
     /// `f32::signum` instead propagates NaN and never returns 0.
     pub fn lat_long_from_dir(dir: Vec3<f32>) -> Vec2<f32> {
         let r = (dir.z * dir.z + dir.x * dir.x).sqrt();
@@ -313,7 +313,7 @@ impl AttrValue for Envmap {
         // C++ 3.4 core `extract_attr_uint8(.., EXR_ENVMAP_LAST_TYPE=2)`
         // (`OpenEXRCore/parse_header.c`): `attrsz != 1` -> size-mismatch error,
         // `value >= 2` -> invalid-attr error. Both fail the attribute so the
-        // header reader's non-strict loop drops it (C-07) instead of
+        // header reader's non-strict loop drops it instead of
         // relabelling an ordinary image as a lat-long environment map.
         if size != 1 {
             return Err(crate::error::ExrError::Input(format!(
@@ -368,7 +368,7 @@ mod tests {
         }
     }
 
-    /// C-07 — an out-of-range raw value must be rejected, not silently
+    /// An out-of-range raw value must be rejected, not silently
     /// remapped to `LatLong`.
     #[test]
     fn read_value_rejects_out_of_range() {
@@ -376,7 +376,7 @@ mod tests {
         assert!(Envmap::read_value(&mut i, 1, 0).is_err());
     }
 
-    /// C-07 — a declared size other than 1 must be rejected.
+    /// A declared size other than 1 must be rejected.
     #[test]
     fn read_value_rejects_wrong_size() {
         let mut i = MemIStream::new(vec![0u8, 0u8]);

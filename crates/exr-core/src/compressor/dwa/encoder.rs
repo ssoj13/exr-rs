@@ -65,8 +65,7 @@ impl LossyDctEncoder {
 
     /// Encode a single (non-CSC) channel of native half data, APPENDING its
     /// `dc`/`ac` output onto caller-supplied buffers instead of allocating
-    /// and returning a fresh `(Vec<u16>, Vec<u16>)` per call (alloc audit
-    /// E11 -- was `encode_channel`, returning owned Vecs; every production
+    /// and returning a fresh `(Vec<u16>, Vec<u16>)` per call (every production
     /// call site (`compress_dwa`) wanted to `.extend()` its result into a
     /// shared stream immediately, so this writes straight into it instead).
     /// `dc` gets one entry per block (row-major); `ac` is the RLE'd AC
@@ -98,9 +97,8 @@ impl LossyDctEncoder {
 
     /// Encode an RGB triplet as a CSC group (R/G/B → Y′CbCr), filling three
     /// caller-supplied Y/Cb/Cr DC staging buffers (each `.clear()`'d here
-    /// first) plus APPENDING `ac` onto `ac_out` (alloc audit E11 -- was
-    /// `encode_rgb`, returning an owned `(Vec<u16>, Vec<u16>)` per call; see
-    /// `encode_channel_into`'s doc for why every production call site wants
+    /// first) plus APPENDING `ac` onto `ac_out` instead of returning an owned
+    /// `(Vec<u16>, Vec<u16>)` per call; see `encode_channel_into`'s doc for why every production call site wants
     /// the `_into` shape instead). A CSC group's DC must be gathered
     /// plane-by-plane while the per-block loop below interleaves Y/Cb/Cr, so
     /// (unlike `encode_channel_into`'s `dc_out`) it cannot be written

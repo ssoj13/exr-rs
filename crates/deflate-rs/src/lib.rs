@@ -6,40 +6,38 @@
 //! Byte-parity is verified against the vcpkg libdeflate **1.26** binary
 //! (`cargo xtask parity-deflate`); xtask pins that version and fails on drift.
 //!
-//! See this crate's `CLAUDE.md` (history: `docs/history/plans/`).
-//!
-//! # Wave 1 — Foundation modules
+//! # Foundation modules
 //! - [`common`]  — portable helpers: LE/BE load/store, bit-scan, alignment maths.
 //! - [`deflate_constants`] — all DEFLATE format constants.
 //! - [`utils`]   — allocator indirection (mirrors `libdeflate_set_memory_allocator`).
 //! - [`adler32`] — scalar Adler-32 checksum (byte-exact to libdeflate's scalar path).
 //!
-//! # Wave 2 — Inflater
+//! # Inflater
 //! - [`deflate_decompress`] — raw DEFLATE decompressor (1:1 port of `deflate_decompress.c`).
 //!
-//! # Wave 3 — Matchfinders (back-reference search for the compressor)
+//! # Matchfinders (back-reference search for the compressor)
 //! - [`matchfinder_common`] — shared defs: window constants, `MfPos`, `lz_hash`, `lz_extend`.
 //! - [`hc_matchfinder`]     — hash-chain matchfinder (greedy/lazy levels).
 //! - [`bt_matchfinder`]     — binary-tree matchfinder (near-optimal levels).
 //! - [`ht_matchfinder`]     — hash-table matchfinder (fastest level).
 //!
-//! # Wave 4 — Compressor
+//! # Compressor
 //! - [`deflate_compress`] — raw DEFLATE compressor, all 12 levels (1:1 port of
 //!   `deflate_compress.c`).
 //!
-//! # Wave 5 — zlib wrapper + public facade
+//! # zlib wrapper + public facade
 //! - [`zlib_constants`] — header/footer sizes, CM/CINFO/FLEVEL constants.
 //! - [`zlib_compress`]  — zlib stream compressor (header + DEFLATE + Adler-32).
 //! - [`zlib_decompress`] — zlib stream decompressor (validate header, DEFLATE, verify Adler-32).
 //!
-//! # Wave 6 — CRC-32 + gzip wrapper (complete libdeflate public API)
+//! # CRC-32 + gzip wrapper (complete libdeflate public API)
 //! - [`crc32_tables`] — precomputed CRC-32 lookup tables (ported from `crc32_tables.h`).
 //! - [`crc32`]        — CRC-32 checksum, slice-by-8 scalar path (`crc32.c`).
 //! - [`gzip_constants`] — gzip header/footer constants (`gzip_constants.h`).
 //! - [`gzip_compress`]  — gzip stream compressor (header + DEFLATE + CRC32/ISIZE footer).
 //! - [`gzip_decompress`] — gzip stream decompressor (validate, DEFLATE, verify footer).
 //!
-//! # Wave W-B — x86 SIMD acceleration tiers (performance only)
+//! # x86 SIMD acceleration tiers (performance only)
 //! Each tier is byte-identical to the scalar source-of-truth above and is
 //! reached only via the safe runtime dispatcher in [`cpu`] (with the
 //! `DEFLATE_RS_SIMD=scalar|sse2|avx2|pclmul` env override). `unsafe` lives
@@ -575,7 +573,7 @@ mod tests {
         );
     }
 
-    /// D2: the buffer-reusing `_into` API must (a) match the `Vec`-returning
+    /// The buffer-reusing `_into` API must (a) match the `Vec`-returning
     /// wrappers byte-for-byte and (b) actually reuse a too-large buffer
     /// (grow-only: never shrink, ignore the leftover tail) rather than
     /// silently reallocating every call. Covers zlib/deflate/gzip compress

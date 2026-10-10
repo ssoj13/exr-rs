@@ -59,9 +59,9 @@
 //! the literal `2.2f` directly instead of `log(logBase)` (`ln(f64::powf(e,2.2))`
 //! is not bit-exact to `2.2f64` due to the round-trip through `pow`/`ln`). Both
 //! rewrites changed rounding for values with `|h| > 1.0`, which the enlarged
-//! `.bughunt/plan3.md` W2.1 parity image (unlike the old 7×5 image) actually
+//! multi-chunk parity image (unlike the old 7×5 image) actually
 //! exercises — the double-precision version silently diverged from the real
-//! 3.4.15 oracle at isolated pixels (W2b.2). We must match the ACTUAL oracle, not
+//! 3.4.15 oracle at isolated pixels. We must match the ACTUAL oracle, not
 //! the historical IlmImf source, so this file now ports the 3.4 table-init math.
 //!
 //! Port target (pinned tag v3.4.15):

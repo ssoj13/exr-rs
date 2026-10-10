@@ -469,7 +469,7 @@ mod tests {
         assert!((by[&id_b.to_bits()] - 0.75).abs() < 1e-6);
     }
 
-    /// S3 regression: the ranked planes are converted once, not once per pixel
+    /// Regression: the ranked planes are converted once, not once per pixel
     /// (the quadratic HALF inject came from a per-pixel conversion).
     #[test]
     fn ranked_planes_convert_each_channel_once() {

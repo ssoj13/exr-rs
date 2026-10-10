@@ -207,7 +207,7 @@ mod tests {
         assert!(matches!(err, Error::Manifest(_)));
     }
 
-    /// C11: the header cannot point outside the EXR's directory.
+    /// The header cannot point outside the EXR's directory.
     #[test]
     fn sidecar_paths_stay_under_the_exr_directory() {
         let exr = Path::new("renders/shot.exr");
@@ -233,7 +233,7 @@ mod tests {
         }
     }
 
-    /// C13: a collision resolves to the same name whatever the input order.
+    /// A collision resolves to the same name whatever the input order.
     #[test]
     fn id_collision_is_deterministic() {
         let id = name_to_float_id("bunny");

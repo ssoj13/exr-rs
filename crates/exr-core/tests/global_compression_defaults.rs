@@ -1,5 +1,5 @@
 //! Process-global ZIP/DWA default compression-level state
-//! (`Header::{set_,}default_{zip,dwa}_compression_level`, C-13/K-06) — tests
+//! (`Header::{set_,}default_{zip,dwa}_compression_level`) — tests
 //! that MUTATE this state live in their OWN process, here, not in the `-p
 //! exr-core --lib` unit-test binary.
 //!
@@ -39,7 +39,7 @@
 //! `header::test_support::COMPRESSION_LEVEL_TEST_LOCK` in `header.rs` (2) and
 //! `compressor/pxr24.rs` (2), ported to use only the PUBLIC API: the two
 //! pure `Header` accessor tests move verbatim (they never touched compressor
-//! internals), and the two PXR24 K-06 tests -- which used to reach into the
+//! internals), and the two PXR24 zip-level tests -- which used to reach into the
 //! crate-private `Pxr24Compressor` directly -- now write real files through
 //! the public `scanline::OutputFile`/`InputFile` and compare bytes/sizes.
 
@@ -201,7 +201,7 @@ fn read_pxr24(bytes: Vec<u8>, w: i32, h: i32) -> Vec<u8> {
     out
 }
 
-/// C-13 (ported from `header::tests::
+/// (Ported from `header::tests::
 /// zip_and_dwa_compression_level_override_and_default`) — a per-header
 /// override wins over the process-global default; with no override, the
 /// header falls back to the (possibly just changed) process-global default.
@@ -232,7 +232,7 @@ fn per_header_override_wins_over_process_default_and_reset_falls_back() {
     assert_eq!(h.dwa_level(), 45.0);
 }
 
-/// C-13 (ported from `header::tests::
+/// (Ported from `header::tests::
 /// insert_dwa_compression_level_attribute_updates_record`) — inserting a
 /// `dwaCompressionLevel` float attribute also updates the header's
 /// compression-level record. Pure `Header` accessor state.
@@ -247,7 +247,7 @@ fn insert_dwa_compression_level_attribute_updates_record() {
     assert_eq!(h.dwa_level(), 200.0);
 }
 
-/// K-06 (ported from `compressor::pxr24::tests::
+/// (Ported from `compressor::pxr24::tests::
 /// pxr24_ignores_per_header_zip_level_override_k06`) — a per-header
 /// `set_zip_level` override must be silently IGNORED by PXR24 (C++'s
 /// `apply_pxr24_impl` calls `exr_compress_buffer(ctx, -1, ...)` with a
@@ -271,7 +271,7 @@ fn pxr24_ignores_per_header_zip_level_override_k06() {
     );
 }
 
-/// K-06 (ported from `compressor::pxr24::tests::
+/// (Ported from `compressor::pxr24::tests::
 /// pxr24_follows_process_global_default_zip_level_k06`) — PXR24 DOES follow
 /// the process-global default zip level (C++'s hardcoded `-1` resolves
 /// through `exr_get_default_zip_compression_level` before falling back to

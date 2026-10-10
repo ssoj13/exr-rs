@@ -1,4 +1,4 @@
-//! Throwaway decode profiler (Phase 9 P0): how long does ONE full `Image::read`
+//! Throwaway decode profiler: how long does ONE full `Image::read`
 //! of a real EXR take, in RELEASE?  Answers the SIMD review's first question —
 //! was the viewer's "~1s/frame" a debug build or a genuine codec cost?  If a
 //! release decode is ~tens of ms, SIMD on the codec is misdirected; if it is

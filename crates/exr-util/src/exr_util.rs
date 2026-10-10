@@ -1,8 +1,7 @@
 //! Port of OpenEXR's OpenEXRUtil library (`openexr/src/lib/OpenEXRUtil`, v3.4.15): in-memory
 //! flat and deep images with all their levels, whole-file image I/O, and `CheckFile`.
 //!
-//! One Rust file per C++ file (`ImfFoo.cpp` -> `foo.rs`); `AGENTS.md` in this crate has the map, the
-//! places where the design differs from the C++ classes (and why) and the verification record.
+//! One Rust file per C++ file (`ImfFoo.cpp` -> `foo.rs`).
 //!
 //! An [`Image`](image::Image) is a set of levels, a level a set of channels, a channel an array of
 //! samples; [`FlatImage`](flat_image::FlatImage) has one sample per pixel,

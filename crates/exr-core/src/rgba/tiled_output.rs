@@ -48,7 +48,7 @@ pub struct TiledRgbaOutputFile<'a> {
     rc: RgbaChannels,
     mode: TiledWriteMode,
     fb: Option<(isize, isize)>,
-    /// Persistent per-tile scratch (alloc audit C7): a tile IS the chunk
+    /// Persistent per-tile scratch: a tile IS the chunk
     /// here (same reasoning as `TiledRgbaInputFile`'s own fields), so this
     /// is pure allocation-elimination, not a redundant-decode fix.
     /// `tile_rows` holds the gathered `Rgba`s; `tile_staging` the resulting
@@ -131,7 +131,7 @@ impl<'a> TiledRgbaOutputFile<'a> {
         let tw = (tile_dw.max.x - tile_dw.min.x + 1) as usize;
         let th = (tile_dw.max.y - tile_dw.min.y + 1) as usize;
 
-        // (alloc audit C7) `tile_rows` is a persistent, reused buffer --
+        // `tile_rows` is a persistent, reused buffer --
         // every element is written by the gather loop below, so
         // `ensure_len` is sound.
         crate::compressor::ensure_len(&mut self.tile_rows, tw * th);
@@ -390,7 +390,7 @@ fn write_tile_grey(
 ) -> Result<()> {
     let write_a = rc.intersects(RgbaChannels::WRITE_A);
     let n = tw * th;
-    // (alloc audit C7) `yca_pixels`/`staging` are persistent, reused
+    // `yca_pixels`/`staging` are persistent, reused
     // buffers -- every element/byte is fully overwritten below.
     crate::compressor::ensure_len(yca_pixels, n);
     yca::rgba_to_yca(yw, write_a, rows, yca_pixels);
@@ -442,7 +442,7 @@ fn write_tile_plain(
     let g_off = plane(rc.intersects(RgbaChannels::WRITE_G));
     let b_off = plane(rc.intersects(RgbaChannels::WRITE_B));
     let a_off = plane(rc.intersects(RgbaChannels::WRITE_A));
-    // (alloc audit C7) `staging` is a persistent, reused buffer -- every
+    // `staging` is a persistent, reused buffer -- every
     // byte within `[0, next)` is written by the loop below.
     crate::compressor::ensure_len(staging, next);
 

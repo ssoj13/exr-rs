@@ -27,7 +27,7 @@
 //!      dropped, which is what makes FLOAT lossy.
 //!
 //!    `prevPixel` resets to 0 at the start of **every channel line**.
-//! 2. **deflate (zlib)** — `exr_compress_buffer(context, -1, …)` (K-06,
+//! 2. **deflate (zlib)** — `exr_compress_buffer(context, -1, …)` (
 //!    `internal_pxr24.c:219-226`), which resolves the hardcoded `-1` to the
 //!    **process-global** default zip level (`exr_get_default_zip_compression_level`,
 //!    `compression.c:89-117`; [`crate::header::Header::default_zip_compression_level`]),
@@ -197,7 +197,7 @@ pub struct Pxr24Compressor {
     /// `scratch_buffer_1`).
     scratch: Vec<u8>,
     /// Persistent low-level deflate compressor — constructed once here
-    /// instead of per `compress()` call (perf follow-up, 2026-09-24; see
+    /// instead of per `compress()` call (see
     /// `compressor::zlib`'s module doc and `ZipCompressor`'s identical
     /// field). Its level: PXR24 always calls `exr_compress_buffer` with a
     /// hardcoded `level = -1` (`internal_pxr24.c:219-226`, v3.4.15) -- it
@@ -206,7 +206,7 @@ pub struct Pxr24Compressor {
     /// which itself falls back to [`DEFAULT_ZIP_LEVEL`] == 4 when still
     /// unset. So the level resolved in [`Pxr24Compressor::new`] is
     /// [`Header::default_zip_compression_level`], not `header.zip_level()`
-    /// (K-06: `header.zip_level()` would incorrectly let a *per-header*
+    /// (`header.zip_level()` would incorrectly let a *per-header*
     /// override -- which PXR24 must ignore -- leak in).
     deflate_compressor: LowCompressor,
     /// Persistent low-level zlib decompressor, reused for symmetry with
@@ -321,7 +321,7 @@ impl Compressor for Pxr24Compressor {
         // core's `nOut`. The loop below writes every byte in `[0, n_out)` and
         // only `self.scratch[..n_out]` is ever read afterward (n_out <= srcb,
         // since FLOAT shrinks 4B/px to 3B/px) -- any stale tail beyond n_out
-        // is never observed, so `ensure_len` (alloc audit E5) is sound.
+        // is never observed, so `ensure_len` is sound.
         super::ensure_len(&mut self.scratch, srcb);
 
         // `nOut` is the running length of the byte-split output; `n_in` walks
@@ -487,12 +487,12 @@ impl Compressor for Pxr24Compressor {
         // size, which is <= the uncompressed (decoded-pixel) size: FLOAT is
         // 3B/px in the stream but 4B/px decoded.  `max_chunk_size` (decoded
         // size) is therefore a safe upper bound for the inflated stream too --
-        // and so is `expected_len` (alloc audit C6: the caller's exact
+        // and so is `expected_len` (the caller's exact
         // per-chunk target), so `.max()` of both is a no-op for
         // scanline/tiled (where `max_chunk_size` already covers every real
         // chunk) and gives deep's per-chunk-varying sizes a correct cap too.
         let cap = expected_len.max(self.max_chunk_size).max(1);
-        // K-01: checked entry point — reject trailing bytes after the zlib
+        // Checked entry point — reject trailing bytes after the zlib
         // stream, matching `exr_uncompress_buffer`. Decodes directly into
         // `self.scratch` -- no intermediate `decoded` Vec + copy.
         uncompress_into(
@@ -704,7 +704,7 @@ mod tests {
         assert_eq!(restored, line.as_slice(), "HALF/UINT must round-trip exactly");
     }
 
-    /// Perf follow-up regression (2026-09-24, same fix + same test shape as
+    /// Regression test (same fix + same test shape as
     /// `zip::tests::compress_uncompress_reused_across_sizes_matches_fresh_instance`):
     /// `compress`/`uncompress` now reuse ONE persistent `deflate_compressor`/
     /// `deflate_decompressor`, and `uncompress_into`'s destination buffer is
@@ -888,7 +888,7 @@ mod tests {
         assert_eq!(float_to_float24(f32::INFINITY), 0x7F8000);
     }
 
-    /// K-01: a zlib stream followed by trailing garbage must be rejected as a
+    /// A zlib stream followed by trailing garbage must be rejected as a
     /// corrupt chunk, matching `exr_uncompress_buffer`
     /// (`OpenEXRCore/compression.c:180-197`), which `undo_pxr24_impl` calls
     /// through. See the identical test in `compressor::zip::tests`.
@@ -909,7 +909,7 @@ mod tests {
         );
     }
 
-    // K-06: the two process-global-default zip-level tests
+    // The two process-global-default zip-level tests
     // (`pxr24_ignores_per_header_zip_level_override_k06`,
     // `pxr24_follows_process_global_default_zip_level_k06`) moved to
     // `tests/global_compression_defaults.rs` -- a separate process from this

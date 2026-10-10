@@ -154,16 +154,12 @@ external aliases keep its pixel owners alive during delayed export. Charged row
 scratch and the shared mixed-LOD area reducer support streaming PNG/EXR without
 a full f32 mosaic or display-texture readback.
 
-Consumer attachment is published in `f4d446b`; bounded preparation-budget fallback
-is accepted in `3144551`. The host's shared request witness records refusal and
+Consumers attach to that snapshot, and preparation has a bounded budget fallback.
+The host's shared request witness records refusal and
 monotonic native lifecycle entry in one allocation, inherited by strip and callback
 workers. Only a typed intrinsic Budget before BeginSequenceRender/Render and clean
 rollback permits a coarser whole level; surviving owners, including zero-byte owners,
 retain the original refusal. Pending preserves scale and completed work; successful
 identity delivery closes fallback. This does not predict arbitrary in-Render allocation
 or guarantee immediate upload. Actual Gaussian/provider, temporal and GPU/native
-consumer contracts are accepted after all seven exact-source Rust 1.96 gates.
-Viewer A/B/C acceptance is published in `563044f`; independently verified host
-regression evidence `c2dc2b6` closes modules 3/4 and phase 7 within the approved
-bounded contract. Viewer dependency pins remain unchanged; hardware and fixture
-coverage limits remain explicit under the [execution contract](https://github.com/ssoj13/exr-rs/blob/main/plans/20261001-viewer-tiles-openfx.md).
+consumer contracts are covered by host regression tests.

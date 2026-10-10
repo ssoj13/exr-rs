@@ -8,8 +8,3 @@
 Start with the relevant source and pinned reference. For the format port, module
 layout follows OpenEXR/IlmImf, Imath and libdeflate; OpenJPH lives in `jph-rs`.
 Viewer/GPU APIs have separate ownership contracts on top of that core.
-
-Current tasks have one
-[roadmap](https://github.com/ssoj13/exr-rs/blob/main/plans/README.md).
-The [handoff](https://github.com/ssoj13/exr-rs/blob/main/plans/HANDOFF.md) records
-restart facts and frozen evidence; it is not another user manual.

@@ -1,4 +1,4 @@
-//! W2.7 S-08 (both directions): incomplete-file semantics for a scanline
+//! Both directions: incomplete-file semantics for a scanline
 //! `InputFile`/`Imf::InputFile` truncated MID-CHUNK-REGION -- the contract
 //! neither direction had an oracle test for before this: **open succeeds**
 //! (never a constructor error just because chunks are missing),
@@ -6,7 +6,7 @@
 //! correctly**, and **reading a missing row fails cleanly** (never a panic
 //! or a hang). `tests/parity_exr.rs::truncated_goldens_never_panic` already
 //! covers the weaker "never panics" property across several codecs/files;
-//! this test adds the STRONGER S-08 semantics on both sides:
+//! this test adds the STRONGER incomplete-file semantics on both sides:
 //! * (a) OUR reader opening a real C++-written golden that WE truncate.
 //! * (b) the real C++ oracle (new `read-truncated` mode, additive to
 //!   `oracle.cpp`) opening a file WE wrote and truncated -- proving C++
@@ -170,7 +170,7 @@ fn cpp_oracle_reads_our_truncated_file_per_s08() {
     else {
         return;
     };
-    // `golden.exr` is C++-written, but the S-08 CONTRACT under test here is
+    // `golden.exr` is C++-written, but the CONTRACT under test here is
     // C++'s OWN open/isComplete/read behaviour on a truncated file -- which
     // file wrote the surviving bytes is irrelevant to that contract, and
     // reusing the same fixture keeps this test independent of any Rust

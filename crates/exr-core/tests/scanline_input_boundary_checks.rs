@@ -129,8 +129,8 @@ fn set_frame_buffer_rejects_a_single_axis_sampling_mismatch() {
     assert!(format!("{err}").contains("subsampling"), "unexpected error: {err}");
 }
 
-/// Mutation-testing gap fix (found via team-lead's report of scanline/'s
-/// final mutation run): the sibling of the test above, isolating the
+/// Mutation-testing gap fix (found by a mutation run over scanline/): the
+/// sibling of the test above, isolating the
 /// X-SAMPLING term instead of the y-sampling one (input.rs's
 /// `ch.x_sampling != slice.x_sampling || ch.y_sampling != slice.y_sampling`,
 /// specifically the `!=`->`==` mutant on the x_sampling comparison). The
@@ -249,7 +249,7 @@ fn read_pixels_rejects_a_range_whose_upper_end_overruns_the_data_window() {
 /// controls ONLY which code path is taken, not whether the result is
 /// correct. Killing these 3 mutants would need instrumentation
 /// (observing which branch actually ran, e.g. via a call counter) rather
-/// than an output-correctness assertion; flagged for team-lead rather
+/// than an output-correctness assertion; left documented here rather
 /// than forcing a misleading "verified" claim.
 #[test]
 fn read_pixels_parallel_dispatch_requires_both_more_than_one_chunk_and_parallel_threads() {

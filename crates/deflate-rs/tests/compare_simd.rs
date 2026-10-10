@@ -17,7 +17,7 @@
 //! Each child also reports the tiers its dispatchers actually selected, and
 //! the parent checks them against the cap and this CPU's features, so a
 //! dispatcher that silently stays scalar (or ignores the cap) fails. A child
-//! that cannot be spawned is a failure, never a skip (U15).
+//! that cannot be spawned is a failure, never a skip.
 
 use std::process::Command;
 

@@ -1,13 +1,13 @@
-//! Team-lead's BREAKDOWN request: isolate "deflate-rs vs C libdeflate" from
-//! "exr-core ZIP pre/post-processing" (predictor + interleave) and from any
-//! I/O cost, on the SAME bytes.
+//! Isolates "deflate-rs vs C libdeflate" from "exr-core ZIP
+//! pre/post-processing" (predictor + interleave) and from any I/O cost, on
+//! the SAME bytes.
 //!
-//! After F1-F8, the codec-isolation harness (`crates/exr-core/tests/
-//! w39b_codec_isolation.rs`) still shows ZIP at ~1.8x/2.2x of C++ OpenEXR
+//! The codec-isolation harness (`crates/exr-core/tests/
+//! w39b_codec_isolation.rs`) showed ZIP at ~1.8x/2.2x of C++ OpenEXR
 //! (which links libdeflate 1.26) for compress/decompress. That harness times
 //! the WHOLE ZIP codec (predictor/interleave + deflate), so it cannot say
-//! whether the gap is in deflate-rs itself or in exr-core's surrounding code
-//! (not my zone — owned by w39b-rayon). This test isolates deflate-rs's own
+//! whether the gap is in deflate-rs itself or in exr-core's surrounding
+//! code. This test isolates deflate-rs's own
 //! `zlib_compress`/`zlib_decompress` against the live C oracle's new `bench`
 //! CLI mode (`oracle.c`: `bench zc/zd <level> <reps>`), on the exact same
 //! payload bytes: a realistic EXR ZIP chunk (16 scanlines x 16384 pixels x 3
@@ -21,8 +21,7 @@
 //! Requires `cargo xtask parity-deflate` to have been run at least once
 //! (builds `tests/parity/oracle.exe` with the `bench` mode).
 //!
-//! Per the team's bench discipline: acquire `bench.lock` before running this,
-//! release it after; report median+min, ratio, and the machine load/log
+//! Bench discipline: run on a quiet machine; report median+min, ratio, and the machine load/log
 //! timestamp alongside the numbers -- never a bare ratio.
 
 mod support;
@@ -35,9 +34,8 @@ use deflate_rs::zlib_decompress::zlib_decompress_ex;
 const WIDTH: usize = 16384;
 const SCANLINES: usize = 16;
 const CHANNELS: usize = 3;
-/// Levels checked: 4 is OpenEXR's ZIP default (plan4's stated reference
-/// point); 6 is zlib's own overall default, added per team-lead's request
-/// to confirm the ratio isn't an artifact specific to level 4.
+/// Levels checked: 4 is OpenEXR's ZIP default (the reference point); 6 is
+/// zlib's own overall default, added to confirm the ratio isn't an artifact specific to level 4.
 const ZIP_LEVELS: [i32; 2] = [4, 6];
 const OUTER_REPEATS: u32 = 5;
 /// Inner reps per outer repeat, so each oracle subprocess call does enough
@@ -204,7 +202,7 @@ fn bench_one_level(oracle: &std::path::Path, level: i32, payload: &[u8]) {
 }
 
 #[test]
-#[ignore] // spawns a subprocess per outer repeat; run explicitly, under bench.lock
+#[ignore] // spawns a subprocess per outer repeat; run explicitly, on a quiet machine
 fn deflate_only_compress_and_decompress_vs_libdeflate() {
     let Some(oracle) = support::oracle_or_skip("deflate_only_compress_and_decompress_vs_libdeflate")
     else {

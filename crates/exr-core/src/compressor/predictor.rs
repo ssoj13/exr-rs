@@ -28,8 +28,8 @@
 //! avoid duplicating it, the shared scalar implementation lives here and is
 //! used by both `compressor::rle` and `compressor::zip`.
 //!
-//! # SIMD (decode side only — via `codec-simd`, 2026-09-24)
-//! Team-lead's ZIP structural review found the DECODE-side transform
+//! # SIMD (decode side only — via `codec-simd`)
+//! Profiling ZIP found the DECODE-side transform
 //! (`unpredict_and_reorder`) taking **~53% of total `ZipCompressor::uncompress`
 //! time** — MORE than the zlib inflate itself — because it was pure scalar,
 //! one byte at a time, while C's `reconstruct`/`interleave`
@@ -47,12 +47,12 @@
 //! NEON) `reconstruct`/`interleave`. This crate does **not** write its own
 //! `core::arch`/`unsafe` SIMD (an earlier version briefly did; moved to
 //! `codec-simd` per the project's "unsafe stays in deflate-rs / codec-simd,
-//! never in exr-core" invariant — see root `CLAUDE.md`). `codec-simd`'s own
+//! never in exr-core" invariant). `codec-simd`'s own
 //! `tests/cross_tier.rs` is the differential-vs-scalar test for these two
 //! primitives; this module only needs to prove the ROUND TRIP is correct
 //! (below), since correctness-per-tier is `codec-simd`'s contract. That a
 //! SIMD body is actually selected on a capable CPU is pinned by
-//! `tests/codec_simd_tier.rs` (U16).
+//! `tests/codec_simd_tier.rs`.
 //!
 //! Port targets (pinned tag v3.3.11, SIMD cited against v3.4.15's
 //! `internal_zip.c` — see the SIMD section above):

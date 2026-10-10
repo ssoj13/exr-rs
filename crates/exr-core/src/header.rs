@@ -57,14 +57,14 @@ const NAME_MAX_LENGTH: usize = 255;
 /// `sanityCheck` to keep `max - min + 1` and `max + min` from overflowing.
 const INT_MAX_DIV_2: i32 = i32::MAX / 2;
 
-// E9 (C-18 design §3.4): the three `sanity_check` messages that
+// The three `sanity_check` messages that
 // `sanity_check_at_open` keeps as `ExrError::Arg` (a required attribute
 // missing, not defaultable) instead of reclassifying to `ExrError::Input`.
 const MISSING_NAME_MSG: &str = "Headers in a multipart file should have name attribute.";
 const MISSING_TYPE_MSG: &str = "Headers in a multipart file should have type attribute.";
 const MISSING_TILE_DESC_MSG: &str = "Tiled image has no tile description attribute.";
 
-/// Process-global max-image/max-tile size state (C-14) — see
+/// Process-global max-image/max-tile size state — see
 /// [`Header::set_max_image_size`] / [`Header::set_max_tile_size`]. `0` means
 /// unlimited, matching the C++ default (`exr_set_default_maximum_image_size`
 /// et al.).
@@ -73,14 +73,14 @@ static MAX_IMAGE_HEIGHT: std::sync::atomic::AtomicI32 = std::sync::atomic::Atomi
 static MAX_TILE_WIDTH: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 static MAX_TILE_HEIGHT: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
-/// Process-global default ZIP compression level (C-13) — mirrors C++
+/// Process-global default ZIP compression level — mirrors C++
 /// `exr_{set,get}_default_zip_compression_level` (`OpenEXRCore/base.c`).
 /// `-1` (the C++ default) means "let the ZIP codec pick its own default"
 /// (`EXR_DEFAULT_ZLIB_COMPRESS_LEVEL`, 4 — see `compressor::zip`). Stored as
 /// the raw `i32` (negative values round-trip through `AtomicI32` directly).
 static DEFAULT_ZIP_LEVEL: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
-/// Process-global default DWA compression quality (C-13) — mirrors C++
+/// Process-global default DWA compression quality — mirrors C++
 /// `exr_{set,get}_default_dwa_compression_quality`. C++ default: `45.0`.
 /// Stored as the `f32` bit pattern since `std` has no `AtomicF32`.
 static DEFAULT_DWA_LEVEL_BITS: std::sync::atomic::AtomicU32 =
@@ -93,12 +93,12 @@ static DEFAULT_DWA_LEVEL_BITS: std::sync::atomic::AtomicU32 =
 pub struct Header {
     /// The attribute map (`Header::_map`).
     map: BTreeMap<Name, Box<dyn Attribute>>,
-    /// Per-header ZIP compression-level override (C-13) — `None` falls back
+    /// Per-header ZIP compression-level override — `None` falls back
     /// to the process-global default ([`Header::default_zip_compression_level`]).
     /// Mirrors the C++ `CompressionRecord` side-table's `zip_level`, but
     /// stored directly on the header instead of keyed by pointer identity.
     zip_compression_level: Option<i32>,
-    /// Per-header DWA compression-level override (C-13) — `None` falls back
+    /// Per-header DWA compression-level override — `None` falls back
     /// to the process-global default ([`Header::default_dwa_compression_level`]).
     /// Set automatically when a `dwaCompressionLevel` float attribute is
     /// inserted (`Header::insert_boxed`), mirroring C++ `Header::insert`'s
@@ -265,11 +265,11 @@ impl Header {
     /// This is the path used by the header reader, which constructs
     /// `Box<dyn Attribute>` values via the registry.
     ///
-    /// C-08: `name` accepts anything convertible to a byte-string [`Name`]
+    /// `name` accepts anything convertible to a byte-string [`Name`]
     /// (attribute names are raw bytes in C++, no encoding assumed); the exact
     /// C++ `strncpy` truncation (first NUL, then 255 bytes) is applied by
     /// [`Name::new`] instead of the old UTF-8-boundary-respecting
-    /// `xdr::truncate_name` (C-09).
+    /// `xdr::truncate_name`.
     pub fn insert_boxed(&mut self, name: impl Into<Name>, attribute: Box<dyn Attribute>) -> Result<()> {
         let name = name.into();
         if name.is_empty() {
@@ -278,7 +278,7 @@ impl Header {
             ));
         }
 
-        // C-13: `Header::insert`'s special-cased hook (`ImfHeader.cpp:440-446`)
+        // `Header::insert`'s special-cased hook (`ImfHeader.cpp:440-446`)
         // — inserting a `dwaCompressionLevel` FLOAT attribute also updates
         // the compression-level record, so `dwa_level()` picks
         // it up even before any codec reads the attribute directly.
@@ -309,7 +309,7 @@ impl Header {
         Ok(())
     }
 
-    /// E3 (C-18 design §3.4): [`Header::insert_boxed`] on the **read** path.
+    /// [`Header::insert_boxed`] on the **read** path.
     ///
     /// A duplicate attribute name with a different type on read is a header
     /// open failure — core `INVALID_ATTR` (`ImfContext.cpp:136`, verified) —
@@ -642,7 +642,7 @@ impl Header {
     }
 
     // -----------------------------------------------------------------------
-    // setPreviewImage / previewImage / hasPreviewImage (C-16 follow-up).
+    // setPreviewImage / previewImage / hasPreviewImage.
     // -----------------------------------------------------------------------
 
     /// `void Header::setPreviewImage(const PreviewImage&)` — `insert("preview", …)`.
@@ -674,7 +674,7 @@ impl Header {
     }
 
     // -----------------------------------------------------------------------
-    // setMaxImageSize / setMaxTileSize (C-14) — port of the process-global
+    // setMaxImageSize / setMaxTileSize — port of the process-global
     // limits `Header::{set,get}Max{Image,Tile}Size` read/write via
     // `exr_{set,get}_default_maximum_{image,tile}_size`
     // (`OpenEXRCore/context.c`). A value of 0 for either dimension means
@@ -715,7 +715,7 @@ impl Header {
     }
 
     // -----------------------------------------------------------------------
-    // zipCompressionLevel / dwaCompressionLevel (C-13) — port of the C++
+    // zipCompressionLevel / dwaCompressionLevel — port of the C++
     // `CompressionRecord` side-table (`ImfHeader.cpp:68-183`) that backs
     // `Header::{zip,dwa}CompressionLevel()` and the process-global
     // `setDefaultZipCompressionLevel`/`setDefaultDwaCompressionLevel` free
@@ -763,9 +763,9 @@ impl Header {
     /// no naming clash to avoid the way there is for DWA, but the pair is
     /// named consistently for symmetry.
     ///
-    /// **Seam for fix-codecs (K-06):** `compressor::zip`'s writer factory
-    /// should read this instead of (or in addition to) its own hardcoded
-    /// `DEFAULT_ZIP_LEVEL` constant, so a caller that sets a per-header or
+    /// `compressor::zip`'s writer factory
+    /// reads this (through [`Header::codec_zip_level`]) instead of a hardcoded
+    /// default level, so a caller that sets a per-header or
     /// process-global level actually affects the deflate stream C++ would
     /// produce for the same header.
     pub fn zip_level(&self) -> i32 {
@@ -804,7 +804,7 @@ impl Header {
     /// different things and `compressor::dwa::DwaCompressor::new` already
     /// depends on the attribute accessor's exact name and `Result` signature.
     ///
-    /// **Seam for fix-codecs (K-06):** the attribute accessor
+    /// The attribute accessor
     /// (`header.dwa_compression_level()`) errors when the attribute is
     /// absent; this method never does — it falls back to a level set via
     /// [`Header::set_dwa_level`] with no attribute present (the C++
@@ -849,7 +849,7 @@ impl Header {
     /// Examine the header for consistency — port of `Header::sanityCheck`.
     ///
     /// Returns [`ExrError::Arg`] on the first problem found, mirroring the C++
-    /// `ArgExc` throws. The max-image-size / max-tile-size limits (C-14) are
+    /// `ArgExc` throws. The max-image-size / max-tile-size limits are
     /// the process-global values set via [`Header::set_max_image_size`] /
     /// [`Header::set_max_tile_size`]; both default to `(0, 0)` ("unlimited"),
     /// matching the C++ default, so this is a no-op unless a caller opts in.
@@ -861,7 +861,7 @@ impl Header {
     /// (`ImfOutputFile.cpp:626, 688` and the tiled/deep writers call
     /// `sanityCheck` themselves and let `ArgExc` propagate). **Readers**
     /// route through [`Header::sanity_check_at_open`] instead — see its doc
-    /// (E9, C-18 design §3.4).
+    /// for the read path.
     pub fn sanity_check(&self, is_tiled: bool, is_multipart_file: bool) -> Result<()> {
         // displayWindow validity.
         let dw = self.display_window()?;
@@ -889,7 +889,7 @@ impl Header {
             return Err(ExrError::Arg("Invalid data window in image header.".into()));
         }
 
-        // C-14: process-global max-image-size limits — `ImfHeader.cpp:924-964`.
+        // Process-global max-image-size limits — `ImfHeader.cpp:924-964`.
         // `0` (the default) means unlimited, matching C++.
         let (max_image_width, max_image_height) = Self::max_image_size();
         let w = data.max.x - data.min.x + 1;
@@ -981,7 +981,7 @@ impl Header {
             if td.x_size == 0 || td.y_size == 0 || td.x_size > i32::MAX as u32 || td.y_size > i32::MAX as u32 {
                 return Err(ExrError::Arg("Invalid tile size in image header.".into()));
             }
-            // C-14: process-global max-tile-size limits — `ImfHeader.cpp:1055-1084`.
+            // Process-global max-tile-size limits — `ImfHeader.cpp:1055-1084`.
             let (max_tile_width, max_tile_height) = Self::max_tile_size();
             if max_tile_width > 0 && (max_tile_width as u32) < td.x_size {
                 return Err(ExrError::Arg(format!(
@@ -1015,7 +1015,7 @@ impl Header {
             ) {
                 return Err(ExrError::Arg("Invalid line order in image header.".into()));
             }
-            // C-10: C++ `sanityCheck` calls `getTiledChunkOffsetTableSize`
+            // C++ `sanityCheck` calls `getTiledChunkOffsetTableSize`
             // (`ImfHeader.cpp` -> `ImfTiledMisc.cpp:309-360`), which throws a
             // `LogicExc` when the tile count overflows `i32`. Readers already
             // get this for free via `read_prologue`'s own offset-table sizing,
@@ -1113,7 +1113,7 @@ impl Header {
         Ok(())
     }
 
-    /// E9 (C-18 design §3.4): the read-open wrapper around [`Header::sanity_check`].
+    /// The read-open wrapper around [`Header::sanity_check`].
     ///
     /// C++ readers never call `Header::sanityCheck` themselves — that method
     /// is a **writer**-only path (`ImfOutputFile.cpp:626, 688` and the
@@ -1260,7 +1260,7 @@ impl Header {
 
         // attributes, in sorted name order (BTreeMap iteration order).
         for (name, attr) in self.map.iter() {
-            // name + type name, each NUL-terminated. C-08/C-08c: both are raw
+            // name + type name, each NUL-terminated. Both are raw
             // byte strings (no encoding assumed) — a registered type's name is
             // always ASCII, but an OpaqueAttribute's may not be.
             xdr::write_name(o, name.as_bytes())?;
@@ -1326,7 +1326,7 @@ impl Header {
                     .into(),
             ));
         }
-        // C-02: apply the same non-strict required-attribute defaults and
+        // Apply the same non-strict required-attribute defaults and
         // name/type/version handling the reader constructors get via
         // `multipart::input::read_prologue` (-> `validate_read_part`), so a
         // header-only consumer sees exactly what `InputFile` would.
@@ -1347,8 +1347,7 @@ impl Header {
     /// name/type/version handling — the shared body of `validate_req_attr`
     /// (`adddefault=1`) plus the legacy `autoAddType` — shared by
     /// [`read_checked`][Header::read_checked] and
-    /// `multipart::input::validate_read_part` (C-02: those two used to
-    /// duplicate this logic, and `read_checked` was missing it outright).
+    /// `multipart::input::validate_read_part`, so the two cannot drift.
     ///
     /// * Fills the 7 required attributes C++ readers default rather than
     ///   reject when absent (`compression`, `dataWindow`, `displayWindow`,
@@ -1461,7 +1460,7 @@ impl Header {
         }
 
         // Version word: version number, known flags, and flag-combination
-        // validity (C-01) — matches C++ 3.4 core `parse_header.c` right after
+        // validity — matches C++ 3.4 core `parse_header.c` right after
         // the magic number, so a version-3 file or a TILED+NON_IMAGE /
         // TILED+MULTI_PART word is rejected here rather than only by the
         // reader constructors' own `read_prologue`.
@@ -1498,7 +1497,7 @@ impl Header {
 
         let mut name_buf: Vec<u8> = Vec::new();
         let mut type_buf: Vec<u8> = Vec::new();
-        // `Header::_readsNothing` (C-16 follow-up): true iff the header list
+        // `Header::_readsNothing`: true iff the header list
         // was empty (the very first name was already the terminator) —
         // counts every attribute NAME encountered, even one later dropped by
         // the non-strict recovery below, matching C++'s `attrCount++` placement
@@ -1519,12 +1518,12 @@ impl Header {
                 break;
             }
             attr_count += 1;
-            // C-08: an attribute name is a raw byte string in C++ (no
+            // An attribute name is a raw byte string in C++ (no
             // encoding check anywhere in `parse_header.c`'s `read_text`);
             // accept non-UTF-8 instead of aborting the whole header read.
             let name = Name::new(name_buf.as_slice());
 
-            // Type name. C-08c: raw bytes, matching C++ (an unregistered
+            // Type name: raw bytes, matching C++ (an unregistered
             // type's on-disk name is never encoding-checked; it round-trips
             // byte-exact through `OpaqueAttribute` instead of being rejected).
             if !xdr::read_name(i, &mut type_buf, NAME_MAX_LENGTH)? {
@@ -1533,7 +1532,7 @@ impl Header {
             }
             let type_name = Name::new(type_buf.as_slice());
 
-            // C-22: C++ core `pull_attr` rejects an empty type name BEFORE reading
+            // C++ core `pull_attr` rejects an empty type name BEFORE reading
             // the size field ("Invalid empty string encountered parsing attribute
             // type", `parse_header.c:2072`), and the non-strict loop resumes right
             // after the type's NUL -- the size bytes become the next attribute's
@@ -1612,7 +1611,7 @@ impl Header {
                 )));
             }
 
-            // --- non-strict required-attribute type dispatch (C-03) --------
+            // --- non-strict required-attribute type dispatch --------------
             // C++ 3.4 core `check_req_attr` (`parse_header.c:1966`) routes a
             // fixed set of by-name attributes to a specific
             // `check_populate_*` validator that enforces BOTH the exact wire
@@ -1639,7 +1638,7 @@ impl Header {
             }
 
             // --- `chlist`: C++ `extract_attr_chlist` appends to a list that already
-            // exists under this name (`channels` since C-04, any other name since
+            // exists under this name (`channels` by name, any other name because
             // `exr_attr_list_add_by_type` hands back the earlier same-typed entry), so
             // channels added before a failure stay. The parser also leaves the stream
             // where C++ does, which is why it is not routed through `new_attribute`. A
@@ -1669,7 +1668,7 @@ impl Header {
             }
 
             // --- duplicate name/type/version/chunkCount: first one wins
-            // (C-04) — C++ `parse_header.c` skips the second occurrence of
+            // — C++ `parse_header.c` skips the second occurrence of
             // these four rather than overwriting (everything else keeps
             // last-wins, matching `Header::insert`'s replace semantics) ----
             if matches!(name.to_str(), Some("name" | "type" | "version" | "chunkCount"))
@@ -1685,7 +1684,7 @@ impl Header {
             // care about it.
             match new_attribute(type_name.as_bytes(), i, size, version_word) {
                 Ok(attr) => {
-                    // C-06 / T-12: re-synchronise on the *declared* size, not
+                    // Re-synchronise on the *declared* size, not
                     // how far the type's own reader advanced the stream
                     // (C++ `extract_attr_*` is always bounded by `attrsz`,
                     // `sequential_skip`s any remainder).
@@ -1697,13 +1696,13 @@ impl Header {
                     // (`EXR_ERR_ATTR_SIZE_MISMATCH`), so a mismatch here drops
                     // the whole attribute rather than keeping a value read
                     // from a stream position that does not match what was
-                    // declared (T-12's size-12/size-5 `tiledesc`, and the
+                    // declared (a size-12/size-5 `tiledesc`, and the
                     // same gap for every other fixed-size type).
                     //
                     // A VARIABLE-length type (`string`, `chlist`,
                     // `floatvector`, `stringvector`, `preview`, an unknown/
                     // opaque type, …) may legitimately consume fewer bytes
-                    // than declared (trailing padding, C-06's padded
+                    // than declared (trailing padding, e.g. a padded
                     // `channels`); the value is kept and the padding is
                     // skipped. Consuming *more* than declared means the
                     // reader ran past the boundary (e.g. an unterminated
@@ -1741,8 +1740,8 @@ impl Header {
                     // `parse_header.c:2848-2852` `pull_attr` failure ->
                     // `if (!strict) { skip; continue; }`). This is what
                     // recovers, e.g., an out-of-range `envmap`/
-                    // `deepImageState` byte (C-07/D-04) or a duplicate/
-                    // invalid `channels` entry (C-05) without losing the
+                    // `deepImageState` byte or a duplicate/
+                    // invalid `channels` entry without losing the
                     // rest of the header.
                     log::warn!("dropping header attribute '{name}' (type '{type_name}'): {e}");
                     // `idmanifest` is opaque to the core parser but the IlmImf layer then
@@ -1765,7 +1764,7 @@ impl Header {
 /// size in bytes, or `None` for a variable-length attribute) — the dispatch
 /// table C++ 3.4 core `check_req_attr` (`OpenEXRCore/parse_header.c:1966`)
 /// uses to route each by-name-required attribute to its own
-/// `check_populate_*` validator (C-03 / T-12).
+/// `check_populate_*` validator.
 ///
 /// <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.4.15/src/lib/OpenEXRCore/parse_header.c#L1966>
 static REQUIRED_ATTR_TYPES: std::sync::LazyLock<HashMap<&'static str, (&'static str, Option<usize>)>> =
@@ -1899,7 +1898,7 @@ fn value_shape_fail(i: &mut dyn IStream, type_name: &Name, size: i32) -> Result<
 }
 
 /// Wire type name -> exact on-disk byte width, for every *fixed-size*
-/// registered attribute type (C-06 / T-12). Absent from this table means
+/// registered attribute type. Absent from this table means
 /// "variable-length" (string, stringvector, floatvector, chlist, preview, an
 /// id manifest, or an unknown/opaque type) — those may legitimately consume
 /// fewer bytes than declared (trailing padding). A fixed-size type's declared
@@ -2003,7 +2002,7 @@ fn sanity_check_display_window(width: i32, height: i32) -> Result<()> {
     Ok(())
 }
 
-// C-08c: `string_from_name` (the UTF-8-checked name reader) was removed —
+// `string_from_name` (the UTF-8-checked name reader) was removed —
 // both the attribute name and the attribute type name are read as raw
 // `Name` bytes now (see `read_attributes_from`), matching C++'s
 // encoding-agnostic `read_text`. The `checkIsNullTerminated` length guard is
@@ -2021,7 +2020,7 @@ fn is_valid_pixel_type(t: crate::attr::PixelType) -> bool {
 // ---------------------------------------------------------------------------
 // Tests
 //
-// These exercise the Wave-4 port against the C++ wire format: default-attribute
+// These exercise the header port against the C++ wire format: default-attribute
 // seeding, byte-exact magic + version word, attribute round-trip through
 // MemOStream -> MemIStream, sanityCheck accept/reject, and the long-names
 // version-flag computation.
@@ -2077,7 +2076,7 @@ mod tests {
         }
     }
 
-    /// C-09 — an attribute name with an interior NUL is truncated at insert
+    /// An attribute name with an interior NUL is truncated at insert
     /// time, matching C++ `Name::operator=`, instead of writing an
     /// unreadable header.
     #[test]
@@ -2085,13 +2084,13 @@ mod tests {
         let mut h = Header::new();
         h.insert("a\0b", IntAttribute::new(1)).unwrap();
         assert!(h.get("a").is_ok());
-        // C-08: a lookup key is normalized identically to an insert key
+        // A lookup key is normalized identically to an insert key
         // (C++ builds a temporary `Name` for `map::find(const char*)` too),
         // so "a\0b" is an alias for "a", not a miss.
         assert!(h.get("a\0b").is_ok());
     }
 
-    /// C-09 — an attribute name over 255 bytes is truncated to `Name::MAX_LENGTH`.
+    /// An attribute name over 255 bytes is truncated to `Name::MAX_LENGTH`.
     #[test]
     fn insert_truncates_overlong_name() {
         let mut h = Header::new();
@@ -2101,7 +2100,7 @@ mod tests {
         assert!(h.get(&truncated).is_ok());
     }
 
-    /// C-08 — a non-UTF-8 attribute name (C++ `Name`/`parse_header.c` never
+    /// A non-UTF-8 attribute name (C++ `Name`/`parse_header.c` never
     /// checks encoding) round-trips byte-exact through the real wire
     /// encode/decode (`write_attributes_to` / `read_attributes_from`), not
     /// just through the in-memory map. Oracle cross-read coverage (a real
@@ -2130,7 +2129,7 @@ mod tests {
         assert_eq!(attr.value, 42);
     }
 
-    /// C-16 follow-up — `setPreviewImage`/`previewImage`/`hasPreviewImage`
+    /// `setPreviewImage`/`previewImage`/`hasPreviewImage`
     /// round-trip through the "preview" attribute.
     #[test]
     fn preview_image_accessors_round_trip() {
@@ -2142,7 +2141,7 @@ mod tests {
         h.preview_image_mut().unwrap();
     }
 
-    /// C-16 follow-up — `readsNothing` is false by default and true only
+    /// `readsNothing` is false by default and true only
     /// after parsing an immediately-empty header list.
     #[test]
     fn reads_nothing_reflects_the_parsed_attribute_count() {
@@ -2312,7 +2311,7 @@ mod tests {
 
     #[test]
     fn read_checked_rejects_a_window_read_from_accepts() {
-        // W3.11: `read_from` is the 1:1 `Header::readFrom` port and validates
+        // `read_from` is the 1:1 `Header::readFrom` port and validates
         // nothing; `read_checked` is the entry point for a consumer that parses
         // a header without opening a reader (the `exr-rs info` CLI). A crafted
         // dataWindow used to reach `info`'s arithmetic unchecked.
@@ -2328,7 +2327,7 @@ mod tests {
         assert!(Header::read_from(&mut i).is_ok(), "read_from stays 1:1 (no check)");
 
         let mut i = MemIStream::new(bytes);
-        // C-18 E9: `read_checked` routes `sanity_check` through
+        // `read_checked` routes `sanity_check` through
         // `sanity_check_at_open`, which reclassifies a non-"missing
         // attribute" `Arg` to `Input` (`ImfContext.cpp:127-138`, verified) —
         // "Invalid data window in image header." is not a missing attribute.
@@ -2356,7 +2355,7 @@ mod tests {
         ));
     }
 
-    /// C-02 — `read_checked` must default a missing required attribute the
+    /// `read_checked` must default a missing required attribute the
     /// way the reader constructors do (via `validate_for_read`), not error.
     #[test]
     fn read_checked_defaults_missing_screen_window_center() {
@@ -2429,7 +2428,7 @@ mod tests {
         xdr::write_string(o, "").unwrap();
     }
 
-    /// C-03 — a required attribute stored under the wrong wire type (a
+    /// A required attribute stored under the wrong wire type (a
     /// `double` `pixelAspectRatio` instead of `float`) is dropped, not
     /// inserted with the wrong type, so the header still parses and the rest
     /// of the attribute list is not desynchronised.
@@ -2452,7 +2451,7 @@ mod tests {
         assert!(!header.contains("pixelAspectRatio"), "the mistyped attribute must be dropped");
     }
 
-    /// C-03 — a required attribute whose declared size is padded past its
+    /// A required attribute whose declared size is padded past its
     /// fixed width (a `float` `pixelAspectRatio` declared as 8 bytes) is
     /// dropped and the stream re-synchronises on the *declared* size, not the
     /// 4 bytes the `float` reader actually consumed.
@@ -2482,7 +2481,7 @@ mod tests {
         assert!(header.contains("compression"));
     }
 
-    /// C-04 — a duplicate `channels` attribute accumulates into the existing
+    /// A duplicate `channels` attribute accumulates into the existing
     /// list instead of replacing it.
     #[test]
     fn read_attributes_merges_duplicate_channels() {
@@ -2511,7 +2510,7 @@ mod tests {
         assert!(channels.find_channel("G").is_some());
     }
 
-    /// C-04 — the second of a duplicate `name` / `type` / `version` /
+    /// The second of a duplicate `name` / `type` / `version` /
     /// `chunkCount` attribute is dropped; the first occurrence wins.
     #[test]
     fn read_attributes_first_wins_for_duplicate_name() {
@@ -2527,7 +2526,7 @@ mod tests {
         assert_eq!(header.name().unwrap(), "a");
     }
 
-    /// C-06 — a padded `channels` attribute (the terminator followed by
+    /// A padded `channels` attribute (the terminator followed by
     /// trailing zero bytes still inside the declared size) must not desync
     /// the rest of the header: the padding is skipped via the declared size,
     /// not misread as the next attribute's name.
@@ -2552,7 +2551,7 @@ mod tests {
         assert!(header.contains("customInt"), "trailing attribute must still parse");
     }
 
-    /// T-12 — a `tiledesc` attribute whose declared size is not the fixed 9
+    /// A `tiledesc` attribute whose declared size is not the fixed 9
     /// bytes is dropped (and the header still parses past it), matching C++
     /// 3.4 core `parse_header.c:712-744` (`attrsz != 9` -> error).
     #[test]
@@ -2574,7 +2573,7 @@ mod tests {
         assert!(header.contains("customInt"), "trailing attribute must still parse");
     }
 
-    /// M-08 — a malformed *non-required* attribute (a `chromaticities` with a
+    /// A malformed *non-required* attribute (a `chromaticities` with a
     /// wrong declared size) is dropped rather than aborting the whole header
     /// parse, matching C++ 3.4's non-strict `pull_attr` loop. C++ drops it
     /// WITHOUT skipping the declared size (`extract_attr_32bit` returns
@@ -2694,7 +2693,7 @@ mod tests {
         write_raw_attr(o, "customInt", "int", 4, &7i32.to_le_bytes());
     }
 
-    /// C-22 — an empty type name is rejected BEFORE the size field is read, and parsing resumes
+    /// An empty type name is rejected BEFORE the size field is read, and parsing resumes
     /// right after the type's NUL: the size bytes and value become the next attribute (oracle:
     /// `foo`, `""`, then `XYZ int 9` lists `XYZ` and `customInt`).
     #[test]
@@ -2902,7 +2901,7 @@ mod tests {
         assert!(!h.contains("foo") && h.contains("customInt"));
     }
 
-    /// C-07 — an out-of-range `envmap` value is dropped instead of being
+    /// An out-of-range `envmap` value is dropped instead of being
     /// remapped to `LatLong`, so the header does not misclassify an ordinary
     /// image as an environment map.
     #[test]
@@ -2918,7 +2917,7 @@ mod tests {
         assert!(!header.contains("envmap"));
     }
 
-    /// C-01 — a version word other than 2 must be rejected by `read_from`
+    /// A version word other than 2 must be rejected by `read_from`
     /// (and therefore by `read_checked`), matching C++ 3.4 core
     /// `parse_header.c` (`if (ctxt->version != 2)`).
     #[test]
@@ -2935,7 +2934,7 @@ mod tests {
         assert!(Header::read_from(&mut i).is_err());
     }
 
-    /// C-01 — TILED combined with NON_IMAGE (or MULTI_PART) is an invalid
+    /// TILED combined with NON_IMAGE (or MULTI_PART) is an invalid
     /// flag combination and must be rejected up front, not silently accepted
     /// by `read_checked` / a header-only passthrough.
     #[test]
@@ -2961,11 +2960,11 @@ mod tests {
         assert!(Header::read_from(&mut i).is_err());
     }
 
-    /// C-10 — `sanity_check` must call `getTiledChunkOffsetTableSize` and
+    /// `sanity_check` must call `getTiledChunkOffsetTableSize` and
     /// reject a tile count that overflows `i32`, matching C++
     /// `ImfHeader.cpp` (`sanityCheck` -> `ImfTiledMisc.cpp:309-360`).
 
-    // C-14/C-13: the process-global default zip/dwa-compression-level tests
+    // The process-global default zip/dwa-compression-level tests
     // (`zip_and_dwa_compression_level_override_and_default`,
     // `insert_dwa_compression_level_attribute_updates_record`) moved to
     // `tests/global_compression_defaults.rs`, and the process-global
@@ -3040,8 +3039,7 @@ mod tests {
         assert!(h.sanity_check(true, false).is_err());
     }
 
-    /// Sub-sampling matrix follow-up (`.bughunt/progress_htj2k_ysub.md`):
-    /// tiled files reject ANY x-subsampled channel outright, matching C++
+    /// Tiled files reject ANY x-subsampled channel outright, matching C++
     /// `ImfHeader.cpp:1163-1171` (v3.4.15) -- ported 1:1 at `sanity_check`
     /// above (`if ch.x_sampling != 1` for `is_tiled || is_deep`). No real C++
     /// writer can produce a tiled file with a sub-sampled channel to cross-
@@ -3075,8 +3073,7 @@ mod tests {
         );
     }
 
-    /// Odd-size follow-up (`.bughunt/progress_htj2k_ysub.md`, team-lead's
-    /// "ODD dimensions" question): a SCANLINE image whose data-window height
+    /// Odd dimensions: a SCANLINE image whose data-window height
     /// is not a multiple of a channel's `y_sampling` is rejected at
     /// `sanity_check` too -- `ImfHeader.cpp:1244-1254` (v3.4.15, "Number of
     /// pixels per column ... is not a multiple of the y subsampling factor"),
@@ -3089,7 +3086,8 @@ mod tests {
     /// is defense-in-depth only: no real OR crafted-but-openable EXR file
     /// (C++'s or ours) can ever reach a codec with this combination, since
     /// both C++ and this crate refuse the file at open time first. Same
-    /// resolution as H-07's unaligned-`min_x` case.
+    /// resolution as a data-window `min.x` that is not a multiple of
+    /// `x_sampling`, which `sanity_check` also rejects at open time.
     #[test]
     fn sanity_check_rejects_scanline_height_not_multiple_of_y_sampling() {
         let mut h = Header::new();

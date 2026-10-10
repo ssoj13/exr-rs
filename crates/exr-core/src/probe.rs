@@ -1,5 +1,5 @@
 //! Engagement probes: the single mechanism tests use to prove a fast path,
-//! parallel path or reuse path actually RAN (`.bughunt/engagement_audit.md`).
+//! parallel path or reuse path actually RAN.
 //!
 //! Result-equality tests cannot tell a fast path from its fallback, because
 //! both produce the same bytes. A probe counts how often a named dispatch

@@ -38,7 +38,7 @@ exr_enum!(Compression, "Compression method", register_compression, {
     NO_COMPRESSION = 0, RLE_COMPRESSION = 1, ZIPS_COMPRESSION = 2, ZIP_COMPRESSION = 3,
     PIZ_COMPRESSION = 4, PXR24_COMPRESSION = 5, B44_COMPRESSION = 6, B44A_COMPRESSION = 7,
     DWAA_COMPRESSION = 8, DWAB_COMPRESSION = 9,
-    // v3.4 additions (target is v3.4.15, corrected 2026-09-22 -- team-lead) --
+    // v3.4 additions (target is v3.4.15) --
     // matches `openexr/.../PyOpenEXR.cpp:2671-2673` exactly, including the
     // NUM_COMPRESSION_METHODS shift from 10 to 12 that makes room for them.
     HTJ2K256_COMPRESSION = 10, HTJ2K32_COMPRESSION = 11, NUM_COMPRESSION_METHODS = 12,

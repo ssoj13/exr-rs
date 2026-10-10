@@ -145,13 +145,10 @@ flowchart TD
     IB --> SP["ensure_linear / GPU scopes"]
 ```
 
-OpenFX-on-tiles has connected processed consumers; overall phase acceptance remains open. The
-published host admission API protects CPU physical owners. Checkpoint `beed60d`
-registers accepted-snapshot consumers for scopes and viewport HUD; App metadata,
+OpenFX-on-tiles has connected processed consumers. The
+published host admission API protects CPU physical owners. Scopes and the viewport
+HUD are registered as accepted-snapshot consumers; App metadata,
 Pixel Info and processed Save view share the accepted owner snapshot.
-Module 3/4 acceptance remains open. The accepted-owner boundary and remaining work
-are maintained in the
-[execution plan](../plans/20261001-viewer-tiles-openfx.md).
 
 ## Parity harness flow
 
@@ -171,7 +168,7 @@ flowchart TD
 ```
 
 
-## deflate-rs (libdeflate v1.26 port): compress / decompress and the known perf gaps (plan4)
+## deflate-rs (libdeflate v1.26 port): compress / decompress
 
 ```mermaid
 flowchart LR
@@ -180,22 +177,21 @@ flowchart LR
         PXR["pxr24.rs"]:::codec
         DWA["dwa/mod.rs"]:::codec
     end
-    ZIP & PXR & DWA -->|"F10: new zero-filled Vec per chunk"| API["lib.rs facade<br/>Compressor / Decompressor"]
+    ZIP & PXR & DWA --> API["lib.rs facade<br/>Compressor / Decompressor"]
     API --> ZC["zlib_compress / zlib_decompress_ex"]
     ZC --> DC["deflate_compress"]
     ZC --> DD["deflate_decompress_ex"]
     ZC --> AD["adler32<br/>scalar | sse2 | avx2"]
     DC --> MF{"level"}
     MF -->|1| HT["ht_matchfinder"]
-    MF -->|2-9| HC["hc_matchfinder<br/>F6: 1-byte filter"]
-    MF -->|10-12| BT["bt_matchfinder + near-optimal<br/>F8: Vec per position"]
-    DC --> HUF["Huffman build<br/>F7: heap allocs"]
-    DC --> BS["bitstream flush_bits!<br/>F5: out_fast_end per call"]
-    DD --> TB["decode tables<br/>F4: to_vec per block"]
-    DD --> FL{"FASTLOOP_ENABLED"}
-    FL -->|"false (today)"| GL["generic loop<br/>byte-at-a-time refill"]
-    FL -->|"true (F1: fix :1099, :1137/:1145)"| FST["fastloop<br/>8-byte refill, F2 word copy, F3 BMI2"]
+    MF -->|2-9| HC["hc_matchfinder"]
+    MF -->|10-12| BT["bt_matchfinder + near-optimal"]
+    DC --> HUF["Huffman build"]
+    DC --> BS["bitstream flush_bits!"]
+    DD --> TB["decode tables"]
+    DD --> FST["fastloop"]
+    FST --> GL["generic loop"]
     CPU["cpu.rs runtime dispatch"] -.-> AD
-    CPU -.->|"F3/F11 missing tiers"| FST
+    CPU -.->|"BMI2 instantiation"| FST
     classDef codec fill:#eef
 ```

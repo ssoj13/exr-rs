@@ -2,13 +2,6 @@
 //! single process-wide `rayon` pool it backs, and a per-file thread-count
 //! capture helper.
 //!
-//! **Phase A only (round-5 design, W3.9 §1.2).** This module is NEW and self
-//! contained: it is not wired into any reader or writer yet (that is phase B,
-//! which waits on C-18's error taxonomy and C-08's byte-exact `Name`, both of
-//! which touch the same read/write seams this work will parallelise). Phase A
-//! exists so the thread-count semantics and the pool are settled and tested
-//! up front.
-//!
 //! Port target (pinned tag v3.3.11):
 //! <https://github.com/AcademySoftwareFoundation/openexr/blob/v3.3.11/src/lib/OpenEXR/ImfThreading.cpp>
 //! and `IlmThread/IlmThreadPool.cpp` (behavioural target 3.4.15; unchanged
@@ -26,7 +19,7 @@
 //!   on the calling thread (`handleProcessTask`, `IlmThreadPool.cpp:675-688`).
 //!   [`run_on_global_pool`] gets the same net effect with a 1-worker pool:
 //!   calling the closure bare would let its `par_iter` spill onto rayon's
-//!   ambient all-cores pool (U1).
+//!   ambient all-cores pool.
 //! - **Pools are cached per distinct thread count** ([`pool_for_count`]).
 //!   Every file that captures the default count shares one pool, which is
 //!   C++'s "at most this number of worker threads regardless of how many
@@ -37,7 +30,7 @@
 //! - Every reader/writer constructor still captures `numThreads` at
 //!   construction — an explicit argument if given, else the *current* global
 //!   count, read once and then fixed for that file's lifetime.
-//!   [`ThreadCount::capture`] is that capture point, for phase B's
+//!   [`ThreadCount::capture`] is that capture point, for the
 //!   `with_num_threads` constructors. The captured count picks the pool
 //!   [`run_on_global_pool`] runs on and bounds how many of that file's chunks
 //!   are in flight (C++'s `max(1, 2*numThreads)`-buffer ring).
@@ -142,10 +135,9 @@ pub fn global_pool() -> Result<Option<Arc<rayon::ThreadPool>>> {
 ///
 /// `f` always runs inside `install`, never bare: every caller's `f` does
 /// `par_iter` work, and a `par_iter` outside any installed pool silently runs
-/// on rayon's ambient default pool (one thread per core). That was U1
-/// (engagement audit): `with_num_threads(Some(n))` ran on all cores whenever
-/// the global count was `<= 1`, so thread-count test matrices compared
-/// all-cores against all-cores.
+/// on rayon's ambient default pool (one thread per core), so
+/// `with_num_threads(Some(n))` would run on all cores whenever the global
+/// count was `<= 1`.
 pub fn run_on_global_pool<F, R>(count: ThreadCount, f: F) -> Result<R>
 where
     F: FnOnce() -> R + Send,
@@ -155,7 +147,7 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Per-file thread-count capture (for phase B's `with_num_threads` ctors)
+// Per-file thread-count capture (for the `with_num_threads` ctors)
 // ---------------------------------------------------------------------------
 
 /// A validated, already-resolved thread count captured at reader/writer
@@ -203,7 +195,7 @@ impl ThreadCount {
         self.0 > 1
     }
 
-    /// How many of this file's chunks phase B should keep outstanding on the
+    /// How many of this file's chunks the pipelines should keep outstanding on the
     /// shared [`global_pool`] at once: C++'s `max(1, 2*numThreads)`
     /// (`ImfOutputFile.cpp:181-205` and the tiled/deep equivalents) - the
     /// ring [`ordered_pipeline`] runs the writers on, and the floor of
@@ -214,8 +206,8 @@ impl ThreadCount {
     }
 
     /// How many chunks/tiles the read-ahead pipeline should batch into ONE
-    /// window — team-lead follow-up: "parallel must never be slower than
-    /// serial". [`Self::max_in_flight`] alone sizes a window by CHUNK COUNT,
+    /// window, so that parallel is never slower than
+    /// serial. [`Self::max_in_flight`] alone sizes a window by CHUNK COUNT,
     /// which is fine for large chunks (ZIP/PIZ/DWA) but pathological for
     /// small ones: `tests/w39b_io_vs_decode.rs::many_small_windows_thread_spawn_overhead_65536_height_none`
     /// found NONE compression (1 scanline/chunk) at 65536 height still only
@@ -573,7 +565,7 @@ mod tests {
         assert_eq!(result, 42);
     }
 
-    /// U1: the work must run on a pool of exactly `n` workers, never on
+    /// The work must run on a pool of exactly `n` workers, never on
     /// rayon's ambient all-cores pool. Byte identity can't show this; the
     /// worker count seen inside the closure can. Mutation (the old
     /// `is_parallel()` gate with a bare `f()` fallback) turns it red.

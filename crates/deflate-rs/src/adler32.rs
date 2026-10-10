@@ -9,11 +9,12 @@
 //!
 //! # N/A in Rust (documented here, not ported)
 //! - SIMD dispatch (`arch_select_adler32_func`, `dispatch_adler32`, `adler32_impl`
-//!   volatile function pointer) — deferred to later waves when SIMD modules are
-//!   added.  The scalar path is always the correct fallback and is the source of
-//!   truth for byte-exact output.
-//! - `x86/adler32_impl.h` and `arm/adler32_impl.h` includes — not in scope for
-//!   Wave 1.
+//!   volatile function pointer) — replaced by the safe runtime dispatcher in
+//!   `crate::cpu` and the `adler32_sse2`/`adler32_avx2` modules.  The scalar path
+//!   is always the correct fallback and is the source of truth for byte-exact
+//!   output.
+//! - `x86/adler32_impl.h` and `arm/adler32_impl.h` includes — ported separately
+//!   as the SIMD modules above, not in this file.
 //! - `adler32_func_t` typedef — not needed; Rust uses trait objects / fn pointers
 //!   differently.
 //! - `MAYBE_UNUSED` attribute on `adler32_generic` — the function is `pub(crate)`;

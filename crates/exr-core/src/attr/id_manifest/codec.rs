@@ -1,5 +1,5 @@
 //! Port of `IDManifest::init` (parse) and `IDManifest::serialize` (write) —
-//! the binary format of the DECOMPRESSED manifest payload (C-15).
+//! the binary format of the DECOMPRESSED manifest payload.
 //!
 //! Both directions share the same prefix-compressed string table + RLE index
 //! remapping scheme documented inline in `ImfIDManifest.cpp`; see the

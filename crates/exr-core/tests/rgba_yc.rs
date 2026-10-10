@@ -114,7 +114,7 @@ fn parse_rgba_dump(bytes: &[u8]) -> (u32, u32, Vec<[u16; 4]>) {
 /// claim there), this asserts IDENTICAL bits: the reference here is what the
 /// SAME reconstruction algorithm, run by the real C++ implementation,
 /// produces from the SAME encoded bytes. `golden_rgba.exr` additionally
-/// proves the plain-RGBA path (M-12(b)) bit-exact, since its decode has no
+/// proves the plain-RGBA path bit-exact, since its decode has no
 /// lossy step at all.
 #[test]
 fn rgba_input_file_matches_cpp_rgba_input_file_bit_exact() {
@@ -218,7 +218,7 @@ fn assert_byte_exact(golden_name: &str, ours: &[u8], expected: &[u8], detail: &s
 /// BYTE-EXACT check of `exr_core::rgba::RgbaOutputFile` against `golden_yc.exr`
 /// / `golden_rgba.exr` — the real C++ `RgbaOutputFile`'s own output, from the
 /// exact same source pixels (`oracle.cpp`'s `yc_pixel` gradient formula,
-/// `do_write_rgba`, W3.6(a)). Covers both the YCA path (`WRITE_YCA`: filtering,
+/// `do_write_rgba`). Covers both the YCA path (`WRITE_YCA`: filtering,
 /// subsampling and `roundYCA`) and the plain path (`WRITE_RGBA`: direct
 /// R/G/B/A, no conversion) via the one-shot `write_stream` convenience.
 #[test]

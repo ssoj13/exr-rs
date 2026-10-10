@@ -76,8 +76,8 @@ pub struct RgbaOutputFile<'a> {
     /// stored, since C++ ToYca buffers the CONVERTED rows internally, not a
     /// borrow of the caller's memory).
     fb: Option<(isize, isize)>,
-    /// Persistent Plain-mode batched-range scratch (alloc audit C7 write
-    /// side): `range_rgba` holds the gathered `Rgba`s for the WHOLE batch,
+    /// Persistent Plain-mode batched-range scratch:
+    /// `range_rgba` holds the gathered `Rgba`s for the WHOLE batch,
     /// row-major with row 0 == the batch's smallest absolute `y` (matching
     /// [`super::input::slice`]'s addressing convention regardless of line
     /// order); `range_staging` holds the resulting byte planes. See
@@ -85,8 +85,8 @@ pub struct RgbaOutputFile<'a> {
     /// `FrameBuffer` + fresh byte buffer rebuilt on EVERY single row.
     range_rgba: Vec<Rgba>,
     range_staging: Vec<u8>,
-    /// Persistent per-INPUT-row scratch shared by Grey/YCA (alloc audit C7
-    /// write side): unlike Plain, these two modes keep C++'s own per-row
+    /// Persistent per-INPUT-row scratch shared by Grey/YCA:
+    /// unlike Plain, these two modes keep C++'s own per-row
     /// emission structure (`ToYca`'s ring buffer genuinely needs adjacent
     /// rows one at a time) -- only the allocations become persistent.
     row_buf: Vec<Rgba>,
@@ -114,8 +114,8 @@ struct ToYcaState {
     round_c: u32,
     /// `N` (27) horizontally-decimated rows — C++ `_buf[N]`.
     buf: Vec<Vec<Rgba>>,
-    /// Persistent per-input-row scratch (alloc audit C7 YCA write-side
-    /// follow-up): `yca_row_scratch` holds `rgba_to_yca`'s output;
+    /// Persistent per-input-row scratch:
+    /// `yca_row_scratch` holds `rgba_to_yca`'s output;
     /// `padded_scratch` holds the padded row `decimate_chroma_horiz` reads
     /// from. Both are fully overwritten every call (the middle region by a
     /// full-width copy, the padding by `pad_tmp`), so `ensure_len` is sound.
@@ -212,7 +212,7 @@ impl<'a> RgbaOutputFile<'a> {
             ExrError::Arg("No frame buffer was specified as the pixel data source.".into())
         })?;
 
-        // (alloc audit C7, write side) Plain: ONE batched range write --
+        // Plain: ONE batched range write --
         // see `write_plain_range`'s doc for why this replaces a per-row
         // loop (matches the read-side `decode_plain_range` fix exactly).
         // Grey/YCA keep C++'s own per-INPUT-row emission structure (`ToYca`
@@ -242,7 +242,7 @@ impl<'a> RgbaOutputFile<'a> {
     }
 
     /// Write a WHOLE `num_scan_lines`-row batch of Plain-mode pixels in ONE
-    /// low-level `write_pixels` call (alloc audit C7 write side) — mirrors
+    /// low-level `write_pixels` call — mirrors
     /// `decode_plain_range`'s read-side fix. Builds ONE `FrameBuffer`
     /// covering the batch's absolute y-range plus ONE persistent byte
     /// staging buffer, instead of a fresh `FrameBuffer` and a fresh byte
@@ -495,7 +495,7 @@ fn yca_convert_and_write_row(out: &mut RgbaOutputFile<'_>, state: &mut ToYcaStat
     let n = yca::N;
 
     // RGBAtoYCA, pad, horizontal decimate into the newly-rotated last slot.
-    // (alloc audit C7 YCA write-side follow-up) `yca_row_scratch`/
+    // `yca_row_scratch`/
     // `padded_scratch` are persistent, reused buffers -- `rgba_to_yca`
     // writes every element of the former, and the latter's middle region
     // (a full-width copy) plus its padding (`pad_tmp`) cover the whole of
@@ -564,7 +564,7 @@ fn duplicate_second_to_last_buffer(state: &mut ToYcaState) {
 /// scanline write at `out.current_scan_line`.
 fn decimate_chroma_vert_and_write_scanline(out: &mut RgbaOutputFile<'_>, state: &mut ToYcaState) -> Result<()> {
     let n2 = yca::N2;
-    // (alloc audit C7 YCA write-side follow-up) `vert_tmp` is a persistent,
+    // `vert_tmp` is a persistent,
     // reused buffer -- both branches below fully overwrite it.
     crate::compressor::ensure_len(&mut state.vert_tmp, state.width);
     if state.lines_converted & 1 != 0 {
@@ -651,7 +651,7 @@ fn write_yca_row_bytes(
     let a_off = y_off + width * 2;
     let ry_off = a_off + width * 2;
     let by_off = ry_off + cw * 2;
-    // (alloc audit C7 write side) `staging` is a persistent, reused buffer
+    // `staging` is a persistent, reused buffer
     // (see `RgbaOutputFile::yca_row_staging`'s doc) instead of a fresh
     // allocation per row: every byte below is either written this call (Y/A
     // for all `x`, RY/BY for every even `x` -- `cw` entries via `x/2`, an
@@ -778,7 +778,7 @@ mod tests {
             .collect()
     }
 
-    /// Alloc audit C7 write side: `write_plain_range` (the batched fix) must
+    /// `write_plain_range` (the batched fix) must
     /// produce a byte-IDENTICAL file to the OLD per-row reference
     /// (`write_output_row` called once per row, exactly the pre-fix shape),
     /// across both line orders and a couple of real codecs with multi-line
@@ -840,7 +840,7 @@ mod tests {
         }
     }
 
-    /// Alloc audit C7's own explicit verification (write side): a single
+    /// Explicit verification (write side): a single
     /// `RgbaOutputFile::write_pixels(pixels, n)` call must make exactly ONE
     /// low-level `write_pixels` call, not one per requested scanline -- the
     /// real bug the batched fix replaces (besides the allocation churn,
@@ -893,7 +893,7 @@ mod tests {
         }
     }
 
-    /// Alloc audit C7 YCA write-side follow-up: `ToYcaState`'s
+    /// `ToYcaState`'s
     /// `yca_row_scratch`/`padded_scratch`/`vert_tmp` are now persistent,
     /// reused fields instead of fresh allocations per input row. Poison all
     /// three with implausible values BEFORE the first real `write_pixels`
@@ -933,8 +933,7 @@ mod tests {
 
     /// Port of `RgbaOutputFile::updatePreviewImage` -- a one-line forward to
     /// the low-level `OutputFile::updatePreviewImage`, wired now that the
-    /// scanline writer supports it (M-07 follow-on, round-4 multipart
-    /// audit). Writes a plain-RGBA file whose header carries a 2x2 preview,
+    /// scanline writer supports it. Writes a plain-RGBA file whose header carries a 2x2 preview,
     /// rewrites the preview after the pixel data is written, and asserts the
     /// scan line pixels survive untouched while the re-parsed header shows
     /// the new preview pixels.

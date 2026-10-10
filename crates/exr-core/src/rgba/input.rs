@@ -38,8 +38,8 @@
 //! built for each actual pixel read, exactly the way
 //! [`MultiPartInputFile::input_part`] is documented to be used.
 //!
-//! [`RgbaInputFile<'a, S>`] is generic over the stream HOLDER `S` (queue
-//! item 2, round-4 multipart audit), mirroring `MultiPartInputFile<'a, S>`'s
+//! [`RgbaInputFile<'a, S>`] is generic over the stream HOLDER `S`,
+//! mirroring `MultiPartInputFile<'a, S>`'s
 //! own split, which mirrors `scanline::OutputFile`/`OutputFileOwned` on the
 //! write side: the default `S = &'a mut dyn IStream` borrows the caller's
 //! stream (this is NOT a self-referential struct — the borrow is ordinary,
@@ -118,8 +118,8 @@ impl RgbaImage {
 /// module doc for the shape it selects and for how it stays a persistent
 /// decoder (like C++) without being a self-referential struct.
 ///
-/// Generic over the stream HOLDER `S` (queue item 2, round-4 multipart
-/// audit), mirroring [`MultiPartInputFile`]'s own `S` parameter: the default
+/// Generic over the stream HOLDER `S`,
+/// mirroring [`MultiPartInputFile`]'s own `S` parameter: the default
 /// `S = &'a mut dyn IStream` borrows the caller's stream (unchanged
 /// behaviour); [`RgbaInputFile::open`] instead builds the
 /// `S = Box<dyn IStream + 'a>` variant, so it can OWN a path-opened stream —
@@ -131,11 +131,11 @@ pub struct RgbaInputFile<'a, S = &'a mut dyn IStream> {
     multipart: MultiPartInputFile<'a, S>,
     part: i32,
     channel_name_prefix: String,
-    /// Which of the three shapes (M-12) this part/layer resolves to, plus the
+    /// Which of the three shapes (plain RGBA, grey, YCA) this part/layer resolves to, plus the
     /// YCA incremental-decode memoization when applicable. Rebuilt whenever
     /// `part`/`channel_name_prefix` change.
     mode: DecodeMode,
-    /// Persistent Plain/Grey staging buffer (alloc audit C7), reused across
+    /// Persistent Plain/Grey staging buffer, reused across
     /// [`read_pixels`](Self::read_pixels) calls — see `decode_plain_range`/
     /// `decode_grey_range`'s doc for why this is the fix for the real
     /// "N chunk decodes for N requested rows" bug those replaced.
@@ -174,8 +174,8 @@ struct YcaCache {
     buf1: Vec<Vec<Rgba>>,
     /// 3 rows (C++ `_buf2`).
     buf2: [Vec<Rgba>; 3],
-    /// Persistent per-line scratch for `read_yca_scanline` (alloc audit
-    /// C7 YCA follow-up): `line_buf` is the raw Xdr bytes for ONE scanline;
+    /// Persistent per-line scratch for `read_yca_scanline`:
+    /// `line_buf` is the raw Xdr bytes for ONE scanline;
     /// `tmp_row` is the pre-reconstruction `Y`/`A`/(even-lx)`R`/`B` staging
     /// row, `width + N - 1` wide (the horizontal reconstruction filter's
     /// padding). Both are fully overwritten every call for the positions
@@ -244,10 +244,8 @@ impl<'a> RgbaInputFile<'a, &'a mut dyn IStream> {
 
 impl<'a> RgbaInputFile<'a, Box<dyn IStream + 'a>> {
     /// Open `path`, OWNING the decoded stream, part 0, no layer — port of
-    /// `RgbaInputFile(const char[], int)`. Queue item 2 (round-4 multipart
-    /// audit): the constructor the module doc previously flagged as needing
-    /// `MultiPartInputFile` to be generic over its stream holder first —
-    /// that split now exists (`MultiPartInputFile::new_owned`).
+    /// `RgbaInputFile(const char[], int)`, built on
+    /// `MultiPartInputFile::new_owned`, which owns its stream holder.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let path_str = path
@@ -449,7 +447,7 @@ where
             Ok(())
         };
 
-        // (alloc audit C7) Plain/Grey: ONE batched decode over [lo, hi] --
+        // Plain/Grey: ONE batched decode over [lo, hi] --
         // see `decode_plain_range`'s doc for why this replaces a per-row
         // loop. YCA keeps the per-row `yca_output_row` loop (C's own
         // `FromYca::readPixels` is line-by-line too, `ImfRgbaFile.cpp:
@@ -576,10 +574,10 @@ pub(crate) fn yw_from_header(header: &Header) -> Result<[f32; 3]> {
 /// Generic over [`scanline::GenericInputReader`] (not the concrete
 /// `scanline::InputFile`) so it accepts EITHER the standalone reader
 /// (`RgbaInputFile::new`'s single-part path) or the multipart-cached
-/// `InputFilePartReader` view (`RgbaInputFile`'s `MultiPartInputFile` path,
-/// S-16 round 4 continuation) — both expose the same three operations
-/// (`header`, `set_frame_buffer`, `read_pixels`) but are, after the S-16
-/// split, genuinely different concrete types.
+/// `InputFilePartReader` view (`RgbaInputFile`'s `MultiPartInputFile` path)
+/// — both expose the same three operations
+/// (`header`, `set_frame_buffer`, `read_pixels`) but are genuinely
+/// different concrete types.
 fn decode_from_input<R: scanline::GenericInputReader>(
     input: &mut R,
     channel_name_prefix: &str,
@@ -601,7 +599,7 @@ fn decode_from_input<R: scanline::GenericInputReader>(
 
 /// Luminance-chroma (YCA) path — port of `FromYca`.
 ///
-/// `Y`, `A` and BOTH chroma channels are always requested (M-11/M-12): a file
+/// `Y`, `A` and BOTH chroma channels are always requested: a file
 /// missing one of `RY`/`BY` (or `Y` itself, or `A`) gets that channel filled
 /// (`0.0`/`0.5`/`1.0`) by the frame-buffer fill mechanism, exactly as C++'s
 /// `FromYca::setFrameBuffer` inserts all four slices unconditionally (gated
@@ -865,7 +863,7 @@ pub(crate) fn slice_at_row(plane_off: usize, dw_min_x: i32, y: i32, width: usize
     )
 }
 
-/// Alloc audit C7 reference implementation: decodes ONE scanline per call
+/// Reference implementation: decodes ONE scanline per call
 /// via its own `input.read_pixels(y, y, ..)` -- kept ONLY as a `#[cfg(test)]`
 /// byte-for-byte oracle for `decode_plain_range`'s output (see
 /// `rgba::input::tests::plain_range_matches_row_by_row_reference` and
@@ -908,7 +906,7 @@ fn decode_plain_row<'a, S: DerefMut<Target = dyn IStream + 'a>>(
     Ok(out)
 }
 
-/// Alloc audit C7 reference implementation -- see `decode_plain_row`'s doc
+/// Reference implementation -- see `decode_plain_row`'s doc
 /// (same "N chunk decodes for N requested rows" bug, same `#[cfg(test)]`
 /// oracle role for `decode_grey_range`).
 #[cfg(test)]
@@ -944,7 +942,7 @@ fn decode_grey_row<'a, S: DerefMut<Target = dyn IStream + 'a>>(
 }
 
 /// Plain RGBA path, a whole `[y1, y2]` RANGE in ONE low-level `read_pixels`
-/// call (alloc audit C7) — batches exactly like the bulk `decode_plain_rgba`
+/// call — batches exactly like the bulk `decode_plain_rgba`
 /// does for the whole image, just scoped to the caller's range, with a
 /// persistent `staging` buffer (grown/truncated via `ensure_len`, then fully
 /// overwritten by the read) instead of a fresh allocation. This is the fix
@@ -1053,7 +1051,7 @@ fn read_yca_scanline<'a, S: DerefMut<Target = dyn IStream + 'a>>(
     let a_off = y_off + yb * 2;
     let ry_off = a_off + ab * 2;
     let by_off = ry_off + cb * 2;
-    // (alloc audit C7 YCA follow-up) `line_buf` is a persistent, reused
+    // `line_buf` is a persistent, reused
     // buffer -- every byte within `[0, (yb+ab+2*cb)*2)` is written by
     // `read_pixels` below (a full-range decode into a freshly `ensure_len`'d
     // destination, same contract as every other `read_pixels`/`write_pixels`
@@ -1077,7 +1075,7 @@ fn read_yca_scanline<'a, S: DerefMut<Target = dyn IStream + 'a>>(
     };
 
     let n2 = yca::N2;
-    // (alloc audit C7 YCA follow-up) `tmp_row` is a persistent, reused
+    // `tmp_row` is a persistent, reused
     // buffer. `g`/`a` are written for EVERY `lx` (full coverage); `r`/`b` are
     // written only at EVEN `lx` when `even` — the ODD-`lx` positions keep
     // whatever they held from a PRIOR call (a "sentinel" that is NEVER
@@ -1273,7 +1271,7 @@ mod tests {
 
     /// Like [`write_exr`], but every pixel of every channel gets a distinct
     /// value (`base + (row*width + col + channel_idx) * 0.001`) instead of a
-    /// constant, and the caller picks the compression — alloc audit C7's
+    /// constant, and the caller picks the compression — the batched-range
     /// matrix test needs both: non-constant content so a wrong row mapping
     /// is actually observable, and a real codec with a multi-line chunk so a
     /// non-chunk-aligned range genuinely straddles a chunk boundary.
@@ -1330,7 +1328,7 @@ mod tests {
         out.into_data()
     }
 
-    /// Alloc audit C7: `decode_plain_range`/`decode_grey_range` (the batched
+    /// `decode_plain_range`/`decode_grey_range` (the batched
     /// fix) must produce byte-identical output to the `#[cfg(test)]`
     /// `decode_plain_row`/`decode_grey_row` reference (one
     /// `input.read_pixels(y, y, ..)` call per row) across a MATRIX of
@@ -1380,7 +1378,7 @@ mod tests {
         }
     }
 
-    /// Alloc audit C7's own explicit verification: `RgbaInputFile::
+    /// Explicit verification: `RgbaInputFile::
     /// read_pixels` must decode each on-disk CHUNK covering the requested
     /// range exactly ONCE, not once per requested SCANLINE -- the real bug
     /// the batched `decode_plain_range`/`decode_grey_range` fix replaces.
@@ -1426,15 +1424,14 @@ mod tests {
         assert_eq!(base2, fresh_base);
     }
 
-    /// Alloc audit C7 YCA follow-up: `YcaCache::line_buf`/`tmp_row` are now
+    /// `YcaCache::line_buf`/`tmp_row` are now
     /// persistent, reused fields in `read_yca_scanline` instead of fresh
     /// allocations per scanline. Poison BOTH with implausible values
     /// (including `tmp_row`'s odd-`lx` `r`/`b` "sentinel" positions, which
-    /// are never explicitly reset — team-lead's specific concern) BEFORE the
+    /// are never explicitly reset) BEFORE the
     /// first real `read_pixels` call, then decode the WHOLE image on that
     /// poisoned-then-reused instance and diff against a fresh instance —
-    /// same methodology as B44's `poison_reused_scratch_matches_fresh_instance`
-    /// (alloc audit E6).
+    /// same methodology as B44's `poison_reused_scratch_matches_fresh_instance`.
     #[test]
     fn poison_reused_yca_scanline_scratch_matches_fresh_instance() {
         let (w, h) = (8usize, 6usize);
@@ -1494,7 +1491,7 @@ mod tests {
 
     #[test]
     fn rgba_channels_of_detects_ry_without_by_as_chroma() {
-        // M-11: the old code used `has("RY") && has("BY")`, so a file with
+        // The old code used `has("RY") && has("BY")`, so a file with
         // only ONE chroma channel was silently treated as having none.
         let mut cl = ChannelList::new();
         cl.insert("Y", Channel::new(PixelType::Half, 1, 1, false)).unwrap();
@@ -1547,13 +1544,13 @@ mod tests {
 
     #[test]
     fn plain_rgba_file_reads_without_a_y_channel() {
-        // M-12(b): the old code hard-required a "Y" channel, so a plain
+        // The old code hard-required a "Y" channel, so a plain
         // R/G/B/A file errored instead of reading.
         let bytes = write_exr(&[("R", 1.0), ("G", 2.0), ("B", 3.0), ("A", 0.5)], 2, 2);
         let mut stream = MemIStream::new(bytes);
         crate::probe::reset(crate::probe::Probe::ScatterChunkPacked);
         let image = RgbaInputFile::read_stream(&mut stream).expect("plain RGBA file must read");
-        // U5: an interleaved half RGBA frame buffer is exactly the packed
+        // An interleaved half RGBA frame buffer is exactly the packed
         // scatter's shape; the fast path must service the read.
         assert!(
             crate::probe::get(crate::probe::Probe::ScatterChunkPacked) > 0,
@@ -1570,7 +1567,7 @@ mod tests {
 
     #[test]
     fn y_only_file_reads_as_grey() {
-        // M-12(a)/(b): a Y-only file must read (grey = Y duplicated into R/G/B),
+        // A Y-only file must read (grey = Y duplicated into R/G/B),
         // not error, and A defaults to 1.0 when absent.
         let bytes = write_exr(&[("Y", 0.25)], 2, 2);
         let mut stream = MemIStream::new(bytes);
@@ -1613,7 +1610,7 @@ mod tests {
         assert_eq!(whole, via_free.pixels);
     }
 
-    /// Queue item 2 (round-4 multipart audit, C-01/C-02): `RgbaInputFile::open`
+    /// `RgbaInputFile::open`
     /// OWNS a path-opened stream (no caller-side `&mut` to keep alive) --
     /// port of C++'s `RgbaInputFile(const char*, int)` constructor, which
     /// this crate could not provide before `MultiPartInputFile` gained the
@@ -1644,7 +1641,7 @@ mod tests {
     /// Incremental `read_pixels` on a YCA file must match the bulk decode
     /// used by `read_all`/`read_stream` line-for-line, whether read forward,
     /// backward, or as isolated single lines (exercising the memoization
-    /// cache's edge-clamp / odd-vs-even-parity branch selection, M-13).
+    /// cache's edge-clamp / odd-vs-even-parity branch selection).
     #[test]
     fn incremental_read_pixels_matches_bulk_decode_on_a_yca_file() {
         // 4x4 Y + 2x2-subsampled RY/BY, non-constant so a wrong row/clamp
@@ -1766,7 +1763,7 @@ mod tests {
         out.into_data()
     }
 
-    /// Team-lead correction: the YCA cache must be a BOUNDED ring (`N + 2` +
+    /// The YCA cache must be a BOUNDED ring (`N + 2` +
     /// 3 rows), not a memo table that grows with image height. Build a YCA
     /// image much taller than the ring, scan it top-to-bottom AND
     /// bottom-to-top, and check `buf1`/`buf2` never change length — plus

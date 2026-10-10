@@ -115,7 +115,7 @@ pub fn read_offset_table(is: &mut dyn IStream, count: i64) -> Result<OffsetTable
     let min_offset = table_pos + n as u64 * OFFSET_BYTES;
     let max_offset = stream_size.unwrap_or(u64::MAX);
 
-    // S-10 residual (round-4 audit): fallible, not `vec![..]` -- `n` is
+    // Fallible, not `vec![..]` -- `n` is
     // already capped at `MAX_CHUNK_COUNT` (8 MB worst case) so this is
     // defense-in-depth rather than the primary fix, but the same
     // `handle_alloc_error`-aborts-the-process concern applies to any
@@ -130,8 +130,8 @@ pub fn read_offset_table(is: &mut dyn IStream, count: i64) -> Result<OffsetTable
     Ok(OffsetTable { offsets, complete })
 }
 
-/// Lenient offset-table read for `multipart::input::read_prologue` (S-08,
-/// round-4 audit, team-lead policy decision (b), 2026-09-22): unlike
+/// Lenient offset-table read for `multipart::input::read_prologue`:
+/// unlike
 /// [`read_offset_table`] above (used by [`crate::chunk::RawImage`], which
 /// stays strict on purpose — a deliberately-stricter tool, not a C++ port),
 /// a READER CONSTRUCTOR must never hard-fail merely because a chunk-offset
@@ -160,8 +160,8 @@ pub fn read_offset_table(is: &mut dyn IStream, count: i64) -> Result<OffsetTable
 /// part `i` never displaces where part `i+1`'s table is looked for.
 ///
 /// **A truncated (short) read is treated the SAME as a size-validation
-/// failure — empty table, no reconstruction attempted** (team-lead
-/// correction, 2026-09-22): `chunk.c::extract_chunk_table` only enters its
+/// failure — empty table, no reconstruction attempted**:
+/// `chunk.c::extract_chunk_table` only enters its
 /// per-entry validity check (the loop that can trigger
 /// `reconstruct_chunk_table`) in the `else` branch of `if (rv !=
 /// EXR_ERR_SUCCESS) { ... UINTPTR_MAX ... } else if (!disable_reconstruct)
@@ -247,7 +247,7 @@ pub enum Framing {
         min_y: i32,
         /// Scanlines per chunk (C++ `lines_per_chunk`).
         lines_per_chunk: i32,
-        /// The header's `lineOrder` — S-09(a)/(b): reconstruction expects
+        /// The header's `lineOrder` — reconstruction expects
         /// chunk `ci` (0-based table slot) at file position `ci` for
         /// `IncreasingY`/`RandomY`, or `chunk_count - (ci + 1)` for
         /// `DecreasingY` (`chunk.c::reconstruct_chunk_table`'s
@@ -285,7 +285,7 @@ pub struct PartOffsets<'a> {
 /// Rebuild incomplete chunk offset tables by scanning the file's chunk region —
 /// port of `OpenEXRCore/chunk.c::reconstruct_chunk_table`.
 ///
-/// S-09 (round-4 audit, (a)/(d)): C++ reconstructs ONE PART AT A TIME, in part
+/// C++ reconstructs ONE PART AT A TIME, in part
 /// order, each seeded from the end of the PREVIOUS part's own last actual
 /// chunk (`:444-462`) — not one interleaved sweep across every part at once.
 /// Within a part, for every table SLOT (not file-order chunk) it re-anchors
@@ -490,7 +490,7 @@ fn parse_chunk_leader(
 
     // C++ `extract_chunk_leader`: the multipart `partNumber` prefix must
     // match the part this leader is being read on behalf of (`chunk.c:261-269`
-    // — S-09(d), a foreign part number is rejected, not silently routed).
+    // — a foreign part number is rejected, not silently routed).
     if multipart {
         let pn = xdr::read_i32(is)?;
         let pn = usize::try_from(pn)
@@ -515,7 +515,7 @@ fn parse_chunk_leader(
             let y = xdr::read_i32(is)?;
             let data_size = xdr::read_i32(is)?;
             if data_size < 0 {
-                // E15 / `ImfTileOffsets.cpp:142` (verified): a chunk-table
+                // `ImfTileOffsets.cpp:142` (verified): a chunk-table
                 // reconstruction failure is `IoExc`. Not observable from the
                 // public API today (this sits inside a catch-all
                 // reconstruct); aligned here for fidelity.
@@ -536,7 +536,7 @@ fn parse_chunk_leader(
             let (dx, dy, lx, ly) = read_tile_coords(is)?;
             let data_size = xdr::read_i32(is)?;
             if data_size < 0 {
-                // E15 / `ImfTileOffsets.cpp:159` (verified) — see the
+                // `ImfTileOffsets.cpp:159` (verified) — see the
                 // scanline arm above.
                 return Err(ExrError::Io("Invalid tile data size".into()));
             }
@@ -593,7 +593,7 @@ fn deep_payload(is: &mut dyn IStream) -> Result<u64> {
 /// (`chunk = (scanline_y - data_window.min.y) / lines_per_chunk`, rejected when
 /// it does not address a real chunk).
 ///
-/// S-09 (round-4 audit, team-lead sign-off 2026-09-22): this used to ALSO
+/// This used to ALSO
 /// reject a `y` that is not exactly at a block boundary
 /// (`rel % lines_per_chunk != 0`). C++ never checks that: `chunk.c`'s
 /// `read_and_validate_chunk_leader` computes the slot via TRUNCATING integer
@@ -604,7 +604,7 @@ fn deep_payload(is: &mut dyn IStream) -> Result<u64> {
 /// chunk_count)`. A misaligned `y` can therefore only arise from a corrupt
 /// or malicious leader (every real leader is written at a block boundary by
 /// construction); it is still caught, just by the CALLER's slot-match check
-/// (S-05, `chunk/mod.rs::read_part_chunks` / `scan_one_chunk` below) rather
+/// (`chunk/mod.rs::read_part_chunks` / `scan_one_chunk` below) rather
 /// than by this function refusing to even compute a candidate slot. Bounds
 /// (`chunk < 0`) fall out of `usize::try_from` failing on a negative
 /// division result; `chunk >= chunk_count` is left to the caller too (every
@@ -674,7 +674,7 @@ mod tests {
         // `size()` intentionally left at the trait default (`None`).
     }
 
-    /// S-08 correction (team-lead, 2026-09-22): pins the exact C++ behaviour
+    /// Pins the exact C++ behaviour
     /// `chunk.c::extract_chunk_table` has for a table that is VALIDLY sized
     /// (passes `check_chunk_count`) but whose actual read is short/truncated
     /// -- `rv != EXR_ERR_SUCCESS` takes the branch that marks the table
@@ -716,7 +716,7 @@ mod tests {
         assert_eq!(check_chunk_count(4, 8, Some(1024)).unwrap(), 4);
     }
 
-    /// Mutation-testing gap fix (round-4/5 chunk/ audit, batch 2): the cap
+    /// Mutation-testing gap fix: the cap
     /// itself, `MAX_CHUNK_COUNT = 1024 * 1024`. A count just above `2048`
     /// (what `1024 + 1024` would give under a `*`→`+` mutant) but well under
     /// the real `2^20` cap must still be accepted.
@@ -845,11 +845,11 @@ mod tests {
         );
     }
 
-    /// S-09 (round-4 audit, team-lead sign-off): updated from
+    /// Updated from
     /// `scanline_slot_rejects_misaligned_and_negative` -- C++
     /// `read_and_validate_chunk_leader` does NOT reject a misaligned `y` by
     /// itself; it computes a slot via truncating division and leaves the
-    /// "does this match what I expected" check to the caller (S-05). A
+    /// "does this match what I expected" check to the caller. A
     /// misaligned `y` therefore now returns `Ok` with the TRUNCATED slot
     /// (`5 / 16 == 0`, matching C's `/`), not an `Err` -- misalignment is
     /// still caught, just one level up, by whichever caller compares the
@@ -881,7 +881,7 @@ mod tests {
         out.extend_from_slice(payload);
     }
 
-    /// S-09(a)+(d) (round-4 audit, team-lead sign-off): a 2-part multipart
+    /// A 2-part multipart
     /// file where part 0's MIDDLE chunk has been tampered (its `y` field
     /// overwritten with garbage, so its leader fails to parse) while its
     /// FIRST and LAST chunks are intact, and part 1's table is fully zeroed
@@ -954,7 +954,7 @@ mod tests {
         assert_eq!(part0_offsets, vec![0, 16, 32], "part 0's still-valid slots must survive");
 
         // Part 1: fully reconstructed from scratch, despite part 0's damage —
-        // the S-09(d) property. The OLD interleaved-sweep design would leave
+        // the per-part reconstruction property. The OLD interleaved-sweep design would leave
         // this at [0, 0] (never even attempted).
         assert_eq!(
             part1_offsets,

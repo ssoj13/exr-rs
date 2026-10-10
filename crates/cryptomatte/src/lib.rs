@@ -1,6 +1,5 @@
 //! Cryptomatte helpers for exr-rs — decode and encode ID mattes.
 //!
-//! Design: `docs/history/specs/2026-08-10-cryptomatte-design.md`.
 //! Hashing uses [`murmur3::x86_32`]; EXR I/O uses [`exr_core`].
 
 #![deny(missing_docs)]

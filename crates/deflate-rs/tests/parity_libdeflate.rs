@@ -1,4 +1,4 @@
-//! Phase 2, Wave 6 — C libdeflate byte-exact golden-parity test for `deflate-rs`.
+//! C libdeflate byte-exact golden-parity test for `deflate-rs`.
 //!
 //! Reads the committed `tests/parity/golden.txt` (produced by the C libdeflate
 //! oracle via `cargo run -p xtask -- parity-deflate`), reproduces the SAME

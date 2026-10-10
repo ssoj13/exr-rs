@@ -27,8 +27,7 @@
 //! # Better than the C++: deep tile requests
 //! `readDeepTile` (`ImfCheckFile.cpp:698`) asks for the wrong tiles, so `exrcheck` rejects valid deep tiled
 //! files with more tile columns than rows (and deep RIPMAP files with a wide-short level). This port asks
-//! for the tile it means to; the difference is pinned in `tests/image_io.rs` and `tests/parity_tool_check.rs`
-//! and reported upstream (`.bughunt/upstream_openexr.md` section 4).
+//! for the tile it means to; the difference is pinned in `tests/image_io.rs` and `tests/parity_tool_check.rs`.
 //!
 //! # Process-global limits
 //! `runChecks` temporarily changes process-wide limits (`Header` max image / tile size,
@@ -1076,7 +1075,7 @@ fn read_deep_tile<T: DeepTileIn>(inp: &mut T, opts: CheckOpts, guard: Guard) -> 
                         // `[min (x, y), max (x, y)]` squared, which do not exist whenever `max (x, y)` reaches the
                         // number of tile columns or rows: `exrcheck` calls every deep tiled file with more tile
                         // columns than rows, and every deep RIPMAP file with a level with more rows than columns,
-                        // bad. Upstream report: `.bughunt/upstream_openexr.md` section 4.
+                        // bad.
                         sc.set_active_window(&rect)?;
                         if inp.counts(x, y, lx, ly, &mut sc.bytes).is_err() {
                             flag!(lx, ly, false);
@@ -1143,8 +1142,7 @@ fn read_deep_tile<T: DeepTileIn>(inp: &mut T, opts: CheckOpts, guard: Guard) -> 
 /// Deep data without them is perfectly valid (ids, positions, ...); `exrcheck` calls it bad because it takes
 /// any exception of the flat readers for damage (`ImfCheckFile.cpp:898`, `:1176`, `:1189`, where only
 /// deep tiled parts are expected to throw). Better than the C++: such parts are not read through the flat
-/// readers here (the deep readers still check them); a corrupt one is still bad. Reported upstream in
-/// `openexr_bug.md`.
+/// readers here (the deep readers still check them); a corrupt one is still bad.
 fn cannot_flatten(h: &Header) -> bool {
     Kind::of(h).is_ok_and(|k| k == Kind::DeepScan)
         && h.channels().is_ok_and(|c| c.find_channel("Z").is_none() || c.find_channel("A").is_none())

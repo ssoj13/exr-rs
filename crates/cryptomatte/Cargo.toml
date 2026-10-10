@@ -1,5 +1,4 @@
 # Cryptomatte decode (and encode) on top of exr-core.
-# Spec: docs/history/specs/2026-08-10-cryptomatte-design.md
 [package]
 name = "cryptomatte"
 authors.workspace = true

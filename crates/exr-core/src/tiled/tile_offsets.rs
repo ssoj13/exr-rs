@@ -196,7 +196,7 @@ impl TileOffsets {
                     && self.in_row_bounds(0, dy, dx)
             }
             LevelMode::MipmapLevels => {
-                // T-11 (round 4 tiled audit, P1): MIPMAP tiles always have
+                // MIPMAP tiles always have
                 // lx == ly; the only real caller of this function is the
                 // shared reconstruction sweep's slot oracle
                 // (`chunk::offsets::tile_slot`), which validates a chunk
@@ -761,7 +761,7 @@ mod tests {
         assert!(!t.is_valid_tile(-1, 0, 0, 0)); // negative
     }
 
-    /// T-11 (round 4 tiled audit) — a MIPMAP leader with `lx != ly` must be
+    /// A MIPMAP leader with `lx != ly` must be
     /// rejected by `is_valid_tile`, the reconstruction sweep's slot oracle
     /// (`chunk::offsets::tile_slot`). Before the fix a bogus `(0, 0, 1, 0)`
     /// leader was accepted into the level-1 (lx=1) slot for tile (0,0),

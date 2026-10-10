@@ -1,4 +1,4 @@
-//! plan4 V1 — byte-exact parity vs C libdeflate on realistic EXR-scale
+//! Byte-exact parity vs C libdeflate on realistic EXR-scale
 //! inputs (100 KiB - 8 MiB), not just the 6 small (max 70000 B) fixed
 //! inputs `tests/parity_libdeflate.rs` uses.
 //!

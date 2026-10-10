@@ -394,7 +394,7 @@ mod tests {
         assert_eq!(Compression::from_name("unknown"), None);
     }
 
-    /// C-17 — `from_name` must be case-insensitive, matching C++ 3.4.15
+    /// `from_name` must be case-insensitive, matching C++ 3.4.15
     /// `getCompressionIdFromName` (lowercases the name before lookup).
     #[test]
     fn from_name_case_insensitive() {
@@ -404,7 +404,7 @@ mod tests {
         assert_eq!(Compression::from_name("Htj2k256"), Some(Compression::Htj2k256));
     }
 
-    /// C-16 follow-up — `description()` mirrors `getCompressionDescriptionFromId`'s
+    /// `description()` mirrors `getCompressionDescriptionFromId`'s
     /// `"<name>: <desc>"` format, and reports the unknown-id message for `Invalid`.
     #[test]
     fn description_format() {
@@ -412,7 +412,7 @@ mod tests {
         assert_eq!(Compression::Invalid.description(), "unrecognized compression method");
     }
 
-    /// C-16 follow-up — `names_string` joins every real codec's name in enum
+    /// `names_string` joins every real codec's name in enum
     /// order, matching `getCompressionNamesString`.
     #[test]
     fn names_string_joins_all_codecs() {

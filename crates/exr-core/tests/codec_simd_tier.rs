@@ -1,4 +1,4 @@
-//! U16 (engagement audit): the ZIP/RLE decode-side predictor
+//! Engagement check: the ZIP/RLE decode-side predictor
 //! (`compressor::predictor`) runs through `codec-simd`, whose dispatcher picks
 //! a SIMD body per CPU. Byte identity against the scalar reference cannot tell
 //! whether a SIMD body was selected at all, so this checks the dispatch table

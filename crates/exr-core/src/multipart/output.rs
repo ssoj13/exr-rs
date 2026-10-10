@@ -26,9 +26,9 @@
 //! (dataWindow.max.y - dataWindow.min.y + linesInBuffer) / linesInBuffer`
 //! (C++ `ImfMisc.cpp::getChunkOffsetTableSize`).
 //!
-//! W8-1 wires the **scanline** part write path end-to-end via
+//! The **scanline** part write path is wired end-to-end via
 //! [`OutputFile::from_part`](crate::scanline::OutputFile::from_part).  Tiled /
-//! deep part writers are W8-2; the `partNumber` chunk seam they will reuse
+//! deep part writers use the same `partNumber` chunk seam, which
 //! lives in the single-part chunk writers (one `part_number: Option<i32>` flag,
 //! not a parallel copy).
 //!
@@ -55,7 +55,7 @@ use super::part::{
 };
 
 /// Per-part bookkeeping recorded while the container writes the prologue —
-/// port of the parts of `OutputPartData` that W8-1 needs.
+/// port of the parts of `OutputPartData` this writer needs.
 struct PartData {
     /// The (type-checked) part header.
     header: Header,
@@ -65,7 +65,7 @@ struct PartData {
     /// File position of this part's reserved (zero-filled) chunk offset table —
     /// C++ `OutputPartData::chunkOffsetTablePosition`.
     chunk_offset_table_position: u64,
-    /// S-16 (round-4 audit, ownership-inversion design): the persisted
+    /// Ownership inversion (the file owns per-part state): the persisted
     /// scanline writer STATE for this part, built lazily on the first
     /// [`MultiPartOutputFile::output_part`] call and kept across every
     /// subsequent call — mirrors C++'s `_outputFiles` cache
@@ -75,27 +75,27 @@ struct PartData {
     /// `missingScanLines` / any partial line-buffer block) on every call.
     /// `None` for a non-scanline part, or before the part's first access.
     scanline_state: Option<OutputFileState>,
-    /// S-16 mirror for **tiled** parts (round 4 continuation, same design as
+    /// The same for **tiled** parts (same design as
     /// `scanline_state` above): the persisted [`TiledOutputFileState`] for
     /// this part, built lazily on the first
     /// [`MultiPartOutputFile::tiled_output_part`] call and kept across every
-    /// subsequent call, so `tile_map`/`next_tile_to_write` (T-13's
+    /// subsequent call, so `tile_map`/`next_tile_to_write` (the
     /// out-of-order buffering) survive an interleaved-parts write sequence
     /// instead of resetting. `None` for a non-tiled part, or before the
     /// part's first access.
     tiled_state: Option<TiledOutputFileState>,
-    /// S-16 mirror for **deep scanline** parts (round 4 continuation, same
+    /// The same for **deep scanline** parts (same
     /// design as `scanline_state` above): the persisted
     /// [`DeepScanLineOutputFileState`] for this part, built lazily on the
     /// first [`MultiPartOutputFile::deep_scanline_output_part`] call and kept
     /// across every subsequent call. `None` for a non-deep-scanline part, or
     /// before the part's first access.
     deep_scanline_state: Option<DeepScanLineOutputFileState>,
-    /// S-16 mirror for **deep tiled** parts (round 4 continuation, same
+    /// The same for **deep tiled** parts (same
     /// design as `tiled_state` above): the persisted
     /// [`DeepTiledOutputFileState`] for this part, built lazily on the first
     /// [`MultiPartOutputFile::deep_tiled_output_part`] call and kept across
-    /// every subsequent call, so D-11's `tile_map`/`next_tile_to_write`
+    /// every subsequent call, so the `tile_map`/`next_tile_to_write`
     /// out-of-order tile buffering survives an interleaved-parts write
     /// sequence instead of resetting. `None` for a non-deep-tiled part, or
     /// before the part's first access.
@@ -105,7 +105,7 @@ struct PartData {
     /// `OutputPartData::previewPosition`, captured from
     /// `headers[i].writeTo(..)`'s return value while writing the header list
     /// (`ImfMultiPartOutputFile.cpp:474-477`). Fed to each writer state's
-    /// `from_part_with_preview` constructor (M-07, round-4 multipart audit)
+    /// `from_part_with_preview` constructor
     /// so `update_preview_image` works on a multipart part exactly as it
     /// does on a standalone file.
     preview_position: u64,
@@ -133,13 +133,11 @@ pub struct MultiPartOutputFile<'a> {
     /// `OutputPartData::multipart` (`ImfMultiPartOutputFile.cpp:185-186`,
     /// `:237-238`).  Only then does a chunk carry the `partNumber` (i32 LE)
     /// prefix (`ImfOutputFile.cpp:745,256`); a single-header file must be
-    /// byte-identical to the single-part writer (S-02 fix).
+    /// byte-identical to the single-part writer.
     is_multi_part: bool,
-    /// W3.9 phase B: captured once at construction (C++ `numThreads`),
+    /// Captured once at construction (C++ `numThreads`),
     /// forwarded to each part's `*_mt` constructor when its writer state is
-    /// first built. Effective on scanline and tiled parts; deep parts still
-    /// write serially regardless (tracked, not silent —
-    /// `.bughunt/progress_w39b.md`).
+    /// first built (scanline, tiled and deep parts alike).
     num_threads: Option<i32>,
 }
 
@@ -174,7 +172,7 @@ impl<'a> MultiPartOutputFile<'a> {
     }
 
     /// Same as [`Self::new`], with an explicit per-file `numThreads`
-    /// override (W3.9 phase B; `None` behaves exactly like [`Self::new`]).
+    /// override (`None` behaves exactly like [`Self::new`]).
     pub fn with_num_threads(
         stream: &'a mut dyn OStream,
         headers: &[Header],
@@ -202,7 +200,7 @@ impl<'a> MultiPartOutputFile<'a> {
     }
 
     /// Same as [`Self::new_with_override`], with an explicit `num_threads`
-    /// override (W3.9 phase B).
+    /// override.
     pub fn new_with_override_mt(
         stream: &'a mut dyn OStream,
         headers: &[Header],
@@ -227,7 +225,7 @@ impl<'a> MultiPartOutputFile<'a> {
         for h in headers {
             let mut hdr = h.clone();
 
-            // M-09 (round-4 audit): C++ `ImfMultiPartOutputFile.cpp:108-113` runs
+            // C++ `ImfMultiPartOutputFile.cpp:108-113` runs
             // part 0 (and every part) through `sanityCheck(.., isMultiPart)`
             // FIRST -- which is what actually rejects a missing `type` on a
             // multipart part, with the message "Headers in a multipart file
@@ -304,7 +302,7 @@ impl<'a> MultiPartOutputFile<'a> {
         // C++ Data::writeHeadersToFile: each header writes its attributes; a
         // TILEDIMAGE part is written with `multiPart == true` (we always pass
         // the attribute-only writer, which is the multipart-correct form).
-        // M-07 (round-4 multipart audit): C++ captures
+        // C++ captures
         // `parts[i]->previewPosition = headers[i].writeTo(..)` here
         // (`ImfMultiPartOutputFile.cpp:474-477`) -- `write_attributes_to`'s
         // return value is the equivalent position, previously discarded.
@@ -373,7 +371,7 @@ impl<'a> MultiPartOutputFile<'a> {
     /// `MultiPartOutputFile::getOutputPart<OutputFile>(int)`.
     ///
     /// Returns an [`OutputPartWriter`] view over this part's PERSISTED writer
-    /// state (S-16: built once, on the first call, and kept across every
+    /// state (built once, on the first call, and kept across every
     /// later call — mirroring C++'s per-part `_outputFiles` cache,
     /// `ImfMultiPartOutputFile.cpp:313-321`) and this file's stream. Drive it
     /// with `set_frame_buffer` + `write_pixels` exactly like a single-part
@@ -443,11 +441,11 @@ impl<'a> MultiPartOutputFile<'a> {
     /// `tiledimage` part; propagates the [`TiledOutputFile::from_part`] error.
     ///
     /// Returns a [`TiledOutputPartWriter`] view over this part's PERSISTED
-    /// write state (S-16, round 4 continuation — mirrors
+    /// write state (mirrors
     /// [`Self::output_part`]'s scanline design exactly): built once, on the
     /// first call, and kept across every later call, so writes interleaved
     /// across parts resume correctly — a fresh `tiled_output_part(0)` no
-    /// longer rebuilds (and resets T-13's `tile_map`/`next_tile_to_write`)
+    /// longer rebuilds (and resets the `tile_map`/`next_tile_to_write`)
     /// the whole write state.
     pub fn tiled_output_part(&mut self, n: i32) -> Result<TiledOutputPartWriter<'_>> {
         let (header, pos) = self.part_typed(n, header::TILED_IMAGE)?;
@@ -474,7 +472,7 @@ impl<'a> MultiPartOutputFile<'a> {
     /// `MultiPartOutputFile::getOutputPart<DeepScanLineOutputFile>(int)`.
     ///
     /// Returns a [`DeepScanLineOutputPartWriter`] view over this part's
-    /// PERSISTED write state (S-16, round 4 continuation — mirrors
+    /// PERSISTED write state (mirrors
     /// [`Self::output_part`]'s scanline design exactly): built once, on the
     /// first call, and kept across every later call, so writes interleaved
     /// across parts resume correctly.
@@ -509,8 +507,8 @@ impl<'a> MultiPartOutputFile<'a> {
     /// `MultiPartOutputFile::getOutputPart<DeepTiledOutputFile>(int)`.
     ///
     /// Returns a [`DeepTiledOutputPartWriter`] view over this part's
-    /// PERSISTED write state (S-16, round 4 continuation — mirrors
-    /// [`Self::tiled_output_part`]'s design exactly, including D-11's
+    /// PERSISTED write state (mirrors
+    /// [`Self::tiled_output_part`]'s design exactly, including the
     /// `tile_map`/`next_tile_to_write` out-of-order tile buffering
     /// surviving across calls).
     ///
@@ -614,7 +612,7 @@ fn write_magic_and_version(o: &mut dyn OStream, headers: &[Header]) -> Result<()
     let mut ver = version::EXR_VERSION;
 
     if headers.len() == 1 {
-        // M-05 (round-4 audit): C++ `ImfGenericOutputFile.cpp:69` calls
+        // C++ `ImfGenericOutputFile.cpp:69` calls
         // `headers[0].type()` UNCONDITIONALLY here (not guarded by
         // `hasType()`), and `Header::type()` throws `ArgExc` when the `type`
         // attribute is absent (`ImfHeader.cpp:762-765`) — so a single-header
@@ -695,7 +693,7 @@ pub fn check_shared_attributes_values(src: &Header, dst: &Header) -> Result<Vec<
 /// `MultiPartOutputFile::Data::overrideSharedAttributesValues`
 /// (`ImfMultiPartOutputFile.cpp:334-379`).
 ///
-/// M-10 (round-4 audit): C++ looks each attribute up with
+/// C++ looks each attribute up with
 /// `findTypedAttribute<Box2iAttribute|FloatAttribute|TimeCodeAttribute|ChromaticitiesAttribute>`,
 /// which returns `None` both when `src` lacks the name AND when `src` holds it
 /// under a *different* attribute type. Either way the fallback is the same:
@@ -757,8 +755,8 @@ pub(crate) fn get_chunk_offset_table_size(h: &Header, tiled: bool) -> Result<i32
     // Known type: tiled vs scanline.  (`deeptile`/`tiledimage` are tiled and
     // use the tiled-grid sizing; `deepscanline`/`scanlineimage` use the
     // scanline sizing.)  C++ `getChunkOffsetTableSize` →
-    // `getTiledChunkOffsetTableSize` for a tiled part (W8-2 unifies tiled +
-    // deep into the same container).
+    // `getTiledChunkOffsetTableSize` for a tiled part (tiled +
+    // deep share the same container).
     if tiled {
         return crate::tiled::misc::get_tiled_chunk_offset_table_size(h);
     }
@@ -775,7 +773,7 @@ pub(crate) fn get_chunk_offset_table_size(h: &Header, tiled: bool) -> Result<i32
 /// Read-side chunk-offset-table sizing — port of `OpenEXRCore/parse_header.c`'s
 /// unknown-storage handling (~2477-2491, adopted at 2618-2619).
 ///
-/// This is the M-04 (round-4 audit) fix: unlike the WRITE-side
+/// Unlike the WRITE-side
 /// [`get_chunk_offset_table_size`] (`ImfMisc.cpp::getChunkOffsetTableSize`,
 /// which throws `ArgExc` for an unsupported `type` with no `chunkCount`), the
 /// *read* path treats a part whose storage this build does not recognise

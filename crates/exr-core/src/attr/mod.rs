@@ -3,7 +3,7 @@
 //! `ImfDoubleAttribute.h`, `ImfStringAttribute.h/.cpp`,
 //! `ImfStringVectorAttribute.h/.cpp`, `ImfFloatVectorAttribute.h/.cpp`,
 //! `ImfBoxAttribute.h/.cpp`, `ImfVecAttribute.h/.cpp`,
-//! `ImfMatrixAttribute.h/.cpp`), and the Wave 3a support types
+//! `ImfMatrixAttribute.h/.cpp`), and the support types
 //! (`ImfCompression.*`, `ImfLineOrder.*`, `ImfEnvmap.*`, `ImfDeepImageState.*`,
 //! `ImfTileDescription.*`, `ImfChromaticities.*`, `ImfKeyCode.*`,
 //! `ImfTimeCode.*`, `ImfRational.*`).
@@ -39,10 +39,10 @@
 
 pub mod attribute;
 
-// C-08: byte-exact name type (attribute/channel/part identity), port of ImfName.h.
+// Byte-exact name type (attribute/channel/part identity), port of ImfName.h.
 pub mod name;
 
-// Wave 3a support-type modules
+// Support-type modules
 pub mod chromaticities;
 pub mod compression;
 pub mod deep_image_state;
@@ -53,23 +53,23 @@ pub mod rational;
 pub mod tile_description;
 pub mod time_code;
 
-// Wave 3b modules: channels, preview image, opaque catch-all, ID manifest.
+// Channels, preview image, opaque catch-all, ID manifest.
 pub mod channel_list;
 pub mod id_manifest;
 pub mod opaque;
 pub mod preview_image;
 
-// OpenEXR 3.4 addition: the `"bytes"` attribute (C-11).
+// OpenEXR 3.4 addition: the `"bytes"` attribute.
 pub mod bytes_attr;
 
-// `framesPerSecond` convenience functions (C-16).
+// `framesPerSecond` convenience functions.
 pub mod frames_per_second;
 
 // Channel grouping into Nuke-style layers (shared by exr-gpu upload + exr-view UI).
 pub mod layers;
 
 // ---------------------------------------------------------------------------
-// Re-exports from the base attribute module (Wave 2)
+// Re-exports from the base attribute module
 // ---------------------------------------------------------------------------
 
 pub use attribute::{
@@ -81,7 +81,7 @@ pub use attribute::{
 };
 
 // ---------------------------------------------------------------------------
-// Re-exports from Wave 3a support types
+// Re-exports from the support types
 // ---------------------------------------------------------------------------
 
 pub use chromaticities::{Chromaticities, ChromaticitiesAttribute};
@@ -97,7 +97,7 @@ pub use tile_description::{
 pub use time_code::{Packing as TimeCodePacking, TimeCode, TimeCodeAttribute};
 
 // ---------------------------------------------------------------------------
-// Re-exports from Wave 3b types
+// Re-exports from the channel / preview / opaque / ID-manifest types
 // ---------------------------------------------------------------------------
 
 pub use channel_list::{

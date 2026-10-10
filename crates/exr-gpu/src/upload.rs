@@ -451,7 +451,7 @@ mod tests {
         assert!(matches!(check_uniform_type(&src, &layer), Err(GpuError::FormatMismatch(_))));
     }
 
-    /// S6: a `Layer` from a DIFFERENT part (indices past this source's channel
+    /// A `Layer` from a DIFFERENT part (indices past this source's channel
     /// list) must be a clean error, not an out-of-bounds index.
     #[test]
     fn foreign_layer_is_rejected_not_indexed() {

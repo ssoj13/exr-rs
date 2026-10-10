@@ -1,5 +1,5 @@
 //! Port of OpenEXR `ImfTestFile.h/.cpp` — quick "is this an OpenEXR file, and
-//! is it tiled/deep/multipart" probes (C-16).
+//! is it tiled/deep/multipart" probes.
 //!
 //! C++ never throws from these: any I/O failure (missing file, truncated
 //! read, …) is caught and reported as `false`. This port mirrors that by
@@ -36,7 +36,7 @@ pub struct ExrFileProbe {
 ///
 /// Note this only reads two `i32`s (8 bytes) and does not validate the
 /// version number or flag combination the way [`version::validate_version_word`]
-/// does (C-01) — it is a cheap probe, exactly as lightweight as C++'s.
+/// does — it is a cheap probe, exactly as lightweight as C++'s.
 pub fn is_open_exr_file_stream(stream: &mut dyn IStream) -> ExrFileProbe {
     let probe = (|| -> crate::error::Result<ExrFileProbe> {
         let magic = xdr::read_i32(stream)?;
