@@ -13,6 +13,9 @@ drop-in `OpenEXR` Python module.
 ![Edition](https://img.shields.io/badge/edition-2024-orange)
 ![FFI](https://img.shields.io/badge/FFI-none-success)
 ![Parity](https://img.shields.io/badge/C%2B%2B%20parity-108%2F108-success)
+[![Docs](https://img.shields.io/badge/docs-mdBook-blue)](https://ssoj13.github.io/exr-rs/)
+
+**[Documentation](https://ssoj13.github.io/exr-rs/)** · **[Releases](https://github.com/ssoj13/exr-rs/releases)**
 
 </div>
 
