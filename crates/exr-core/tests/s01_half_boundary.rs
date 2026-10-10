@@ -1,0 +1,196 @@
+//! S-01 (round-4 audit) oracle-verified boundary test: FLOAT->HALF and
+//! UINT->HALF conversion at and around HALF_MAX, checked against a real C++
+//! OpenEXR 3.4 oracle run (`tests/parity/oracle.cpp`'s `read-half` mode:
+//! every channel read into a HALF slice regardless of its on-disk type,
+//! exercising C++'s `OpenEXRCore/unpack.c` -> `internal_coding.h::
+//! float_to_half`/`uint_to_half` conversion paths directly).
+//!
+//! This settles the round-3 `W3.3` claim (that FLOAT overflows to +/-inf at
+//! HALF_MAX, same as UINT) by a REAL oracle run rather than by reading alone:
+//! that claim was WRONG for FLOAT. The two source types genuinely have
+//! different overflow thresholds in C++ 3.4:
+//! * **FLOAT -> HALF** overflows to +/-inf only at `|f| >= 65520`
+//!   (`|bits| > 0x477fefff`, Imath's round-to-nearest `imath_float_to_half`).
+//!   `65504 <= |f| < 65520` rounds to the largest finite half.
+//! * **UINT -> HALF** overflows to +inf as soon as `u > 65504` (HALF_MAX) --
+//!   `internal_coding.h::uint_to_half`, a plain threshold, not a rounding
+//!   boundary.
+//!
+//! The C++ oracle output below is the COMMITTED fixture (`EXPECTED_FLOAT_BITS`
+//! / `EXPECTED_UINT_BITS`), captured from a real `oracle.exe read-half` run
+//! against files written by our own (trusted, `NO_COMPRESSION`, byte-exact)
+//! writer -- this test is then oracle-free once the fixture is committed,
+//! matching the project's parity-gate pattern (see `tests/parity/README.md`
+//! "Committed C++ decode dumps"). It re-derives the fixture from a live
+//! oracle run whenever one is available (`EXR_ORACLE_EXE` or the auto-built
+//! `tests/parity/oracle.exe`) to catch any future divergence, and always
+//! checks our OWN reader against the same fixture so a regression in
+//! `misc.rs::copy_into_frame_buffer` is caught with no oracle present at all.
+
+use std::path::Path;
+use std::process::Command;
+
+use exr_core::attr::{Channel, ChannelList, ChannelListAttribute, Compression, LineOrder, PixelType};
+use exr_core::frame_buffer::{FrameBuffer, Slice};
+use exr_core::header::Header;
+use exr_core::io::{MemIStream, MemOStream};
+use exr_core::scanline::{InputFile, OutputFile};
+
+use imath_rs::V2f;
+
+mod support;
+
+/// Boundary FLOAT values, in file order.
+const FLOAT_VALS: [f32; 6] = [65504.0, 65505.0, 65519.0, 65520.0, 70000.0, -65505.0];
+/// Committed C++ oracle fixture: `oracle.exe read-half` on a FLOAT channel
+/// carrying `FLOAT_VALS`, one HALF-bits hex record per pixel.
+const EXPECTED_FLOAT_BITS: [u16; 6] = [0x7bff, 0x7bff, 0x7bff, 0x7c00, 0x7c00, 0xfbff];
+
+/// Boundary UINT values, in file order.
+const UINT_VALS: [u32; 6] = [65504, 65505, 65519, 65520, 70000, 0];
+/// Committed C++ oracle fixture: `oracle.exe read-half` on a UINT channel
+/// carrying `UINT_VALS`.
+const EXPECTED_UINT_BITS: [u16; 6] = [0x7bff, 0x7c00, 0x7c00, 0x7c00, 0x7c00, 0x0000];
+
+/// Write a single-row, single-channel `NO_COMPRESSION` scanline EXR of
+/// `type_` carrying `raw_le_values` (already-serialized native-endian bytes,
+/// one sample per column) to `path`.
+fn write_single_channel(path: &Path, type_: PixelType, values: &[u8], width: i32) {
+    let mut h = Header::with_dimensions(
+        width,
+        1,
+        1.0,
+        V2f { x: 0.0, y: 0.0 },
+        1.0,
+        LineOrder::IncreasingY,
+        Compression::NoCompression,
+    )
+    .unwrap();
+    let mut cl = ChannelList::new();
+    cl.insert("Z", Channel::new(type_, 1, 1, true)).unwrap();
+    h.insert("channels", ChannelListAttribute::new(cl)).unwrap();
+
+    let mut fb = FrameBuffer::new();
+    let size = exr_core::misc::pixel_type_size(type_).unwrap();
+    fb.insert(
+        "Z",
+        Slice::new(type_, 0, size, (width as usize) * size, 1, 1, 0.0, false, false).unwrap(),
+    )
+    .unwrap();
+
+    let mut stream = MemOStream::new();
+    {
+        let mut of = OutputFile::new(&mut stream, &h).unwrap();
+        of.set_frame_buffer(&fb).unwrap();
+        of.write_pixels(values, 1).unwrap();
+    }
+    std::fs::write(path, stream.data()).unwrap();
+}
+
+fn f32_bytes(vals: &[f32]) -> Vec<u8> {
+    vals.iter().flat_map(|v| v.to_ne_bytes()).collect()
+}
+fn u32_bytes(vals: &[u32]) -> Vec<u8> {
+    vals.iter().flat_map(|v| v.to_ne_bytes()).collect()
+}
+
+/// Read `path`'s single `Z` channel into a HALF slice with OUR reader and
+/// return the bits, one per pixel -- the exact codepath under test
+/// (`misc::copy_into_frame_buffer`, `(PixelType::Half, PixelType::{Float,Uint})`).
+fn ours_read_half(path: &Path, width: i32) -> Vec<u16> {
+    let bytes = std::fs::read(path).unwrap();
+    let mut is = MemIStream::new(bytes);
+    let mut inf = InputFile::new(&mut is).unwrap();
+    let mut fb = FrameBuffer::new();
+    fb.insert(
+        "Z",
+        Slice::new(PixelType::Half, 0, 2, (width as usize) * 2, 1, 1, 0.0, false, false).unwrap(),
+    )
+    .unwrap();
+    inf.set_frame_buffer(&fb).unwrap();
+    let mut out = vec![0u8; (width as usize) * 2];
+    inf.read_pixels(0, 0, &mut out).unwrap();
+    out.as_chunks::<2>().0.iter()
+        .map(|c| u16::from_ne_bytes(*c))
+        .collect()
+}
+
+/// Run `oracle.exe read-half <path>` and return the HALF bits it printed for
+/// channel `Z`, in x order.
+fn oracle_read_half(oracle: &Path, path: &Path) -> Vec<u16> {
+    let output = Command::new(oracle)
+        .args(["read-half", path.to_str().unwrap()])
+        .output()
+        .expect("run oracle read-half");
+    assert!(
+        output.status.success(),
+        "oracle read-half failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut bits = Vec::new();
+    for line in stdout.lines() {
+        // "PIX Z <x> <y> <hex>"
+        let mut it = line.split_whitespace();
+        if it.next() != Some("PIX") {
+            continue;
+        }
+        let _chan = it.next();
+        let _x = it.next();
+        let _y = it.next();
+        let hex = it.next().expect("PIX line missing bits field");
+        bits.push(u16::from_str_radix(hex, 16).expect("PIX bits must be hex"));
+    }
+    bits
+}
+
+#[test]
+fn s01_float_to_half_boundary_matches_oracle_and_our_reader() {
+    let dir = std::env::temp_dir();
+    let path = dir.join("exr_core_s01_float.exr");
+    write_single_channel(&path, PixelType::Float, &f32_bytes(&FLOAT_VALS), FLOAT_VALS.len() as i32);
+
+    // Our own reader must match the committed C++ oracle fixture.
+    let ours = ours_read_half(&path, FLOAT_VALS.len() as i32);
+    assert_eq!(
+        ours, EXPECTED_FLOAT_BITS,
+        "our FLOAT->HALF conversion diverges from the committed C++ 3.4 fixture"
+    );
+
+    // When a live oracle is available, re-derive the fixture and confirm it
+    // has not silently drifted from what is committed above.
+    if let Some(oracle) = support::oracle_or_skip("s01_float_to_half_boundary_matches_oracle") {
+        let live = oracle_read_half(&oracle, &path);
+        assert_eq!(
+            live, EXPECTED_FLOAT_BITS,
+            "live oracle result no longer matches the committed S-01 fixture -- \
+             update EXPECTED_FLOAT_BITS from a fresh `oracle.exe read-half` run"
+        );
+    }
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn s01_uint_to_half_boundary_matches_oracle_and_our_reader() {
+    let dir = std::env::temp_dir();
+    let path = dir.join("exr_core_s01_uint.exr");
+    write_single_channel(&path, PixelType::Uint, &u32_bytes(&UINT_VALS), UINT_VALS.len() as i32);
+
+    let ours = ours_read_half(&path, UINT_VALS.len() as i32);
+    assert_eq!(
+        ours, EXPECTED_UINT_BITS,
+        "our UINT->HALF conversion diverges from the committed C++ 3.4 fixture"
+    );
+
+    if let Some(oracle) = support::oracle_or_skip("s01_uint_to_half_boundary_matches_oracle") {
+        let live = oracle_read_half(&oracle, &path);
+        assert_eq!(
+            live, EXPECTED_UINT_BITS,
+            "live oracle result no longer matches the committed S-01 fixture -- \
+             update EXPECTED_UINT_BITS from a fresh `oracle.exe read-half` run"
+        );
+    }
+
+    std::fs::remove_file(&path).ok();
+}

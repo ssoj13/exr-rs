@@ -1,0 +1,154 @@
+# =============================================================================
+# exr-view — lightweight EXR viewer (Rust / egui / wgpu)
+# =============================================================================
+#
+# A GPU-first viewer for OpenEXR files, dogfooding the workspace `exr-core`
+# reader. winit + wgpu 29 + egui_dock window shell; no USD / 3-D / material /
+# tile-atlas layers — only the 2-D image window.
+#
+# wgpu is MANDATORY (always-on), NOT an optional feature — the viewer is
+# wgpu-only by operator mandate (max GPU processing, no CPU fallback path).
+#
+# VW-1 (this wave): de-risk the dependency stack + stand up an empty docked
+# window that COMPILES and runs. Later waves add the flat image viewport,
+# sequence playback, and scopes (see CLAUDE.md / PLAYER_plan.md).
+# =============================================================================
+
+[package]
+authors.workspace = true
+name = "exr-view"
+description = "Lightweight GPU EXR viewer (egui_dock + wgpu) over exr-core"
+keywords = ["exr", "openexr", "viewer", "wgpu", "vfx"]
+categories = ["multimedia::images", "rendering", "command-line-utilities"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Workspace EXR codecs — the load seam dogfoods these (wired now, used by VW-2+).
+exr-core = { path = "../exr-core" }
+# The GPU bridge. The viewer keeps its OWN persistent display textures (exr-gpu
+# creates a fresh texture per upload, which is exactly the VRAM churn `DisplayGpu`
+# exists to avoid), but the CHECKED SIZING is shared: `exr_gpu::UploadLayout` is
+# the one place width/height/row/byte limits are validated before `create_texture`.
+exr-gpu = { path = "../exr-gpu" }
+imath-rs = { path = "../imath-rs" }
+# Tile production off the UI thread (`tiles::view`); the workspace pool exr-core uses too.
+rayon.workspace = true
+cryptomatte = { path = "../cryptomatte" }
+
+# Sequence detector — the operator's own scanseq-rs, consumed from github as
+# the single source of truth (no longer vendored under `crates/scanseq`).
+# Replaces the hand-rolled `sequence.rs`; fixes the unpadded
+# `heart.N.exr` -> `heart.006.exr` mis-detection. `default-features = false`
+# keeps it lib-clean (no clap/indicatif/env_logger CLI deps).
+scanseq = { git = "ssh://git@github.com/ssoj13/scanseq-rs.git", branch = "main", default-features = false }
+
+# Async single-sequence frame-cache engine (pull pool + byte-budget LRU + debounce).
+# Shared as its own repo so EXR/EXV/H264/VDB viewers use the same cache engine.
+scancache = { git = "ssh://git@github.com/ssoj13/scancache-rs.git", branch = "main" }
+
+# GUI stack — versions pinned together so a single wgpu/naga copy builds:
+# wgpu 30 ↔ egui 0.36 ↔ egui-wgpu 0.36 ↔ egui_dock 0.21.
+egui = "0.36"
+egui-display = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+# Shared widget set (ssoj13/egui-widgets-rs, the one home of our egui widgets, also used by
+# Playa and vfx-view): design tokens (fonts/metrics), the timeline and status bar that started
+# in this viewer, the layer/channel tree, the read-only attribute grid, the command-table menu
+# bar and the corner HUD. Pinned to egui 0.36 like this crate.
+egui-widgets-config = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+egui-timeline = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+egui-statusbar = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+egui-outliner = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+egui-attr-grid = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+egui-menubar = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+egui-hotkeys = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+egui-viewport-hud = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+# The viewport's collapsible control strip (the display dials), tinted collapsible sections
+# (Metadata panel) and the path field with a Browse button (OCIO config).
+egui-viewport-toolbar = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+egui-titlebar = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+egui-slider = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+egui-file-field = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+egui-dock-layout = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+egui-prefs2 = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+# Phosphor icon font (our fork: upstream has no egui 0.36 release), the icon set the widgets use.
+egui-phosphor = { git = "ssh://git@github.com/ssoj13/egui-phosphor.git", branch = "main" }
+# In-app File > Open dialog (immediate mode, directory listing on a thread), as in Playa.
+egui-file-dialog = "0.15"
+# PNG writer for File > Save view / --screenshot (already in the tree through egui-winit).
+png = "0.18"
+egui-wgpu = "0.36"
+egui-winit = "0.36"
+egui_dock = { version = "0.21", features = ["serde"] }
+wgpu = "30"
+winit = "0.30"
+
+# GPU capability querying (vendored wgpu-29-pinned): max-limits device request
+# (handle large EXRs instead of `Limits::default()`), feature detection
+# (FLOAT32_FILTERABLE), and the startup capability log. Used in `gpu_ctx`.
+wgpu-info = { git = "ssh://git@github.com/ssoj13/gpu-info-rs.git", branch = "main", package = "gpu-info-rs", default-features = false, features = ["wgpu"] }
+
+# wgpu device/surface bring-up + vertex POD bridging.
+pollster = "1.0"
+bytemuck = { version = "1", features = ["derive"] }
+
+# Error propagation (no panics in lib code; bin may eprintln!+exit on init).
+anyhow = "1"
+
+# Logging: the `log` facade across the lib (info/debug/trace at load / GPU /
+# sequence / cache seams; warn/error replace the bare eprintln!s), with the
+# `env_logger` backend initialised once in the `exr-view` BINARY (main.rs).
+log = { workspace = true }
+env_logger = { workspace = true }
+
+# Dock layout (de)serialization for egui_dock's `serde` feature; also drives the
+# viewer config (window geom + controls + recents) in `persist.rs`.
+serde = { version = "1", features = ["derive"] }
+
+# Persistence (`persist.rs`): JSON (de)serialization of the viewer config and the
+# per-OS user-config directory it lives in (`<config>/exr-view/config.json`).
+serde_json = "1"
+dirs = "7"
+
+# Frame-cache memory budget (`app.rs::cache_budget_bytes`): query available RAM
+# so the whole sequence stays resident (decode once, no disk re-reads — the
+# After-Effects model) without OOM. Same crate playa uses for its CacheManager.
+sysinfo = "0.39"
+
+# OpenFX image effects over the shown image (feature `ofx`): ofx-rs's shared application layer
+# (`ofx-runtime`, with the built-in effects linked in) and its egui UI (`ofx-host-egui`: parameter
+# panel, parameter interacts, overlays, questions). On by default.
+ofx-runtime = { git = "ssh://git@github.com/ssoj13/ofx-rs.git", branch = "main", optional = true }
+ofx-host-egui = { git = "ssh://git@github.com/ssoj13/ofx-rs.git", branch = "main", optional = true }
+# Native test effects share the runtime's published OpenFX source.
+ofx = { git = "ssh://git@github.com/ssoj13/ofx-rs.git", branch = "main", optional = true }
+
+# OpenColorIO display transform (`ocio.rs`): vfx-ocio, the OCIO 2.5 port shared with Playa and
+# vfx-view. One `Processor` gives the tile shader's WGSL (`gpu`: `wgsl_prelude` +
+# `GpuOcioResources::build_for`) and the exact CPU twin (`apply_rgba`, rayon via `parallel`).
+# Its wgpu comes through gpu-info-rs, the same git package as `wgpu-info` above: one wgpu.
+vfx-ocio = { git = "ssh://git@github.com/ssoj13/oiio-rs.git", branch = "main", features = ["gpu", "parallel"] }
+
+[dev-dependencies]
+# Unit tests parse and validate every WGSL shader (scopes, colour pass), so an
+# invalid shader fails `cargo test` instead of rendering a blank panel at run
+# time (the naga-24 `let`-array bug did exactly that). Same naga as wgpu 30 links.
+naga = { version = "30", features = ["wgsl-in"] }
+# Locates real images for the loading tests (openexr-images).
+exr-test-data = { workspace = true }
+
+[features]
+default = ["ofx"]
+ofx = ["dep:ofx-runtime", "dep:ofx-host-egui", "dep:ofx"]
+# Run the tests that read the private test image set (`exr-test-data`); off by default.
+test-data = []
+
+# Library only: the viewer ships inside the `exr-rs` binary (the root crate links
+# this crate behind its `viewer` feature and calls `exr_view::run` from
+# `exr-rs view` / `v`). There is no standalone `exr-view` binary.
+[lib]
+name = "exr_view"
+path = "src/exr_view.rs"

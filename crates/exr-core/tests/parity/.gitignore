@@ -1,0 +1,9 @@
+# Build artifacts from `cargo xtask parity-exr` (the C++ OpenEXR oracle). Only
+# the source (oracle.cpp), the committed golden.exr, the README and this file
+# belong in git. golden.exr IS committed (it is the C++-written reference).
+oracle.exe
+oracle.obj
+*.obj
+*.exe
+*.pdb
+*.ilk

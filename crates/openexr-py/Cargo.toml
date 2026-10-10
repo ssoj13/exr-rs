@@ -1,0 +1,56 @@
+# =============================================================================
+# openexr-py — Python bindings for exr-rs (drop-in `OpenEXR` Python module)
+# =============================================================================
+#
+# A PyO3 extension module that reproduces the official OpenEXR Python API 1:1 — so
+# existing `import OpenEXR` code runs unchanged on our pure-Rust core (exr-core +
+# imath-rs) instead of the C++ library. Built with **maturin** (`bootstrap.py b p`).
+#
+# NOT a workspace member (see repo-root Cargo.toml `[workspace] exclude`): a
+# cdylib with pyo3's `extension-module` deliberately does NOT link libpython, which
+# would break `cargo test --workspace` (a test binary needs libpython). It is built
+# in isolation by maturin. It still PATH-depends on the workspace crates, so it
+# tracks them exactly. Full requirements + the parity surface: see CLAUDE.md here.
+# =============================================================================
+
+[package]
+authors = ["Alex Khalyavin <joss13@gmail.com>"]
+name = "openexr-py"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"  # = the workspace's (exr-core uses let chains and is_multiple_of)
+license = "BSD-3-Clause"
+description = "Pure-Rust OpenEXR Python bindings — a drop-in replacement for the OpenEXR Python module"
+keywords = ["exr", "openexr", "python", "pyo3", "vfx"]
+categories = ["multimedia::images", "api-bindings"]
+repository = "https://github.com/ssoj13/exr-rs"
+publish = false
+
+[lib]
+# `name = "OpenEXR"` makes the compiled artifact `OpenEXR.pyd` / `OpenEXR.so`, so
+# the Python import name is exactly `OpenEXR` (drop-in). The `#[pymodule]` fn in
+# src must also be named `OpenEXR`.
+name = "OpenEXR"
+# `cdylib` is the wheel maturin builds. `rlib` is for a HOST extension module that
+# embeds this one as a submodule (vfx-rs-py exposes it as `vfx_rs.OpenEXR` via
+# `wrap_pymodule!`): linking a Rust dependency needs an rlib, and a cdylib-only
+# crate is "unlinked" to the compiler however correctly it is declared.
+# Emitting both costs an extra artifact and changes nothing about the wheel.
+crate-type = ["cdylib", "rlib"]
+path = "src/openexr_py.rs"
+
+[dependencies]
+# `extension-module`: don't link libpython (resolved by the host interpreter at
+# import) — required for a portable wheel. `abi3-py38`: one wheel for CPython ≥3.8.
+pyo3 = { version = "0.28.3", features = ["extension-module", "abi3-py38"] }
+# numpy <-> ndarray interop: the new OpenEXR API exposes pixels as numpy arrays.
+# `half` feature → `PyArray*<half::f16>` for float16 (HALF) channels.
+numpy = { version = "0.28", features = ["half"] }
+# `half::f16` is numpy's float16 storage type — used ONLY at the numpy boundary here
+# (HALF channel <-> numpy float16). The CORE half maths stays `imath_rs::Half`; the
+# conversion goes through `Half::to_f32` (exact) so no `half`-crate maths is trusted.
+half = "2"
+# Our pure-Rust core + foundation — the whole point (no C++ OpenEXR/Imath).
+exr-core = { path = "../exr-core" }
+imath-rs = { path = "../imath-rs" }
+cryptomatte = { path = "../cryptomatte" }

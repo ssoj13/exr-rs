@@ -1,0 +1,55 @@
+/target
+.omc
+.omh
+.agents
+.bughunt
+.claude
+.gitnexus
+.omc
+.omh
+
+# mdBook generated HTML (build with `mdbook build docs/book`)
+/docs/book/book/
+.venv-crypto/
+# bootstrap.py's pytest venv (`t python`)
+/.venv-pytest/
+__pycache__/
+*.pyc
+
+# Files the vendored official openexr-py tests write during a run (relative
+# paths, so they land wherever pytest's cwd is — usually the repo root).
+# Several of these were accidentally committed in b6681aa / earlier and then
+# got silently overwritten by every test run; see .bughunt/progress_py_parity.md.
+# Keep test.exr / unfinished_multipart.exr (real upstream v3.4.15 fixtures) and
+# golden_multipart.exr (exr-core parity fixture) OUT of this list — they are
+# read-only inputs, never written by a test.
+/out.exr
+/readme.exr
+/readme_2part.exr
+/readme_modified.exr
+/readme_tiled.exr
+/readme_test_tiled_deep.exr
+/rgb_deep.exr
+/write_deep.exr
+/test_tiled_deep.exr
+/tiled.exr
+/test_file.exr
+/separate_channels.exr
+/rgba_channels.exr
+crates/openexr-py/tests/official/multipart.exr
+
+# The log an OpenFX plug-in writes into the cwd whenever exr-view's OFX host loads it
+# (tests, the viewer): rewritten on every run.
+ofxTestLog.txt
+ag.cmd
+
+# Release ZIPs written by `bootstrap.py ci` / `release` (ci.py)
+/dist/
+
+# Agent notes and internal planning stay on disk, out of the public repository
+AGENTS.md
+CLAUDE.md
+/docs/history/
+/docs/plans/
+# OpenEXR bug findings incl. memory-safety issues: private until reported upstream
+/docs/openexr-bugs.md

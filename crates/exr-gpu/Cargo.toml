@@ -1,0 +1,46 @@
+# exr-gpu — land decoded OpenEXR channel layers in GPU VRAM (wgpu).
+#
+# WHAT: takes an EXR decoded on the CPU by `exr-core` and uploads chosen Nuke-style
+# channel LAYERS into `wgpu::Texture`s (typed, linear, scene-referred) for readback
+# or direct wgpu compute/render.
+#
+# WHY a separate crate: `exr-core` is a pure-Rust 1:1 OpenEXR port and MUST stay
+# wgpu-free (hard project rule). `exr-gpu` is the GPU bridge: exr-core + wgpu.
+# `exr-view` already proves the boundary (exr-core + wgpu, exr-core untouched).
+#
+# Decode-on-GPU is explicitly NOT a goal: the entropy/Huffman/zlib stages are serial
+# and GPU-hostile, CPU decode is already fast + parallel across frames (scancache),
+# and a non-bit-exact GPU decoder would break exr-core's C++ parity invariant.
+[package]
+authors.workspace = true
+name = "exr-gpu"
+description = "Upload decoded OpenEXR (exr-core) channel layers into GPU VRAM (wgpu) for readback or wgpu processing"
+keywords = ["exr", "openexr", "wgpu", "gpu", "vfx"]
+categories = ["rendering", "multimedia::images"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Descriptive root path (workspace convention) instead of the default lib.rs.
+path = "src/exr_gpu.rs"
+
+[dependencies]
+# The CPU decoder. We consume its `api::Image` (single-part facade) in Phase A;
+# Phase B/C will additionally drive MultiPartInputFile / the low-level FrameBuffer.
+exr-core = { path = "../exr-core" }
+# The GPU surface. Pinned to 30 to match exr-view / wgpu-info (one wgpu in the tree).
+wgpu = "30"
+# Logging facade only (no backend) — same policy as exr-core/exr-view.
+log = { workspace = true }
+
+[dev-dependencies]
+# Headless device bring-up for the GPU-gated round-trip tests (reuses the viewer's
+# max-limits request path). CPU tests (layer grouping, format select, packing) need none.
+wgpu-info = { git = "ssh://git@github.com/ssoj13/gpu-info-rs.git", branch = "main", package = "gpu-info-rs", default-features = false, features = ["wgpu"] }
+# block_on for the async adapter enumeration in the GPU round-trip test (matches wgpu-info's pollster).
+pollster = "1.0"
+# Header dimensions (`V2f`) when a test writes its own subsampled fixture.
+imath-rs = { path = "../imath-rs" }

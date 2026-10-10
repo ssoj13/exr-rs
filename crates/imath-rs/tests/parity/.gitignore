@@ -1,0 +1,8 @@
+# Build artifacts from `cargo xtask parity` (the C++ Imath oracle). Only the
+# source (oracle.cpp), the committed golden.txt, and the README belong in git.
+oracle.exe
+oracle.obj
+*.obj
+*.exe
+*.pdb
+*.ilk

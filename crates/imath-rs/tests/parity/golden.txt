@@ -1,0 +1,625 @@
+# exr-rs Imath golden parity oracle (C++ Imath 3.2.2)
+half.u16_to_f32.0000=0x0.0000000000000p+0 bits=00000000
+half.u16_to_f32.8000=-0x0.0000000000000p+0 bits=80000000
+half.u16_to_f32.0001=0x1.0000000000000p-24 bits=33800000
+half.u16_to_f32.8001=-0x1.0000000000000p-24 bits=b3800000
+half.u16_to_f32.03ff=0x1.ff80000000000p-15 bits=387fc000
+half.u16_to_f32.0400=0x1.0000000000000p-14 bits=38800000
+half.u16_to_f32.3c00=0x1.0000000000000p+0 bits=3f800000
+half.u16_to_f32.bc00=-0x1.0000000000000p+0 bits=bf800000
+half.u16_to_f32.3555=0x1.5540000000000p-2 bits=3eaaa000
+half.u16_to_f32.4000=0x1.0000000000000p+1 bits=40000000
+half.u16_to_f32.c000=-0x1.0000000000000p+1 bits=c0000000
+half.u16_to_f32.7bff=0x1.ffc0000000000p+15 bits=477fe000
+half.u16_to_f32.fbff=-0x1.ffc0000000000p+15 bits=c77fe000
+half.u16_to_f32.7c00=inf bits=7f800000
+half.u16_to_f32.fc00=-inf bits=ff800000
+half.u16_to_f32.7e00=nan bits=7fc00000
+half.u16_to_f32.7c01=nan bits=7f802000
+half.u16_to_f32.fe00=-nan(ind) bits=ffc00000
+half.u16_to_f32.3800=0x1.0000000000000p-1 bits=3f000000
+half.u16_to_f32.b800=-0x1.0000000000000p-1 bits=bf000000
+half.u16_to_f32.4900=0x1.4000000000000p+3 bits=41200000
+half.u16_to_f32.4248=0x1.9200000000000p+1 bits=40490000
+half.u16_to_f32.5640=0x1.9000000000000p+6 bits=42c80000
+half.u16_to_f32.6400=0x1.0000000000000p+10 bits=44800000
+half.u16_to_f32.0200=0x1.0000000000000p-15 bits=38000000
+half.u16_to_f32.8200=-0x1.0000000000000p-15 bits=b8000000
+half.u16_to_f32.1234=0x1.8d00000000000p-11 bits=3a468000
+half.u16_to_f32.9abc=-0x1.af00000000000p-9 bits=bb578000
+half.u16_to_f32.5bff=0x1.ffc0000000000p+7 bits=437fe000
+half.u16_to_f32.7800=0x1.0000000000000p+15 bits=47000000
+half.f32_to_u16.00000000=0000
+half.f32_to_u16.80000000=8000
+half.f32_to_u16.3f800000=3c00
+half.f32_to_u16.bf800000=bc00
+half.f32_to_u16.3f000000=3800
+half.f32_to_u16.bf000000=b800
+half.f32_to_u16.40000000=4000
+half.f32_to_u16.40490fdb=4248
+half.f32_to_u16.477fe000=7bff
+half.f32_to_u16.c77fe000=fbff
+half.f32_to_u16.477ff000=7c00
+half.f32_to_u16.322bcc77=0000
+half.f32_to_u16.38800000=0400
+half.f32_to_u16.33800000=0001
+half.f32_to_u16.47c35000=7c00
+half.f32_to_u16.c7c35000=fc00
+half.f32_to_u16.3eaaaaab=3555
+half.f32_to_u16.449a5000=64d2
+half.f32_to_u16.b8d1b717=868e
+half.f32_to_u16.4640e400=7207
+half.f32_to_u16.3dcc0000=2e60
+half.f32_to_u16.40e00000=4700
+half.f32_to_u16.38820000=0410
+half.f32_to_u16.33000000=0000
+half.f32_to_u16.3f2aaaab=3955
+half.f32_to_u16.44801000=6400
+half.f32_to_u16.c5000400=e800
+half.f32_to_u16.7149f2ca=7c00
+half.f32_to_u16.f149f2ca=fc00
+half.f32_to_u16.35000000=0008
+half.u16_to_f32.all.fnv1a64=b0659868ec053145
+half.f32_to_u16.roundtrip.fnv1a64=ba36b3170979df25
+half.f32_to_u16.7f800000=7c00
+half.f32_to_u16.ff800000=fc00
+half.f32_to_u16.7fc00000=7e00
+half.f32_to_u16.ffc00000=fe00
+half.f32_to_u16.7f800001=7c01
+half.f32_to_u16.ff800001=fc01
+half.f32_to_u16.7fbfffff=7dff
+half.f32_to_u16.ffbfffff=fdff
+half.f32_to_u16.7fc00001=7e00
+half.f32_to_u16.7fffffff=7fff
+half.f32_to_u16.7f802000=7c01
+half.f32_to_u16.7f801000=7c01
+half.f32_to_u16.7f7fffff=7c00
+half.f32_to_u16.ff7fffff=fc00
+half.u16_to_f32.7c01=nan bits=7f802000
+half.u16_to_f32.7dff=nan bits=7fbfe000
+half.u16_to_f32.7e00=nan bits=7fc00000
+half.u16_to_f32.7fff=nan bits=7fffe000
+half.u16_to_f32.fc01=-nan bits=ff802000
+half.u16_to_f32.fe00=-nan(ind) bits=ffc00000
+half.u16_to_f32.ffff=-nan bits=ffffe000
+half.flags.0000=00000009
+half.flags.0001=00000005
+half.flags.3c00=00000003
+half.flags.7c00=00000020
+half.flags.fc00=00000060
+half.flags.7e00=00000010
+half.flags.bc00=00000043
+v3f.dot=-0x1.2000000000000p+1 bits=c0100000
+v3f.cross.x=-0x1.3800000000000p+4 bits=c19c0000
+v3f.cross.y=-0x1.3800000000000p+2 bits=c09c0000
+v3f.cross.z=0x1.3800000000000p+2 bits=409c0000
+v3f.length2=0x1.5600000000000p+4 bits=41ab0000
+v3f.length=0x1.27e4520000000p+2 bits=4093f229
+v3f.norm.x=0x1.4c3abe0000000p-2 bits=3ea61d5f
+v3f.norm.y=-0x1.f2581e0000000p-2 bits=bef92c0f
+v3f.norm.z=0x1.9f496e0000000p-1 bits=3f4fa4b7
+v3d.dot=-0x1.2000000000000p+1 bits=c002000000000000
+v3d.cross.x=-0x1.3800000000000p+4 bits=c033800000000000
+v3d.cross.y=-0x1.3800000000000p+2 bits=c013800000000000
+v3d.cross.z=0x1.3800000000000p+2 bits=4013800000000000
+v3d.length2=0x1.5600000000000p+4 bits=4035600000000000
+v3d.length=0x1.27e451bb944c3p+2 bits=40127e451bb944c3
+v3d.norm.x=0x1.4c3abe93bcf74p-2 bits=3fd4c3abe93bcf74
+v3d.norm.y=-0x1.f2581ddd9b72ep-2 bits=bfdf2581ddd9b72e
+v3d.norm.z=0x1.9f496e38ac351p-1 bits=3fe9f496e38ac351
+v4f.dot=0x1.4000000000000p+0 bits=3fa00000
+v4f.length2=0x1.c800000000000p+3 bits=41640000
+v4f.length=0x1.e3307c0000000p+1 bits=4071983e
+v4f.norm.x=0x1.0f43a40000000p-2 bits=3e87a1d2
+v4f.norm.y=0x1.0f43a40000000p-1 bits=3f07a1d2
+v4f.norm.z=-0x1.96e5780000000p-1 bits=bf4b72bc
+v4f.norm.w=0x1.0f43a40000000p-3 bits=3e07a1d2
+v4d.dot=0x1.4000000000000p+0 bits=3ff4000000000000
+v4d.length2=0x1.c800000000000p+3 bits=402c800000000000
+v4d.length=0x1.e3307cc56cf5cp+1 bits=400e3307cc56cf5c
+v4d.norm.x=0x1.0f43a45cdedadp-2 bits=3fd0f43a45cdedad
+v4d.norm.y=0x1.0f43a45cdedadp-1 bits=3fe0f43a45cdedad
+v4d.norm.z=-0x1.96e5768b4e483p-1 bits=bfe96e5768b4e483
+v4d.norm.w=0x1.0f43a45cdedadp-3 bits=3fc0f43a45cdedad
+m33f.mul.00=0x1.a000000000000p+1 bits=40500000
+m33f.mul.01=0x1.6000000000000p+1 bits=40300000
+m33f.mul.02=-0x1.c000000000000p+1 bits=c0600000
+m33f.mul.10=-0x1.e000000000000p+1 bits=c0700000
+m33f.mul.11=0x1.5000000000000p+2 bits=40a80000
+m33f.mul.12=0x1.b800000000000p+2 bits=40dc0000
+m33f.mul.20=0x1.4000000000000p+1 bits=40200000
+m33f.mul.21=-0x1.7800000000000p+2 bits=c0bc0000
+m33f.mul.22=0x1.4000000000000p+2 bits=40a00000
+m33f.det=0x1.b900000000000p+4 bits=41dc8000
+m33f.inv.00=0x1.e2f99e0000000p-2 bits=3ef17ccf
+m33f.inv.01=0x1.3bca980000000p-3 bits=3e1de54c
+m33f.inv.02=0x1.2937260000000p-6 bits=3c949b93
+m33f.inv.10=-0x1.bdd2b80000000p-4 bits=bddee95c
+m33f.inv.11=0x1.16a3b40000000p-2 bits=3e8b51da
+m33f.inv.12=0x1.3280de0000000p-3 bits=3e19406f
+m33f.inv.20=-0x1.ab3f460000000p-4 bits=bdd59fa3
+m33f.inv.21=-0x1.2937260000000p-4 bits=bd949b93
+m33f.inv.22=0x1.d0662a0000000p-3 bits=3e683315
+m33f.transpose.00=0x1.0000000000000p+1 bits=40000000
+m33f.transpose.01=0x1.0000000000000p-2 bits=3e800000
+m33f.transpose.02=0x1.0000000000000p+0 bits=3f800000
+m33f.transpose.10=-0x1.0000000000000p+0 bits=bf800000
+m33f.transpose.11=0x1.8000000000000p+1 bits=40400000
+m33f.transpose.12=0x1.0000000000000p-1 bits=3f000000
+m33f.transpose.20=0x1.0000000000000p-1 bits=3f000000
+m33f.transpose.21=-0x1.0000000000000p+1 bits=c0000000
+m33f.transpose.22=0x1.0000000000000p+2 bits=40800000
+m33f.multVec.x=0x1.99999a0000000p-2 bits=3ecccccd
+m33f.multVec.y=-0x1.99999a0000000p-1 bits=bf4ccccd
+m33f.multDir.x=0x1.4000000000000p+1 bits=40200000
+m33f.multDir.y=-0x1.e000000000000p+2 bits=c0f00000
+m44d.mul.00=0x1.a800000000000p+1 bits=400a800000000000
+m44d.mul.01=0x1.7000000000000p+1 bits=4007000000000000
+m44d.mul.02=-0x1.c800000000000p+1 bits=c00c800000000000
+m44d.mul.03=-0x1.8000000000000p-1 bits=bfe8000000000000
+m44d.mul.10=-0x1.c000000000000p+1 bits=c00c000000000000
+m44d.mul.11=0x1.7000000000000p+2 bits=4017000000000000
+m44d.mul.12=0x1.a800000000000p+2 bits=401a800000000000
+m44d.mul.13=0x1.2000000000000p+2 bits=4012000000000000
+m44d.mul.20=0x1.3000000000000p+1 bits=4003000000000000
+m44d.mul.21=-0x1.8800000000000p+2 bits=c018800000000000
+m44d.mul.22=0x1.4800000000000p+2 bits=4014800000000000
+m44d.mul.23=-0x1.1000000000000p+2 bits=c011000000000000
+m44d.mul.30=0x1.0000000000000p-2 bits=3fd0000000000000
+m44d.mul.31=-0x1.f000000000000p+0 bits=bfff000000000000
+m44d.mul.32=0x1.8000000000000p+0 bits=3ff8000000000000
+m44d.mul.33=0x1.2000000000000p+0 bits=3ff2000000000000
+m44d.det=0x1.fb60000000000p+5 bits=404fb60000000000
+m44d.inv.00=0x1.b7f970d4ec62ap-2 bits=3fdb7f970d4ec62a
+m44d.inv.01=0x1.28ae128ae128ap-3 bits=3fc28ae128ae128a
+m44d.inv.02=0x1.8380183801838p-5 bits=3fa8380183801838
+m44d.inv.03=-0x1.d43ac7ee5729ap-4 bits=bfbd43ac7ee5729a
+m44d.inv.10=-0x1.1684116841168p-3 bits=bfc1684116841168
+m44d.inv.11=0x1.1076110761107p-2 bits=3fd1076110761107
+m44d.inv.12=0x1.591e1591e1592p-3 bits=3fc591e1591e1592
+m44d.inv.13=-0x1.2ebc12ebc12ecp-4 bits=bfb2ebc12ebc12ec
+m44d.inv.20=-0x1.209b675f0bcb4p-4 bits=bfb209b675f0bcb4
+m44d.inv.21=-0x1.0a6810a6810a6p-4 bits=bfb0a6810a6810a6
+m44d.inv.22=0x1.a0429a0429a04p-3 bits=3fca0429a0429a04
+m44d.inv.23=0x1.7968c24136cedp-4 bits=3fb7968c24136ced
+m44d.inv.30=0x1.46f4146f41470p-3 bits=3fc46f4146f41470
+m44d.inv.31=0x1.22a0122a0122bp-5 bits=3fa22a0122a0122b
+m44d.inv.32=-0x1.c61a1c61a1c62p-4 bits=bfbc61a1c61a1c62
+m44d.inv.33=0x1.bd051bd051bd1p-2 bits=3fdbd051bd051bd1
+m44d.transpose.00=0x1.0000000000000p+1 bits=4000000000000000
+m44d.transpose.01=0x1.0000000000000p-2 bits=3fd0000000000000
+m44d.transpose.02=0x1.0000000000000p+0 bits=3ff0000000000000
+m44d.transpose.03=-0x1.0000000000000p-1 bits=bfe0000000000000
+m44d.transpose.10=-0x1.0000000000000p+0 bits=bff0000000000000
+m44d.transpose.11=0x1.8000000000000p+1 bits=4008000000000000
+m44d.transpose.12=0x1.0000000000000p-1 bits=3fe0000000000000
+m44d.transpose.13=0x1.0000000000000p-2 bits=3fd0000000000000
+m44d.transpose.20=0x1.0000000000000p-1 bits=3fe0000000000000
+m44d.transpose.21=-0x1.0000000000000p+1 bits=c000000000000000
+m44d.transpose.22=0x1.0000000000000p+2 bits=4010000000000000
+m44d.transpose.23=0x1.0000000000000p+0 bits=3ff0000000000000
+m44d.transpose.30=0x1.0000000000000p-2 bits=3fd0000000000000
+m44d.transpose.31=0x1.0000000000000p+0 bits=3ff0000000000000
+m44d.transpose.32=-0x1.0000000000000p-1 bits=bfe0000000000000
+m44d.transpose.33=0x1.0000000000000p+1 bits=4000000000000000
+m44d.multVec.x=-0x1.1c71c71c71c72p+2 bits=c011c71c71c71c72
+m44d.multVec.y=0x1.471c71c71c71cp+2 bits=401471c71c71c71c
+m44d.multVec.z=-0x1.f8e38e38e38e4p+3 bits=c02f8e38e38e38e4
+m44d.multDir.x=0x1.6000000000000p+2 bits=4016000000000000
+m44d.multDir.y=-0x1.8000000000000p+2 bits=c018000000000000
+m44d.multDir.z=0x1.0c00000000000p+4 bits=4030c00000000000
+shrt.ok=1
+shrt.s.x=0x1.eed7944b3b96cp+0 bits=3ffeed7944b3b96c
+shrt.s.y=0x1.7620cb75af6ccp+0 bits=3ff7620cb75af6cc
+shrt.s.z=0x1.04c2020714c76p-1 bits=3fe04c2020714c76
+shrt.h.x=-0x1.ba3c1001c1284p-5 bits=bfaba3c1001c1284
+shrt.h.y=0x1.2449eed6968a7p-2 bits=3fd2449eed6968a7
+shrt.h.z=-0x1.6f81c72726fcdp-4 bits=bfb6f81c72726fcd
+shrt.r.x=0x1.d7a04f6a33ceap-6 bits=3f9d7a04f6a33cea
+shrt.r.y=0x1.a88fe509180b9p-4 bits=3fba88fe509180b9
+shrt.r.z=0x1.aa480fc9eb0fcp-5 bits=3faaa480fc9eb0fc
+shrt.t.x=0x1.4000000000000p+2 bits=4014000000000000
+shrt.t.y=-0x1.8000000000000p+1 bits=c008000000000000
+shrt.t.z=0x1.0000000000000p+1 bits=4000000000000000
+shrt.fail.ok=0
+shrt.fail.r.x=0x1.0000000000000p-2 bits=3fd0000000000000
+shrt.fail.r.y=-0x1.0000000000000p-1 bits=bfe0000000000000
+shrt.fail.r.z=0x1.8000000000000p-1 bits=3fe8000000000000
+jacobi33.s.x=0x1.b181af3ad95f6p+1 bits=400b181af3ad95f6
+jacobi33.s.y=0x1.18e201a241d3fp+1 bits=40018e201a241d3f
+jacobi33.s.z=0x1.2d6713c8b9334p+3 bits=4022d6713c8b9334
+jacobi44.s.x=0x1.b0fda86e133e5p+1 bits=400b0fda86e133e5
+jacobi44.s.y=0x1.1749093e1d20dp+1 bits=4001749093e1d20d
+jacobi44.s.z=0x1.4d91acf5b3a23p+3 bits=4024d91acf5b3a23
+jacobi44.s.w=0x1.80b94d3e808bfp+2 bits=40180b94d3e808bf
+procrustes.00=0x1.8000000000000p-53 bits=3ca8000000000000
+procrustes.01=0x1.6a09e667f3bccp-1 bits=3fe6a09e667f3bcc
+procrustes.02=0x1.6a09e667f3bcep-1 bits=3fe6a09e667f3bce
+procrustes.03=0x0.0000000000000p+0 bits=0000000000000000
+procrustes.10=0x1.ffffffffffffep-1 bits=3feffffffffffffe
+procrustes.11=-0x1.8000000000000p-53 bits=bca8000000000000
+procrustes.12=0x1.99cfabd633057p-53 bits=3ca99cfabd633057
+procrustes.13=0x0.0000000000000p+0 bits=0000000000000000
+procrustes.20=0x1.8000000000000p-52 bits=3cb8000000000000
+procrustes.21=0x1.6a09e667f3bcep-1 bits=3fe6a09e667f3bce
+procrustes.22=-0x1.6a09e667f3bccp-1 bits=bfe6a09e667f3bcc
+procrustes.23=0x0.0000000000000p+0 bits=0000000000000000
+procrustes.30=0x1.fffffffffffffp-1 bits=3fefffffffffffff
+procrustes.31=0x1.0000000000000p+1 bits=4000000000000000
+procrustes.32=0x1.8000000000000p+1 bits=4008000000000000
+procrustes.33=0x1.0000000000000p+0 bits=3ff0000000000000
+quat.axisangle.m00=0x1.6a09e667f3bccp-1 bits=3fe6a09e667f3bcc
+quat.axisangle.m01=0x1.6a09e667f3bcdp-1 bits=3fe6a09e667f3bcd
+quat.axisangle.m02=0x0.0000000000000p+0 bits=0000000000000000
+quat.axisangle.m03=0x0.0000000000000p+0 bits=0000000000000000
+quat.axisangle.m10=-0x1.6a09e667f3bcdp-1 bits=bfe6a09e667f3bcd
+quat.axisangle.m11=0x1.6a09e667f3bccp-1 bits=3fe6a09e667f3bcc
+quat.axisangle.m12=0x0.0000000000000p+0 bits=0000000000000000
+quat.axisangle.m13=0x0.0000000000000p+0 bits=0000000000000000
+quat.axisangle.m20=0x0.0000000000000p+0 bits=0000000000000000
+quat.axisangle.m21=0x0.0000000000000p+0 bits=0000000000000000
+quat.axisangle.m22=0x1.0000000000000p+0 bits=3ff0000000000000
+quat.axisangle.m23=0x0.0000000000000p+0 bits=0000000000000000
+quat.axisangle.m30=0x0.0000000000000p+0 bits=0000000000000000
+quat.axisangle.m31=0x0.0000000000000p+0 bits=0000000000000000
+quat.axisangle.m32=0x0.0000000000000p+0 bits=0000000000000000
+quat.axisangle.m33=0x1.0000000000000p+0 bits=3ff0000000000000
+quat.slerp.0.r=0x1.f6297cff75cb1p-1 bits=3fef6297cff75cb1
+quat.slerp.0.x=0x0.0000000000000p+0 bits=0000000000000000
+quat.slerp.0.y=0x0.0000000000000p+0 bits=0000000000000000
+quat.slerp.0.z=0x1.8f8b83c69a60bp-3 bits=3fc8f8b83c69a60b
+quat.slerp.1.r=0x1.d906bcf328d47p-1 bits=3fed906bcf328d47
+quat.slerp.1.x=0x0.0000000000000p+0 bits=0000000000000000
+quat.slerp.1.y=0x0.0000000000000p+0 bits=0000000000000000
+quat.slerp.1.z=0x1.87de2a6aea964p-2 bits=3fd87de2a6aea964
+quat.slerp.2.r=0x1.a9b66290ea1a4p-1 bits=3fea9b66290ea1a4
+quat.slerp.2.x=0x0.0000000000000p+0 bits=0000000000000000
+quat.slerp.2.y=0x0.0000000000000p+0 bits=0000000000000000
+quat.slerp.2.z=0x1.1c73b39ae68c9p-1 bits=3fe1c73b39ae68c9
+quat.setrot.r=0x1.6a09e667f3bccp-1 bits=3fe6a09e667f3bcc
+quat.setrot.x=0x0.0000000000000p+0 bits=0000000000000000
+quat.setrot.y=0x0.0000000000000p+0 bits=0000000000000000
+quat.setrot.z=0x1.6a09e667f3bccp-1 bits=3fe6a09e667f3bcc
+euler.XYZ.m00=0x1.390bbc42217f5p-1 bits=3fe390bbc42217f5
+euler.XYZ.m01=0x1.4252f62513db3p-1 bits=3fe4252f62513db3
+euler.XYZ.m02=0x1.eaee8744b05f0p-2 bits=3fdeaee8744b05f0
+euler.XYZ.m03=0x0.0000000000000p+0 bits=0000000000000000
+euler.XYZ.m10=-0x1.916bd4bb389acp-1 bits=bfe916bd4bb389ac
+euler.XYZ.m11=0x1.20bea0d2c140cp-1 bits=3fe20bea0d2c140c
+euler.XYZ.m12=0x1.09914f9f08a1ep-2 bits=3fd09914f9f08a1e
+euler.XYZ.m13=0x0.0000000000000p+0 bits=0000000000000000
+euler.XYZ.m20=-0x1.b6b6272a8e99cp-4 bits=bfbb6b6272a8e99c
+euler.XYZ.m21=-0x1.11a3509b3836ep-1 bits=bfe11a3509b3836e
+euler.XYZ.m22=0x1.ad41039f47d70p-1 bits=3fead41039f47d70
+euler.XYZ.m23=0x0.0000000000000p+0 bits=0000000000000000
+euler.XYZ.m30=0x0.0000000000000p+0 bits=0000000000000000
+euler.XYZ.m31=0x0.0000000000000p+0 bits=0000000000000000
+euler.XYZ.m32=0x0.0000000000000p+0 bits=0000000000000000
+euler.XYZ.m33=0x1.0000000000000p+0 bits=3ff0000000000000
+euler.XYZ.extract.x=0x1.3333333333333p-2 bits=3fd3333333333333
+euler.XYZ.extract.y=-0x1.0000000000000p-1 bits=bfe0000000000000
+euler.XYZ.extract.z=0x1.999999999999ap-1 bits=3fe999999999999a
+euler.ZYX.m00=0x1.ad41039f47d70p-1 bits=3fead41039f47d70
+euler.ZYX.m01=-0x1.f671fbd5d1978p-4 bits=bfbf671fbd5d1978
+euler.ZYX.m02=0x1.0feb8514ce9fap-1 bits=3fe0feb8514ce9fa
+euler.ZYX.m03=0x0.0000000000000p+0 bits=0000000000000000
+euler.ZYX.m10=-0x1.09914f9f08a1ep-2 bits=bfd09914f9f08a1e
+euler.ZYX.m11=0x1.88d19fc9319ccp-1 bits=3fe88d19fc9319cc
+euler.ZYX.m12=0x1.2c57c3a9f5c84p-1 bits=3fe2c57c3a9f5c84
+euler.ZYX.m13=0x0.0000000000000p+0 bits=0000000000000000
+euler.ZYX.m20=-0x1.eaee8744b05f0p-2 bits=bfdeaee8744b05f0
+euler.ZYX.m21=-0x1.4252f62513db3p-1 bits=bfe4252f62513db3
+euler.ZYX.m22=0x1.390bbc42217f5p-1 bits=3fe390bbc42217f5
+euler.ZYX.m23=0x0.0000000000000p+0 bits=0000000000000000
+euler.ZYX.m30=0x0.0000000000000p+0 bits=0000000000000000
+euler.ZYX.m31=0x0.0000000000000p+0 bits=0000000000000000
+euler.ZYX.m32=0x0.0000000000000p+0 bits=0000000000000000
+euler.ZYX.m33=0x1.0000000000000p+0 bits=3ff0000000000000
+euler.ZYX.extract.x=0x1.3333333333333p-2 bits=3fd3333333333333
+euler.ZYX.extract.y=-0x1.0000000000000p-1 bits=bfe0000000000000
+euler.ZYX.extract.z=0x1.999999999999bp-1 bits=3fe999999999999b
+euler.XZX.m00=0x1.c1528065b7d50p-1 bits=3fec1528065b7d50
+euler.XZX.m01=-0x1.560912ee7c131p-2 bits=bfd560912ee7c131
+euler.XZX.m02=-0x1.602c42019e38bp-2 bits=bfd602c42019e38b
+euler.XZX.m03=0x0.0000000000000p+0 bits=0000000000000000
+euler.XZX.m10=0x1.d50148b8f737bp-2 bits=3fdd50148b8f737b
+euler.XZX.m11=0x1.7d0c137f167b2p-2 bits=3fd7d0c137f167b2
+euler.XZX.m12=0x1.9d58164a79464p-1 bits=3fe9d58164a79464
+euler.XZX.m13=0x0.0000000000000p+0 bits=0000000000000000
+euler.XZX.m20=-0x1.222916e0b9429p-3 bits=bfc222916e0b9429
+euler.XZX.m21=-0x1.bb64b574890e4p-1 bits=bfebb64b574890e4
+euler.XZX.m22=0x1.eb0e934f35bc4p-2 bits=3fdeb0e934f35bc4
+euler.XZX.m23=0x0.0000000000000p+0 bits=0000000000000000
+euler.XZX.m30=0x0.0000000000000p+0 bits=0000000000000000
+euler.XZX.m31=0x0.0000000000000p+0 bits=0000000000000000
+euler.XZX.m32=0x0.0000000000000p+0 bits=0000000000000000
+euler.XZX.m33=0x1.0000000000000p+0 bits=3ff0000000000000
+euler.XZX.extract.x=0x1.3333333333333p-2 bits=3fd3333333333333
+euler.XZX.extract.y=-0x1.fffffffffffffp-2 bits=bfdfffffffffffff
+euler.XZX.extract.z=0x1.999999999999bp-1 bits=3fe999999999999b
+color.hsv2rgb.r=0x1.8000040000000p-2 bits=3ec00002
+color.hsv2rgb.g=0x1.8000000000000p-1 bits=3f400000
+color.hsv2rgb.b=0x1.8000000000000p-2 bits=3ec00000
+color.rgb2hsv.h=0x1.5555540000000p-2 bits=3eaaaaaa
+color.rgb2hsv.s=0x1.0000000000000p-1 bits=3f000000
+color.rgb2hsv.v=0x1.8000000000000p-1 bits=3f400000
+color.rgb2packed=ffbf7f3f
+color.packed2rgb.r=0x1.f9f9fc0000000p-3 bits=3e7cfcfe
+color.packed2rgb.g=0x1.fdfe000000000p-2 bits=3efeff00
+color.packed2rgb.b=0x1.7f7f800000000p-1 bits=3f3fbfc0
+color.rgb2packed.c4=ffb26619
+color.packed2rgb.u8.00000000.x=0
+color.packed2rgb.u8.00000000.y=0
+color.packed2rgb.u8.00000000.z=0
+color.packed2rgb.i16.00000000.x=0
+color.packed2rgb.i16.00000000.y=0
+color.packed2rgb.i16.00000000.z=0
+color.packed2rgb.i32.00000000.x=0
+color.packed2rgb.i32.00000000.y=0
+color.packed2rgb.i32.00000000.z=0
+color.packed2rgb.i64.00000000.x=0
+color.packed2rgb.i64.00000000.y=0
+color.packed2rgb.i64.00000000.z=0
+color.packed2rgb.c4i64.00000000.r=0
+color.packed2rgb.c4i64.00000000.g=0
+color.packed2rgb.c4i64.00000000.b=0
+color.packed2rgb.c4i64.00000000.a=0
+color.packed2rgb.u8.ffffffff.x=255
+color.packed2rgb.u8.ffffffff.y=255
+color.packed2rgb.u8.ffffffff.z=255
+color.packed2rgb.i16.ffffffff.x=32640
+color.packed2rgb.i16.ffffffff.y=32640
+color.packed2rgb.i16.ffffffff.z=32640
+color.packed2rgb.i32.ffffffff.x=2147483520
+color.packed2rgb.i32.ffffffff.y=2147483520
+color.packed2rgb.i32.ffffffff.z=2147483520
+color.packed2rgb.i64.ffffffff.x=9223372036854775680
+color.packed2rgb.i64.ffffffff.y=9223372036854775680
+color.packed2rgb.i64.ffffffff.z=9223372036854775680
+color.packed2rgb.c4i64.ffffffff.r=9223372036854775680
+color.packed2rgb.c4i64.ffffffff.g=9223372036854775680
+color.packed2rgb.c4i64.ffffffff.b=9223372036854775680
+color.packed2rgb.c4i64.ffffffff.a=9223372036854775680
+color.packed2rgb.u8.12345678.x=120
+color.packed2rgb.u8.12345678.y=86
+color.packed2rgb.u8.12345678.z=52
+color.packed2rgb.i16.12345678.x=15360
+color.packed2rgb.i16.12345678.y=11008
+color.packed2rgb.i16.12345678.z=6656
+color.packed2rgb.i32.12345678.x=1010580480
+color.packed2rgb.i32.12345678.y=724249344
+color.packed2rgb.i32.12345678.z=437918208
+color.packed2rgb.i64.12345678.x=4340410370284600320
+color.packed2rgb.i64.12345678.y=3110627432037296896
+color.packed2rgb.i64.12345678.z=1880844493789993472
+color.packed2rgb.c4i64.12345678.r=4340410370284600320
+color.packed2rgb.c4i64.12345678.g=3110627432037296896
+color.packed2rgb.c4i64.12345678.b=1880844493789993472
+color.packed2rgb.c4i64.12345678.a=651061555542690048
+color.packed2rgb.u8.0080ff7f.x=127
+color.packed2rgb.u8.0080ff7f.y=255
+color.packed2rgb.u8.0080ff7f.z=128
+color.packed2rgb.i16.0080ff7f.x=16256
+color.packed2rgb.i16.0080ff7f.y=32640
+color.packed2rgb.i16.0080ff7f.z=16384
+color.packed2rgb.i32.0080ff7f.x=1069531008
+color.packed2rgb.i32.0080ff7f.y=2147483520
+color.packed2rgb.i32.0080ff7f.z=1077952512
+color.packed2rgb.i64.0080ff7f.x=4593600975217868672
+color.packed2rgb.i64.0080ff7f.y=9223372036854775680
+color.packed2rgb.i64.0080ff7f.z=4629771061636907008
+color.packed2rgb.c4i64.0080ff7f.r=4593600975217868672
+color.packed2rgb.c4i64.0080ff7f.g=9223372036854775680
+color.packed2rgb.c4i64.0080ff7f.b=4629771061636907008
+color.packed2rgb.c4i64.0080ff7f.a=0
+box.transform.min.x=0x0.0000000000000p+0 bits=00000000
+box.transform.min.y=-0x1.4000000000000p+2 bits=c0a00000
+box.transform.min.z=0x1.c000000000000p+0 bits=3fe00000
+box.transform.max.x=0x1.8000000000000p+1 bits=40400000
+box.transform.max.y=0x1.0000000000000p+0 bits=3f800000
+box.transform.max.z=0x1.c000000000000p+1 bits=40600000
+line.closest.x=0x1.fffffe0000000p-2 bits=3effffff
+line.closest.y=0x1.fffffe0000000p-2 bits=3effffff
+line.closest.z=0x0.0000000000000p+0 bits=00000000
+plane.intersect.hit=1
+plane.intersect.x=0x1.0000000000000p+0 bits=3f800000
+plane.intersect.y=0x1.0000000000000p-1 bits=3f000000
+plane.intersect.z=0x1.0000000000000p+1 bits=40000000
+sphere.intersect.hit=1
+sphere.intersect.x=0x0.0000000000000p+0 bits=00000000
+sphere.intersect.y=0x0.0000000000000p+0 bits=00000000
+sphere.intersect.z=0x1.8000000000000p+1 bits=40400000
+frustum.proj.00=0x1.0000000000000p+1 bits=40000000
+frustum.proj.01=0x0.0000000000000p+0 bits=00000000
+frustum.proj.02=0x0.0000000000000p+0 bits=00000000
+frustum.proj.03=0x0.0000000000000p+0 bits=00000000
+frustum.proj.10=0x0.0000000000000p+0 bits=00000000
+frustum.proj.11=0x1.4000000000000p+1 bits=40200000
+frustum.proj.12=0x0.0000000000000p+0 bits=00000000
+frustum.proj.13=0x0.0000000000000p+0 bits=00000000
+frustum.proj.20=0x0.0000000000000p+0 bits=00000000
+frustum.proj.21=0x0.0000000000000p+0 bits=00000000
+frustum.proj.22=-0x1.052bf60000000p+0 bits=bf8295fb
+frustum.proj.23=-0x1.0000000000000p+0 bits=bf800000
+frustum.proj.30=0x0.0000000000000p+0 bits=00000000
+frustum.proj.31=0x0.0000000000000p+0 bits=00000000
+frustum.proj.32=-0x1.0295fa0000000p+1 bits=c0014afd
+frustum.proj.33=0x0.0000000000000p+0 bits=00000000
+frustum.plane0.n.x=0x0.0000000000000p+0 bits=00000000
+frustum.plane0.n.y=0x1.db614e0000000p-1 bits=3f6db0a7
+frustum.plane0.n.z=0x1.7c4dd80000000p-2 bits=3ebe26ec
+frustum.plane0.d=0x0.0000000000000p+0 bits=00000000
+frustum.plane1.n.x=0x1.c9f25c0000000p-1 bits=3f64f92e
+frustum.plane1.n.y=0x0.0000000000000p+0 bits=00000000
+frustum.plane1.n.z=0x1.c9f25c0000000p-2 bits=3ee4f92e
+frustum.plane1.d=0x0.0000000000000p+0 bits=00000000
+frustum.plane2.n.x=0x0.0000000000000p+0 bits=00000000
+frustum.plane2.n.y=-0x1.db614e0000000p-1 bits=bf6db0a7
+frustum.plane2.n.z=0x1.7c4dd80000000p-2 bits=3ebe26ec
+frustum.plane2.d=0x0.0000000000000p+0 bits=00000000
+frustum.plane3.n.x=-0x1.c9f25c0000000p-1 bits=bf64f92e
+frustum.plane3.n.y=0x0.0000000000000p+0 bits=00000000
+frustum.plane3.n.z=0x1.c9f25c0000000p-2 bits=3ee4f92e
+frustum.plane3.d=0x0.0000000000000p+0 bits=00000000
+frustum.plane4.n.x=0x0.0000000000000p+0 bits=00000000
+frustum.plane4.n.y=0x0.0000000000000p+0 bits=00000000
+frustum.plane4.n.z=0x1.0000000000000p+0 bits=3f800000
+frustum.plane4.d=-0x1.0000000000000p+0 bits=bf800000
+frustum.plane5.n.x=0x0.0000000000000p+0 bits=00000000
+frustum.plane5.n.y=0x0.0000000000000p+0 bits=00000000
+frustum.plane5.n.z=-0x1.0000000000000p+0 bits=bf800000
+frustum.plane5.d=0x1.9000000000000p+6 bits=42c80000
+frustum.ztodepth.persp.u16.0=-0x1.0000000000000p+0 bits=bf800000
+frustum.ztodepth.ortho.u16.0=-0x1.0000000000000p+0 bits=bf800000
+frustum.ztodepth.d.u16.0=-0x1.0000000000000p+0 bits=bff0000000000000
+frustum.ztodepth.persp.u16.1=-0x1.5431ba0000000p+0 bits=bfaa18dd
+frustum.ztodepth.ortho.u16.1=-0x1.9bfb5c0000000p+4 bits=c1cdfdae
+frustum.ztodepth.d.u16.1=-0x1.5536e28345a7ap+0 bits=bff5536e28345a7a
+frustum.ztodepth.persp.u16.2=-0x1.faec520000000p+0 bits=bffd7629
+frustum.ztodepth.ortho.u16.2=-0x1.93fe740000000p+5 bits=c249ff3a
+frustum.ztodepth.d.u16.2=-0x1.ff7b109f519dap+0 bits=bffff7b109f519da
+frustum.ztodepth.persp.u16.3=-0x1.f114800000000p+1 bits=c0788a40
+frustum.ztodepth.ortho.u16.3=-0x1.2cff9c0000000p+6 bits=c2967fce
+frustum.ztodepth.d.u16.3=-0x1.fe75f95b96d13p+1 bits=c00fe75f95b96d13
+frustum.ztodepth.persp.u16.4=-0x1.9000000000000p+6 bits=c2c80000
+frustum.ztodepth.ortho.u16.4=-0x1.9000000000000p+6 bits=c2c80000
+frustum.ztodepth.d.u16.4=-0x1.f400000000000p+9 bits=c08f400000000000
+frustum.ztodepth.persp.u24.0=-0x1.0000000000000p+0 bits=bf800000
+frustum.ztodepth.ortho.u24.0=-0x1.0000000000000p+0 bits=bf800000
+frustum.ztodepth.d.u24.0=-0x1.0000000000000p+0 bits=bff0000000000000
+frustum.ztodepth.persp.u24.1=-0x1.5433060000000p+0 bits=bfaa1983
+frustum.ztodepth.ortho.u24.1=-0x1.9bfffa0000000p+4 bits=c1cdfffd
+frustum.ztodepth.d.u24.1=-0x1.553835f24b505p+0 bits=bff553835f24b505
+frustum.ztodepth.persp.u24.2=-0x1.faee400000000p+0 bits=bffd7720
+frustum.ztodepth.ortho.u24.2=-0x1.93fffe0000000p+5 bits=c249ffff
+frustum.ztodepth.d.u24.2=-0x1.ff7d0d184b705p+0 bits=bffff7d0d184b705
+frustum.ztodepth.persp.u24.3=-0x1.f1165e0000000p+1 bits=c0788b2f
+frustum.ztodepth.ortho.u24.3=-0x1.2d00000000000p+6 bits=c2968000
+frustum.ztodepth.d.u24.3=-0x1.fe77f3cdf7ccfp+1 bits=c00fe77f3cdf7ccf
+frustum.ztodepth.persp.u24.4=-0x1.9000000000000p+6 bits=c2c80000
+frustum.ztodepth.ortho.u24.4=-0x1.9000000000000p+6 bits=c2c80000
+frustum.ztodepth.d.u24.4=-0x1.f400000000000p+9 bits=c08f400000000000
+frustum.ztodepth.persp.i31.0=-0x1.0000000000000p+0 bits=bf800000
+frustum.ztodepth.ortho.i31.0=-0x1.0000000000000p+0 bits=bf800000
+frustum.ztodepth.d.i31.0=-0x1.0000000000000p+0 bits=bff0000000000000
+frustum.ztodepth.persp.i31.1=-0x1.5433080000000p+0 bits=bfaa1984
+frustum.ztodepth.ortho.i31.1=-0x1.9c00000000000p+4 bits=c1ce0000
+frustum.ztodepth.d.i31.1=-0x1.553837470f195p+0 bits=bff553837470f195
+frustum.ztodepth.persp.i31.2=-0x1.faee420000000p+0 bits=bffd7721
+frustum.ztodepth.ortho.i31.2=-0x1.9400000000000p+5 bits=c24a0000
+frustum.ztodepth.d.i31.2=-0x1.ff7d0f16c2e09p+0 bits=bffff7d0f16c2e09
+frustum.ztodepth.persp.i31.3=-0x1.f1165e0000000p+1 bits=c0788b2f
+frustum.ztodepth.ortho.i31.3=-0x1.2d00000000000p+6 bits=c2968000
+frustum.ztodepth.d.i31.3=-0x1.fe77f5ca669abp+1 bits=c00fe77f5ca669ab
+frustum.ztodepth.persp.i31.4=-0x1.9000000000000p+6 bits=c2c80000
+frustum.ztodepth.ortho.i31.4=-0x1.9000000000000p+6 bits=c2c80000
+frustum.ztodepth.d.i31.4=-0x1.f400000000000p+9 bits=c08f400000000000
+frustum.ztodepth.persp.sym.0=-0x1.0000000000000p+0 bits=bf800000
+frustum.ztodepth.ortho.sym.0=-0x1.0000000000000p+0 bits=bf800000
+frustum.ztodepth.d.sym.0=-0x1.0000000000000p+0 bits=bff0000000000000
+frustum.ztodepth.persp.sym.1=-0x1.5433080000000p+0 bits=bfaa1984
+frustum.ztodepth.ortho.sym.1=-0x1.9c00000000000p+4 bits=c1ce0000
+frustum.ztodepth.d.sym.1=-0x1.553837470f195p+0 bits=bff553837470f195
+frustum.ztodepth.persp.sym.2=-0x1.faee420000000p+0 bits=bffd7721
+frustum.ztodepth.ortho.sym.2=-0x1.9400000000000p+5 bits=c24a0000
+frustum.ztodepth.d.sym.2=-0x1.ff7d0f16c2e09p+0 bits=bffff7d0f16c2e09
+frustum.ztodepth.persp.sym.3=-0x1.f1165e0000000p+1 bits=c0788b2f
+frustum.ztodepth.ortho.sym.3=-0x1.2d00000000000p+6 bits=c2968000
+frustum.ztodepth.d.sym.3=-0x1.fe77f5ca669abp+1 bits=c00fe77f5ca669ab
+frustum.ztodepth.persp.sym.4=-0x1.9000000000000p+6 bits=c2c80000
+frustum.ztodepth.ortho.sym.4=-0x1.9000000000000p+6 bits=c2c80000
+frustum.ztodepth.d.sym.4=-0x1.f400000000000p+9 bits=c08f400000000000
+frustum.depthtoz.persp.u16.0=0
+frustum.depthtoz.ortho.u16.0=0
+frustum.depthtoz.d.u16.0=0
+frustum.depthtoz.persp.u16.1=33098
+frustum.depthtoz.ortho.u16.1=661
+frustum.depthtoz.d.u16.1=32800
+frustum.depthtoz.persp.u16.2=59577
+frustum.depthtoz.ortho.u16.2=5957
+frustum.depthtoz.d.u16.2=59040
+frustum.depthtoz.persp.u16.3=64873
+frustum.depthtoz.ortho.u16.3=32436
+frustum.depthtoz.d.u16.3=64288
+frustum.depthtoz.persp.u16.4=65535
+frustum.depthtoz.ortho.u16.4=65535
+frustum.depthtoz.d.u16.4=65535
+frustum.depthtoz.persp.u24.0=0
+frustum.depthtoz.ortho.u24.0=0
+frustum.depthtoz.d.u24.0=0
+frustum.depthtoz.persp.u24.1=8473340
+frustum.depthtoz.ortho.u24.1=169466
+frustum.depthtoz.d.u24.1=8397004
+frustum.depthtoz.persp.u24.2=15252013
+frustum.depthtoz.ortho.u24.2=1525201
+frustum.depthtoz.d.u24.2=15114608
+frustum.depthtoz.persp.u24.3=16607748
+frustum.depthtoz.ortho.u24.3=8303874
+frustum.depthtoz.d.u24.3=16458128
+frustum.depthtoz.persp.u24.4=16777215
+frustum.depthtoz.ortho.u24.4=16777215
+frustum.depthtoz.d.u24.4=16777215
+frustum.depthtoz.persp.i31.0=0
+frustum.depthtoz.ortho.i31.0=0
+frustum.depthtoz.d.i31.0=0
+frustum.depthtoz.persp.i31.1=1010100960
+frustum.depthtoz.ortho.i31.1=20202040
+frustum.depthtoz.d.i31.1=1001001001
+frustum.depthtoz.persp.i31.2=1818181753
+frustum.depthtoz.ortho.i31.2=181818187
+frustum.depthtoz.d.i31.2=1801801801
+frustum.depthtoz.persp.i31.3=1979797959
+frustum.depthtoz.ortho.i31.3=989898979
+frustum.depthtoz.d.i31.3=1961961961
+frustum.depthtoz.persp.i31.4=2000000000
+frustum.depthtoz.ortho.i31.4=2000000000
+frustum.depthtoz.d.i31.4=2000000000
+frustum.depthtoz.persp.sym.0=-1000
+frustum.depthtoz.ortho.sym.0=-1000
+frustum.depthtoz.d.sym.0=-1000
+frustum.depthtoz.persp.sym.1=10
+frustum.depthtoz.ortho.sym.1=-980
+frustum.depthtoz.d.sym.1=1
+frustum.depthtoz.persp.sym.2=818
+frustum.depthtoz.ortho.sym.2=-819
+frustum.depthtoz.d.sym.2=801
+frustum.depthtoz.persp.sym.3=979
+frustum.depthtoz.ortho.sym.3=-11
+frustum.depthtoz.d.sym.3=961
+frustum.depthtoz.persp.sym.4=1000
+frustum.depthtoz.ortho.sym.4=1000
+frustum.depthtoz.d.sym.4=1000
+frustum.fovx=0x1.dac6700000000p-1 bits=3f6d6338
+frustum.fovy=0x1.85a3780000000p-1 bits=3f42d1bc
+rand32.nexti.0=20577a1a
+rand32.nexti.1=a81082b1
+rand32.nexti.2=1ca11c5c
+rand32.nexti.3=a6e60c0b
+rand32.nexti.4=8bfcf1ee
+rand32.nexti.5=c0ea1075
+rand32.nexti.6=e64d6750
+rand32.nexti.7=dc57126f
+rand32.nextf.0=0x1.5de8680000000p-1 bits=3f2ef434
+rand32.nextf.1=0x1.082b100000000p-3 bits=3e041588
+rand32.nextf.2=0x1.08e2e00000000p-2 bits=3e847170
+rand32.nextf.3=0x1.98302c0000000p-1 bits=3f4c1816
+rand32.nextf.4=0x1.f3c7b80000000p-1 bits=3f79e3dc
+rand32.nextf.5=0x1.a841d40000000p-1 bits=3f5420ea
+rand32.nextf.6=0x1.359d400000000p-1 bits=3f1acea0
+rand32.nextf.7=0x1.5c49bc0000000p-1 bits=3f2e24de
+rand48.nexti.0=2076018974
+rand48.nexti.1=138242978
+rand48.nexti.2=850008313
+rand48.nexti.3=200665164
+rand48.nexti.4=359542163
+rand48.nexti.5=1051491523
+rand48.nexti.6=1084671758
+rand48.nexti.7=852258251
+rand48.nextf.0=0x1.eef6247a7acdep-1 bits=3feeef6247a7acde
+rand48.nextf.1=0x1.07ad744c87910p-4 bits=3fb07ad744c87910
+rand48.nextf.2=0x1.9550c7c846418p-2 bits=3fd9550c7c846418
+rand48.nextf.3=0x1.7ebd098da5b10p-4 bits=3fb7ebd098da5b10
+rand48.nextf.4=0x1.56e2d935d6510p-3 bits=3fc56e2d935d6510
+rand48.nextf.5=0x1.f563e61c1035cp-2 bits=3fdf563e61c1035c
+rand48.nextf.6=0x1.029b1c38cf290p-1 bits=3fe029b1c38cf290
+rand48.nextf.7=0x1.96636e5c483d8p-2 bits=3fd96636e5c483d8

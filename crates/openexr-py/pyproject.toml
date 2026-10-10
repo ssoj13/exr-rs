@@ -1,0 +1,28 @@
+# maturin build config for the `OpenEXR` Python module.
+#   build:   maturin build --release      (wheel in target/wheels/)  — `bootstrap.py b p`
+#   dev:     maturin develop --release     (installs into the active venv)
+#   test:    pytest crates/openexr-py/tests
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "OpenEXR"
+description = "Pure-Rust OpenEXR Python bindings — a drop-in replacement for the OpenEXR Python module"
+requires-python = ">=3.8"
+license = { text = "BSD-3-Clause" }
+dependencies = ["numpy"]
+# `__version__` is set inside the module (from the OpenEXR API version we target);
+# maturin reads the wheel version from the crate's [package] version.
+dynamic = ["version"]
+
+[tool.maturin]
+# Produce the module as `OpenEXR` (matches `[lib] name`). abi3 → a single wheel
+# works on CPython >= 3.8.
+module-name = "OpenEXR"
+manifest-path = "Cargo.toml"
+features = ["pyo3/extension-module"]
+# `python/` holds the `OpenEXR` package: it re-exports the compiled extension (so
+# `import OpenEXR` is unchanged) and ships the companion `OpenEXR.Imath`, which its
+# `__init__` also registers as the top-level `Imath` (legacy API support).
+python-source = "python"

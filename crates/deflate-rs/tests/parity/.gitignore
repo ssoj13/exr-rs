@@ -1,0 +1,9 @@
+# Build artifacts from `cargo run -p xtask -- parity-deflate` (the C libdeflate
+# oracle). Only the source (oracle.c), the committed golden.txt, and the README
+# belong in git.
+oracle.exe
+oracle.obj
+*.obj
+*.exe
+*.pdb
+*.ilk

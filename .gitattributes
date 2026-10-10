@@ -1,0 +1,20 @@
+* text=auto eol=lf
+# Test fixtures and goldens are compared byte for byte: never guess them as text.
+*.exr binary
+*.sxr binary
+*.bin binary
+*.deflate binary
+*.f32 binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.wasm binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary

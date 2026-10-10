@@ -1,0 +1,19 @@
+[package]
+authors.workspace = true
+name = "xtask"
+version = "0.1.0"
+edition = "2024"
+license = "BSD-3-Clause"
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+
+# vcv-rs applies the MSVC toolchain env on Windows; it is a no-op stub elsewhere,
+# so we only depend on it on Windows to keep non-Windows builds lean.
+[target.'cfg(windows)'.dependencies]
+vcv-rs = { git = "ssh://git@github.com/ssoj13/vcv-rs.git", branch = "main" }

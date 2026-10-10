@@ -1,0 +1,24 @@
+[package]
+name = "exr-util"
+description = "Port of OpenEXR's OpenEXRUtil: in-memory flat and deep images, whole-file image I/O, CheckFile"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/exr_util.rs"
+
+[dependencies]
+exr-core = { path = "../exr-core" }
+imath-rs = { path = "../imath-rs" }
+log = { workspace = true }
+
+[dev-dependencies]
+exr-test-data = { workspace = true }
+
+[features]
+# Run the tests that read the private test image set (`exr-test-data`); off by default.
+test-data = []

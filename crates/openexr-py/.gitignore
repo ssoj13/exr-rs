@@ -1,0 +1,7 @@
+# maturin/cargo build artifacts for this excluded crate (its own target dir, since
+# it is not a workspace member) + Python caches.
+/target
+__pycache__/
+*.pyc
+*.so
+*.pyd

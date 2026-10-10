@@ -1,0 +1,83 @@
+[workspace]
+resolver = "3"
+members = ["crates/imath-rs", "crates/deflate-rs", "crates/exr-core", "crates/exr-image", "crates/exr-util", "crates/cryptomatte", "crates/exr-gpu", "crates/exr-view", "crates/exr-test-data", "xtask"]
+# `openexr-py` is a PyO3 cdylib built ONLY by maturin (`bootstrap.py b p`), NOT by
+# cargo: its `extension-module` feature does not link libpython, which would break
+# `cargo test --workspace` (a test binary needs libpython). It still path-depends on
+# the workspace crates, so it tracks them. See crates/openexr-py/CLAUDE.md.
+exclude = ["crates/openexr-py"]
+
+# Shared metadata inherited by member crates via `<field>.workspace = true`.
+[workspace.package]
+authors = ["Alex Khalyavin <joss13@gmail.com>"]
+version = "0.1.0"
+edition = "2024"
+license = "BSD-3-Clause"
+repository = "https://github.com/ssoj13/exr-rs"
+rust-version = "1.96"  # vfx-ocio's vfx-lut (exr-view's OCIO) requires 1.96; raised 2026-09-29 (was the 1.85 edition-2024 floor)
+
+# Shared dependency versions; members opt in via `<dep> = { workspace = true }`.
+[workspace.dependencies]
+rayon = "1"
+smallvec = "1"
+# Logging facade (libraries) + env_logger backend (binaries only). The `log`
+# crate is a zero-cost facade: members emit `log::{info,debug,trace,warn,error}`
+# and pick NO backend; only the two binaries (`exr-rs` CLI + `exr-view`) init
+# `env_logger`. This keeps the libraries (exr-core, scanseq) lean. See the
+# logging design in CLAUDE.md.
+log = "0.4"
+env_logger = "0.11"
+# MurmurHash3: x64_128 (Alembic) + x86_32 (Cryptomatte).
+murmur3 = { git = "ssh://git@github.com/ssoj13/murmur3.git", branch = "main" }
+# Cross-arch SIMD primitives (safe API, unsafe stays inside that crate) --
+# the ONE place SIMD-accelerated codec kernels live outside deflate-rs; see
+# CLAUDE.md's "Key invariants" for why (this crate never writes its own
+# core::arch/unsafe).
+codec-simd = { git = "ssh://git@github.com/ssoj13/codec-simd-rs.git", branch = "main" }
+# Locates the private test image set (EXR_TEST_DATA / ../exr-rs-tests); the tests that read it
+# are behind each crate's `test-data` feature, off by default.
+exr-test-data = { path = "crates/exr-test-data" }
+
+# The root package is the future thin CLI (exrinfo-like). Keeps src/main.rs working.
+[package]
+name = "exr-rs"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The CLI drives the verified exr-core readers/writers + the W10-1 `api` facade.
+exr-core = { path = "crates/exr-core" }
+# Cryptomatte inspect / extract / encode subcommand.
+cryptomatte = { path = "crates/cryptomatte" }
+imath-rs = { path = "crates/imath-rs" }
+# OpenEXRUtil port: `check` (ImfCheckFile) and the whole-image tools.
+exr-util = { path = "crates/exr-util" }
+# Logging facade + backend: the CLI is a BINARY, so it initialises env_logger
+# (default level info; `RUST_LOG` / `-v`/`-vv` override). Libraries only depend
+# on the `log` facade — the backend lives here.
+log = { workspace = true }
+env_logger = { workspace = true }
+# Argument parsing for the subcommands: one declarative definition per command gives the help
+# text, the errors and the "no arguments -> help" default from the same source.
+clap = { version = "4.6", features = ["derive"] }
+# The GPU viewer behind the `view`/`v` command. Optional so a lean CLI build can
+# drop the egui/wgpu stack; enabled by default (the `viewer` feature) for now.
+exr-view = { path = "crates/exr-view", optional = true }
+
+[dev-dependencies]
+# The private test image set, for the tool parity tests (`tests/parity_tool_*.rs`).
+exr-test-data = { workspace = true }
+
+[features]
+# `viewer` wires the `exr-rs view <file>` (alias `v`) GPU viewer (egui + wgpu), `ofx` its OpenFX
+# effects; both default-on. `--no-default-features` yields a pure inspector/converter CLI with no
+# GUI dependencies.
+default = ["viewer", "ofx"]
+viewer = ["dep:exr-view"]
+# OpenFX image effects in the viewer (ofx-rs `ofx-runtime` + `ofx-host-egui`; the built-in effects
+# linked in, installed plug-ins from OFX_PLUGIN_PATH and the OS plug-in dirs).
+ofx = ["viewer", "exr-view/ofx"]

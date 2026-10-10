@@ -1,0 +1,13 @@
+{
+  "$comment": "The C++ libraries the parity oracles (cargo xtask parity / parity-deflate / parity-exr) link, pinned to the versions the goldens were made with. CI installs exactly these (triplet x64-windows-static-release); locally any vcpkg tree with the same versions works.",
+  "name": "exr-rs-oracles",
+  "version-string": "0",
+  "dependencies": ["imath", "libdeflate", "openexr"],
+  "builtin-baseline": "4056a718039dc20216cccb960bccce4b9ad69519",
+  "overrides": [
+    { "name": "openexr", "version": "3.4.15" },
+    { "name": "imath", "version": "3.2.2" },
+    { "name": "libdeflate", "version": "1.26" },
+    { "name": "openjph", "version": "0.31.0" }
+  ]
+}

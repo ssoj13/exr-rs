@@ -1,0 +1,20 @@
+[package]
+authors.workspace = true
+name = "deflate-rs"
+description = "Pure-Rust 1:1 port of libdeflate (DEFLATE/zlib/gzip) for exr-rs"
+keywords = ["deflate", "libdeflate", "zlib", "compression", "gzip"]
+categories = ["compression", "encoding"]
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+# Engagement probes (`.bughunt/engagement_audit.md`, `src/probe.rs`) --
+# normally compiled only under `cfg(test)`; this feature lets an external
+# tool (a benchmark, a bug report) opt into the same counters outside a
+# test binary without turning them on unconditionally in every build.
+probe = []
+
+[dependencies]

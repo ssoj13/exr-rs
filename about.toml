@@ -1,0 +1,24 @@
+# cargo-about configuration: `ci.py` renders `about.hbs` into THIRD-PARTY-LICENSES.html
+# for every release ZIP. The list holds every license in the `exr-rs` dependency graph;
+# a new license makes the release fail until it is reviewed and added here.
+accepted = [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "bzip2-1.0.6",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+# Only what is compiled into the shipped binary.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true

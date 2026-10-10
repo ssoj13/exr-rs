@@ -1,0 +1,36 @@
+[package]
+authors.workspace = true
+name = "exr-image"
+description = "OpenEXR decoding for the `image` crate through exr-core (decoding + format-detection hooks)"
+keywords = ["exr", "openexr", "image", "hdr"]
+categories = ["multimedia::images"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/exr_image.rs"
+
+[dependencies]
+exr-core = { path = "../exr-core" }
+# Hooks need >= 0.25.8. No `image` codec is needed for the hook itself; the format set is the
+# `image-formats` feature below, and `image/exr` (crates.io exrs) is never enabled.
+image = { version = "0.25.10", default-features = false }
+
+[features]
+default = ["image-formats"]
+# SSOT of the ecosystem's `image` format set: image 0.25's own `default` (`rayon` +
+# `default-formats`) MINUS `exr`. A crate that used image's default set declares
+# `image = { version = "0.25", default-features = false }` + `exr-image` and gets exactly this set via
+# Cargo feature unification. A crate with its own minimal format list keeps that list and takes
+# `exr-image = { default-features = false }` for the EXR hook only.
+image-formats = [
+    "image/rayon", "image/avif", "image/bmp", "image/dds", "image/ff", "image/gif", "image/hdr",
+    "image/ico", "image/jpeg", "image/png", "image/pnm", "image/qoi", "image/tga", "image/tiff",
+    "image/webp",
+]
+
+[dev-dependencies]
+imath-rs = { path = "../imath-rs" }

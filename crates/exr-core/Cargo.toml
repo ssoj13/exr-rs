@@ -1,0 +1,69 @@
+[package]
+authors.workspace = true
+name = "exr-core"
+description = "Pure-Rust 1:1 port of OpenEXR (IlmImf): container, attributes, codecs, image API"
+keywords = ["exr", "openexr", "vfx", "hdr", "image"]
+categories = ["multimedia::images", "encoding", "parser-implementations"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+imath-rs = { path = "../imath-rs" }
+deflate-rs = { path = "../deflate-rs" }
+# HTJ2K codec (OpenEXR 3.4 extension): pure-Rust OpenJPH port for the JPEG 2000
+# codestream. Used only by `compressor/htj2k.rs`.
+jph-rs = { git = "ssh://git@github.com/ssoj13/jph-rs.git", branch = "main" }
+# Logging facade ONLY (no backend). exr-core is a LIBRARY: it emits structured
+# `log::{info,debug,trace}` at the read/write/constructor/codec seams but never
+# initialises a logger — the binary that links it (exr-rs CLI / exr-view) picks
+# the env_logger backend. Approved infra: the facade is zero-cost when the level
+# is disabled and adds no runtime/feature weight, keeping the crate lean.
+log = { workspace = true }
+# MurmurHash3 (x86_32 + x64_128) for the structured IDManifest model's
+# `MurmurHash3_32`/`MurmurHash3_64` hash schemes (`attr::id_manifest::hash`,
+# C-15). Not format-intrinsic to OpenEXR itself (a general-purpose hash the
+# format happens to call), so the "port everything ourselves" rule does not
+# apply; already an approved git dependency used the same way by `cryptomatte`.
+murmur3 = { workspace = true }
+# W3.9 chunk-level parallelism (`threading.rs`): the dedicated pool
+# `set_global_thread_count`/per-file `ThreadCount` builds. Approved
+# infrastructure (root CLAUDE.md), already used by `exr-view`; not
+# format-intrinsic, so the "port everything ourselves" rule does not apply.
+# Phase A (this dependency + `threading.rs` + benches) does not wire it into
+# any reader/writer — that is phase B (after C-18/C-08 land).
+rayon.workspace = true
+# `misc::plan_disjoint`'s per-chunk range SET (alloc audit follow-up,
+# 2026-09-24): most callers (flat scanline/tiled) pass exactly one range per
+# chunk, only deep needs more (one per active slice) -- `SmallVec<[Range; 1]>`
+# avoids a heap allocation for the overwhelmingly common single-range case.
+# Approved workspace infrastructure (root CLAUDE.md), not format-intrinsic.
+smallvec.workspace = true
+# ZIP/RLE decode-side predictor SIMD (`compressor::predictor`'s
+# reconstruct/interleave): the SAFE codec-simd API, not a hand-rolled
+# core::arch/unsafe port in this crate — see CLAUDE.md's "Key invariants"
+# ("no unsafe in exr-core; SIMD via codec-simd").
+codec-simd = { workspace = true }
+
+[dev-dependencies]
+# Phase 9 W9-1 benchmark harness (statistical, warm-run throughput). Used only
+# by `benches/codecs.rs`; not part of the library build. `default-features =
+# false` drops the optional plotting/HTML backend so the bench builds with no
+# extra native/toolchain deps (criterion still reports per-bench ns + MB/s).
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+# Locates the OpenEXR / openexr-images test data (corpus, facade, header tests).
+exr-test-data = { workspace = true }
+
+[features]
+# Run the tests that read the private test image set (`exr-test-data`); off by default.
+test-data = []
+
+[[bench]]
+name = "codecs"
+harness = false
+
+[[bench]]
+name = "parallel"
+harness = false

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>exr-rs third-party licenses</title>
+<style>
+body { font-family: sans-serif; max-width: 960px; margin: 2em auto; padding: 0 1em; }
+pre { white-space: pre-wrap; background: #f4f4f4; padding: 1em; }
+</style>
+</head>
+<body>
+<h1>Third-party licenses</h1>
+<p>License texts of the Rust crates compiled into the <code>exr-rs</code> binary.
+The notices of the C and C++ projects that exr-rs ports are in THIRD-PARTY-NOTICES.md.</p>
+<h2>Overview</h2>
+<ul>
+{{#each overview}}
+<li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
+{{/each}}
+</ul>
+{{#each licenses}}
+<h2 id="{{id}}">{{name}}</h2>
+<p>Used by:</p>
+<ul>
+{{#each used_by}}
+<li>{{crate.name}} {{crate.version}}</li>
+{{/each}}
+</ul>
+<pre>{{text}}</pre>
+{{/each}}
+</body>
+</html>

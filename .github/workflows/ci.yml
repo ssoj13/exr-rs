@@ -1,0 +1,287 @@
+# CI and release for exr-rs.
+#
+# build    clippy, tests, release build and one portable ZIP per platform
+#          (python bootstrap.py ci, see ci.py): Linux on every push/PR, Linux +
+#          Windows + macOS on tags and manual runs (macOS minutes cost ~10x).
+# gate     tags and manual runs: THE gate on Windows -- the C++ parity oracles
+#          (Imath, libdeflate, OpenEXR from xtask/vcpkg.json) and every test on the
+#          private image set (ssoj13/exr-rs-tests); the regenerated goldens must
+#          equal the committed ones.
+# wheels   tags and manual runs: the `OpenEXR` Python wheels (crates/openexr-py,
+#          abi3-py38), tested on every runnable platform.
+# release  v* tags: publish the three ZIPs and the wheels as a GitHub release.
+#
+# Most ssoj13 git dependencies are private and locked as ssh://git@github.com/ssoj13/...
+# URLs. The repository secret DEPS_TOKEN (a fine-grained PAT, "Contents: read" on the
+# private ssoj13 repositories in Cargo.lock plus exr-rs and exr-rs-tests) lets cargo
+# fetch them over https: git's url.insteadOf rewrites the ssh URL, and
+# CARGO_NET_GIT_FETCH_WITH_CLI makes cargo use git, which honours it.
+name: CI and release
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+  PYTHONUTF8: '1'
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # Private-repo minutes cost Linux 1x, Windows ~2x, macOS ~10x: pushes and PRs
+        # build Linux only; tags and manual runs build all three platforms.
+        # Linux uses the oldest supported image: its glibc (2.35) is the ZIP's baseline.
+        include: >-
+          ${{ fromJSON((github.ref_type == 'tag' || github.event_name == 'workflow_dispatch')
+          && '[{"platform":"linux-x86_64","os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},
+          {"platform":"windows-x86_64","os":"windows-latest","target":"x86_64-pc-windows-msvc"},
+          {"platform":"macos-aarch64","os":"macos-15","target":"aarch64-apple-darwin"}]'
+          || '[{"platform":"linux-x86_64","os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"}]') }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      # The debug test build plus the release build do not fit the ~14 GB the image leaves.
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: Route private git dependencies through DEPS_TOKEN
+        shell: bash
+        env:
+          DEPS_TOKEN: ${{ secrets.DEPS_TOKEN }}
+        run: |
+          test -n "$DEPS_TOKEN" || { echo "::error::Secret DEPS_TOKEN is not set"; exit 1; }
+          [[ "$DEPS_TOKEN" != *[[:space:]]* ]] || { echo "::error::Secret DEPS_TOKEN contains whitespace (a pasted newline?); set it again"; exit 1; }
+          # Both ssh spellings: the lockfile's ssh:// URLs and scp-style submodule URLs
+          # (git@github.com:owner/repo). The runner has no ssh key.
+          git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "git@github.com:"
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Set up stable Rust
+        shell: bash
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup component add clippy llvm-tools-preview
+          rustup target add "${{ matrix.target }}"
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: . -> target/portable
+          key: ${{ matrix.target }}
+      # Renders THIRD-PARTY-LICENSES.html for the ZIP (ci.py `licenses`).
+      - uses: taiki-e/install-action@v2.87.27
+        with:
+          tool: cargo-about@0.9.2
+      - name: Clippy, test, build and package
+        run: python bootstrap.py ci --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ${{ matrix.platform }}
+          path: dist/*.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  gate:
+    name: gate (C++ parity + private images)
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      EXR_TEST_DATA: ${{ github.workspace }}\exr-rs-tests
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\.vcpkg-bin
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: ssoj13/exr-rs-tests
+          token: ${{ secrets.DEPS_TOKEN }}
+          path: exr-rs-tests
+          persist-credentials: false
+      - name: Route private git dependencies through DEPS_TOKEN
+        shell: bash
+        env:
+          DEPS_TOKEN: ${{ secrets.DEPS_TOKEN }}
+        run: |
+          test -n "$DEPS_TOKEN" || { echo "::error::Secret DEPS_TOKEN is not set"; exit 1; }
+          [[ "$DEPS_TOKEN" != *[[:space:]]* ]] || { echo "::error::Secret DEPS_TOKEN contains whitespace (a pasted newline?); set it again"; exit 1; }
+          # Both ssh spellings: the lockfile's ssh:// URLs and scp-style submodule URLs
+          # (git@github.com:owner/repo). The runner has no ssh key.
+          git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "git@github.com:"
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Set up stable Rust
+        shell: bash
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup component add clippy
+      - uses: actions/cache@v6.1.0
+        with:
+          path: .vcpkg-bin
+          key: vcpkg-x64-windows-static-release-${{ hashFiles('xtask/vcpkg.json') }}
+      - name: Install the pinned C++ oracle libraries
+        shell: pwsh
+        run: |
+          $vcpkg = $env:VCPKG_INSTALLATION_ROOT
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          # The manifest's builtin-baseline and the old port trees its overrides name
+          # must be in the runner's vcpkg clone.
+          if ((git -C $vcpkg rev-parse --is-shallow-repository) -eq 'true') {
+            git -C $vcpkg fetch --quiet --unshallow origin
+          } else {
+            git -C $vcpkg fetch --quiet origin
+          }
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $root = Join-Path $env:RUNNER_TEMP vcpkg-installed
+          & "$vcpkg\vcpkg.exe" install --x-manifest-root=xtask "--x-install-root=$root" `
+            --triplet x64-windows-static-release --host-triplet x64-windows-static-release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "VCPKG_INSTALLED=$root\x64-windows-static-release" >> $env:GITHUB_ENV
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: gate
+      # The oracles first: they leave oracle.exe where the cargo tests find it.
+      - name: C++ parity oracles
+        run: python bootstrap.py t parity deflate exr
+      - name: Workspace and Python tests on the private image set
+        run: python bootstrap.py t cargo python
+      - name: The C++ oracles reproduce the committed goldens
+        run: git diff --exit-code
+
+  wheels:
+    name: wheel ${{ matrix.os }} ${{ matrix.target }}
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      MANIFEST: crates/openexr-py/Cargo.toml
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64, test: true }
+          - { os: ubuntu-latest, target: aarch64, test: false } # cross-built, not runnable here
+          - { os: windows-latest, target: x64, test: true }
+          # Both macOS wheels come from the arm64 runner; the x86_64 one is
+          # cross-built and so cannot be tested there.
+          - { os: macos-15, target: x86_64, test: false }
+          - { os: macos-15, target: aarch64, test: true }
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Route private git dependencies through DEPS_TOKEN
+        shell: bash
+        env:
+          DEPS_TOKEN: ${{ secrets.DEPS_TOKEN }}
+        run: |
+          test -n "$DEPS_TOKEN" || { echo "::error::Secret DEPS_TOKEN is not set"; exit 1; }
+          [[ "$DEPS_TOKEN" != *[[:space:]]* ]] || { echo "::error::Secret DEPS_TOKEN contains whitespace (a pasted newline?); set it again"; exit 1; }
+          # Both ssh spellings: the lockfile's ssh:// URLs and scp-style submodule URLs
+          # (git@github.com:owner/repo). The runner has no ssh key.
+          git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "git@github.com:"
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.13'
+      # The runner's preinstalled Rust may be older than the workspace's rust-version.
+      - name: Set up stable Rust
+        shell: bash
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1.51.0
+        env:
+          DEPS_TOKEN: ${{ secrets.DEPS_TOKEN }}
+        with:
+          command: build
+          args: --release --locked --out dist -m ${{ env.MANIFEST }}
+          target: ${{ matrix.target }}
+          manylinux: '2_28'
+          # The manylinux build runs in a container: hand it the token and redo
+          # the URL rewrite in there.
+          docker-options: -e DEPS_TOKEN -e CARGO_NET_GIT_FETCH_WITH_CLI
+          before-script-linux: |
+            git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+            git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "git@github.com:"
+      - name: Test the wheel
+        if: matrix.test
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest numpy
+          python -m pip install --no-index --find-links dist OpenEXR
+          # The tests on the private image set skip here (no EXR_TEST_DATA); the gate runs them.
+          python -m pytest crates/openexr-py/tests -q -rs
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  release:
+    name: Publish ZIPs and wheels
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [build, gate, wheels]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: '*'
+          path: release
+          merge-multiple: true
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          for platform in windows-x86_64 linux-x86_64 macos-aarch64; do
+            test -f "release/exr-rs-${TAG}-${platform}.zip"
+          done
+          shopt -s nullglob
+          archives=(release/*.zip)
+          wheels=(release/*.whl)
+          test "${#archives[@]}" -eq 3
+          test "${#wheels[@]}" -eq 5
+          prerelease=()
+          if [[ "$TAG" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --draft --generate-notes \
+              --title "$TAG" "${prerelease[@]}"
+          fi
+          gh release upload "$TAG" "${archives[@]}" "${wheels[@]}" --clobber
+          gh release edit "$TAG" --draft=false "${prerelease[@]}"

@@ -1,0 +1,13 @@
+[package]
+name = "exr-test-data"
+description = "Where exr-rs's test image set is: EXR_TEST_DATA, else a sibling exr-rs-tests checkout"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+path = "src/exr_test_data.rs"
