@@ -29,7 +29,7 @@
 //!   `imath_float_to_half`) already implements the 65520 threshold, so
 //!   `float_to_half` needs no extra clamping.
 //!
-//! Both boundaries are oracle-verified: `tests/s01_half_boundary.rs`
+//! Both boundaries are oracle-verified: `tests/half_conversion_boundary.rs`
 //! (->HALF) and `tests/uint_conversion_boundary.rs` (->UINT).
 
 use imath_rs::half::HALF_MAX;

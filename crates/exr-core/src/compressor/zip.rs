@@ -499,7 +499,7 @@ mod tests {
     /// the counted form) only checked the decoded length, so it silently
     /// accepted the trailing byte.
     #[test]
-    fn zip_rejects_trailing_bytes_after_zlib_stream_k01() {
+    fn zip_rejects_trailing_bytes_after_zlib_stream() {
         let mut data = Vec::new();
         for i in 0..64u16 {
             data.extend_from_slice(&i.to_le_bytes());
@@ -525,7 +525,7 @@ mod tests {
     /// per-header overrides (never the process-global default) so this test
     /// has no cross-test-parallelism dependency on that shared state.
     #[test]
-    fn zip_level_from_header_changes_deflate_output_k06() {
+    fn zip_level_from_header_changes_deflate_output() {
         // Compressible but not so uniform that different levels degenerate
         // to the same bytes.
         let mut data = Vec::new();

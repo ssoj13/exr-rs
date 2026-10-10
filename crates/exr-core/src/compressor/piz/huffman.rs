@@ -1533,7 +1533,7 @@ mod tests {
     /// A real 512 MiB fixture is impractical, so this uses a tiny injected
     /// limit that `UNCOMPRESSED_ARRAY`'s real bit count exceeds.
     #[test]
-    fn compress_with_limit_returns_none_over_ceiling_k02() {
+    fn compress_with_limit_returns_none_over_ceiling() {
         // A real compress of this fixture needs far more than 8 bits.
         let out = compress_with_limit(&UNCOMPRESSED_ARRAY, 8).unwrap();
         assert!(out.is_none(), "over-ceiling bit count must yield None, not a wrapped header");

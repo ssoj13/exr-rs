@@ -1865,7 +1865,7 @@ mod tests {
     /// `breakScanLine` in C++ — only the tiled writer has `breakTile`; the
     /// deep scanline writer's own missing-API list is just this one method).
     #[test]
-    fn d13_update_preview_image() {
+    fn update_preview_image_replaces_preview() {
         use crate::attr::{PreviewImage, PreviewImageAttribute, PreviewRgba};
 
         let (w, h) = (4, 3);
@@ -1914,7 +1914,7 @@ mod tests {
     /// error (`ExrError::Logic`), matching C++'s `LogicExc` throw, instead of
     /// silently no-oping.
     #[test]
-    fn d13_update_preview_image_without_preview_errors() {
+    fn update_preview_image_without_preview_errors() {
         use crate::attr::PreviewRgba;
 
         let (w, h) = (4, 3);
@@ -2004,7 +2004,7 @@ mod tests {
     /// decompressing. ZIPS (not NONE) so a byte-identical result actually
     /// proves `copy_pixels` never decompresses+recompresses.
     #[test]
-    fn d13_copy_pixels_byte_identical() {
+    fn copy_pixels_byte_identical() {
         let (w, h) = (4, 3);
         let header = make_deep_header(w, h, Compression::Zips);
         let (sc, data, fb, _counts) = make_deep_pixels(w, h);
@@ -2036,7 +2036,7 @@ mod tests {
     /// `copy_pixels` must reject copying into a file that already has
     /// pixel data (C++ LogicExc "already contains pixel data").
     #[test]
-    fn d13_copy_pixels_rejects_when_destination_already_has_pixel_data() {
+    fn copy_pixels_rejects_when_destination_already_has_pixel_data() {
         let (w, h) = (4, 3);
         let header = make_deep_header(w, h, Compression::NoCompression);
         let (sc, data, fb, _counts) = make_deep_pixels(w, h);

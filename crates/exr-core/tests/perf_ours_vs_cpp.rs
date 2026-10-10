@@ -4,7 +4,7 @@
 //! `OutputFile::with_num_threads`/`InputFile::with_num_threads`, C++'s via
 //! `oracle.cpp`'s `bench-io` mode (`setGlobalThreadCount`) — for every codec in
 //! `Compression::ALL`, and logs a per-codec read+write wall-time table to
-//! `.bughunt/bench/ours_vs_cpp_t<threads>.log`.
+//! `target/bench/ours_vs_cpp_t<threads>.log`.
 //!
 //! This is a THROUGHPUT comparison, not a byte-parity one, but the input is
 //! identical: `make_pixels` builds the image once and C++ reads that raw
@@ -19,7 +19,7 @@
 //! Run explicitly on a quiet machine (ignored by default — real file I/O,
 //! ~1 min per codec and thread count):
 //! ```text
-//! cargo test -p exr-core --release --test w39b_cpp_comparison -- --ignored --nocapture
+//! cargo test -p exr-core --release --test perf_ours_vs_cpp -- --ignored --nocapture
 //! ```
 
 mod support;
@@ -228,14 +228,15 @@ fn run_comparison(threads: i32) {
     let dir = std::env::temp_dir();
     let (pixels, fb) = make_pixels();
     // The one input both sides compress (C++ reads it in `bench-io`).
-    let raw = dir.join(format!("w39b_cmp_pixels_t{threads}.raw"));
+    let raw = dir.join(format!("perf_cmp_pixels_t{threads}.raw"));
     std::fs::write(&raw, &pixels).unwrap();
     let raw = raw.to_str().unwrap().to_string();
 
     // Every run is logged as it happens (per-repeat samples, then the table), so a long run
     // can be followed and its numbers are quoted from the log, never retyped.
     let log_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../../.bughunt/bench/ours_vs_cpp_t{threads}.log"));
+        .join(format!("../../target/bench/ours_vs_cpp_t{threads}.log"));
+    std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
     let mut log = std::fs::File::create(&log_path).unwrap();
     let mut say = |line: String| {
         println!("{line}");
@@ -257,9 +258,9 @@ fn run_comparison(threads: i32) {
     for comp in Compression::ALL {
         let name = comp.name();
         let header = make_header(comp);
-        let ours_path = dir.join(format!("w39b_cmp_ours_{name}_t{threads}.exr"));
+        let ours_path = dir.join(format!("perf_cmp_ours_{name}_t{threads}.exr"));
         let ours_path = ours_path.to_str().unwrap().to_string();
-        let cpp_path = dir.join(format!("w39b_cmp_cpp_{name}_t{threads}.exr"));
+        let cpp_path = dir.join(format!("perf_cmp_cpp_{name}_t{threads}.exr"));
         let cpp_path = cpp_path.to_str().unwrap().to_string();
 
         let (mut ow, mut or, mut cw, mut cr) = (vec![], vec![], vec![], vec![]);
@@ -349,7 +350,7 @@ fn profile_ours_single_threaded() {
     };
     let header = make_header(comp);
     let (pixels, fb) = make_pixels();
-    let path = std::env::temp_dir().join(format!("w39b_profile_ours_{codec}.exr"));
+    let path = std::env::temp_dir().join(format!("perf_profile_ours_{codec}.exr"));
     let path = path.to_str().unwrap().to_string();
     for i in 0..REPEATS {
         let (w, r) = time_ours(&path, &header, &pixels, &fb, 0);

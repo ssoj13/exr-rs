@@ -2340,7 +2340,7 @@ mod tests {
     /// zero channels; HTJ2K's codestream framing is not a no-op on empty
     /// input either) -- covering every block height in the module.
     #[test]
-    fn s15_writer_skips_codec_on_a_block_with_no_sampled_line() {
+    fn writer_skips_codec_on_a_block_with_no_sampled_line() {
         for comp in [
             Compression::Piz,
             Compression::Zip,

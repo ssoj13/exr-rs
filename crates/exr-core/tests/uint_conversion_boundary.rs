@@ -5,11 +5,11 @@
 //! slice regardless of its on-disk type, exercising C++'s
 //! `OpenEXRCore/unpack.c` -> `internal_coding.h::half_to_uint`/
 //! `float_to_uint` conversion paths directly -- the mirror of
-//! `s01_half_boundary.rs`'s ->HALF coverage, completing another pair of
+//! `half_conversion_boundary.rs`'s ->HALF coverage, completing another pair of
 //! cells in the pixel-type conversion matrix `misc::copy_into_frame_buffer`
 //! implements on read.
 //!
-//! Same pattern as `s01_half_boundary.rs`: the C++ oracle output is a
+//! Same pattern as `half_conversion_boundary.rs`: the C++ oracle output is a
 //! COMMITTED fixture (captured from a real `oracle.exe read-as-uint` run
 //! against files written by our own trusted `NO_COMPRESSION` writer), so
 //! this test is oracle-free once committed, but re-derives the fixture from

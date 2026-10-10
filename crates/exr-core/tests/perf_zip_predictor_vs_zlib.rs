@@ -12,7 +12,7 @@
 //!
 //! Run explicitly (ignored by default):
 //! ```text
-//! cargo test -p exr-core --release --test w39b_zip_predictor_vs_zlib -- --ignored --nocapture
+//! cargo test -p exr-core --release --test perf_zip_predictor_vs_zlib -- --ignored --nocapture
 //! ```
 //!
 //! Bench discipline: run one benchmark at a time on a quiet machine — enforced
@@ -44,7 +44,7 @@ fn hash01(mut x: u32) -> f32 {
 /// Cosmetic gradient + a little noise -- realistically compressible HALF
 /// data (a flat/zero buffer would over-flatter the predictor's cost and a
 /// pure-random buffer would defeat ZIP outright; this matches
-/// `w39b_codec_isolation.rs`'s `sample()`).
+/// `perf_codec_isolation.rs`'s `sample()`).
 fn sample(c: usize, x: usize, y: usize, w: usize, h: usize) -> f32 {
     let gx = x as f32 / w as f32;
     let gy = y as f32 / h as f32;

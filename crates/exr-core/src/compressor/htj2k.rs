@@ -1558,7 +1558,7 @@ mod tests {
     /// code only range-checked each index, so `[0, 0]` decoded — two codestream
     /// components writing the same file channel and another left zero.
     #[test]
-    fn htj2k_rejects_duplicate_file_index_h01() {
+    fn htj2k_rejects_duplicate_file_index() {
         let (w, h) = (256i32, 64i32);
         let chans = [("H1", PixelType::Half), ("H2", PixelType::Half)];
         let hdr = make_header(w, h, &chans);
@@ -1594,7 +1594,7 @@ mod tests {
     /// per-component `recon_width`/`recon_height`/`downsampling` cross-check.
     /// The old code only validated the overall width/height/component count.
     #[test]
-    fn htj2k_rejects_swapped_component_geometry_h02() {
+    fn htj2k_rejects_swapped_component_geometry() {
         let (w, h) = (32i32, 16i32);
         let mut hdr = Header::with_dimensions(
             w,
@@ -1777,7 +1777,7 @@ mod tests {
     /// count by one relative to `channel_width` (which every per-line loop
     /// already uses), sizing `bpl`/`uncompressed_size` too small.
     #[test]
-    fn htj2k_subsampled_odd_min_x_round_trips_h07() {
+    fn htj2k_subsampled_odd_min_x_round_trips() {
         // Data window x in [2, 33] (32 columns, min_x = 2 is ALIGNED to the
         // xs=2 sub-sampling), y in [0, 15]. Before the fix, `channel_byte_width`
         // computed `divp(image_width, xs)` (min_x == 0 assumed), which happens
@@ -1845,7 +1845,7 @@ mod tests {
     /// own `y_sampling` includes; every error path returns `Err` before
     /// `self.out` would ever be read as a result). Poison `self.out` with an
     /// implausible value BEFORE the first real call on the SAME subsampled
-    /// (planar) fixture `htj2k_subsampled_odd_min_x_round_trips_h07` uses,
+    /// (planar) fixture `htj2k_subsampled_odd_min_x_round_trips` uses,
     /// then diff against a fresh instance -- proves that empirically rather
     /// than trusting the trace alone.
     #[test]
@@ -2067,7 +2067,7 @@ mod tests {
     /// a defence-in-depth `Err` here too — never a raw panic — rather than to
     /// claim this is how a real file could ever reach the codec.
     #[test]
-    fn htj2k_subsampled_unaligned_min_x_errors_not_panics_h07() {
+    fn htj2k_subsampled_unaligned_min_x_errors_not_panics() {
         let (min_x, max_x, min_y, max_y) = (1i32, 32i32, 0i32, 15i32);
         let h = max_y - min_y + 1;
         let hdr = {

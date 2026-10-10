@@ -763,7 +763,7 @@ mod tests {
     /// in front-to-back order accumulate to `0.75` (hand-derived: `0.5 +
     /// (1-0.5)*0.5`), and the empty second pixel composites to `0`.
     #[test]
-    fn d12_single_source_front_to_back() {
+    fn composite_single_source_front_to_back() {
         let w = 2;
         let channels = ["Z", "A"];
         let counts = [2u32, 0];
@@ -794,7 +794,7 @@ mod tests {
     /// front (nearer) opaque sample must win regardless of source order,
     /// verified via a THIRD channel ("R") whose value differs per source.
     #[test]
-    fn d12_multi_source_sorted_front_to_back() {
+    fn composite_multi_source_sorted_front_to_back() {
         let w = 1;
         let channels = ["Z", "A", "R"];
 

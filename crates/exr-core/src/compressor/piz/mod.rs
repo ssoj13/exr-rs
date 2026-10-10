@@ -1132,7 +1132,7 @@ mod tests {
     /// `huffman::compress_with_limit` — mirroring C's `hufEncode`
     /// `ARGUMENT_OUT_OF_RANGE` -> raw-store path (`internal_piz.c:596-603`,
     /// `internal_huf.c:846-848`). `huffman::tests::
-    /// compress_with_limit_returns_none_over_ceiling_k02` already proves the
+    /// compress_with_limit_returns_none_over_ceiling` already proves the
     /// PRIMITIVE returns `None` over a tiny ceiling; this test proves
     /// `PizCompressor` itself is actually WIRED to that primitive and takes
     /// the fallback branch through the real `Compressor::compress` seam --
@@ -1147,7 +1147,7 @@ mod tests {
     /// bit-count-exceeded branch without needing the real ~512 MiB+ fixture
     /// that would naturally trigger it.
     #[test]
-    fn k02_huf_bit_limit_exceeded_falls_back_to_raw_through_piz_compressor() {
+    fn huf_bit_limit_exceeded_falls_back_to_raw_through_piz_compressor() {
         let (w, h) = (64i32, 32i32); // one full 32-line PIZ block
         let chans = [
             ("B", PixelType::Half),
@@ -1163,7 +1163,7 @@ mod tests {
         let baseline_compressed = baseline.compress(&line, 0).unwrap();
         assert!(
             baseline_compressed.len() < line.len(),
-            "fixture must genuinely compress without the K-02 override, or this \
+            "fixture must genuinely compress without the bit-limit override, or this \
              test cannot distinguish the bit-limit fallback from an unrelated \
              no-shrink raw-store"
         );
@@ -1171,7 +1171,7 @@ mod tests {
         // Same image, same compressor construction, but with the test
         // seam forcing the "entropy-coded bit count doesn't fit" branch --
         // the same tiny ceiling `huffman::tests::
-        // compress_with_limit_returns_none_over_ceiling_k02` uses.
+        // compress_with_limit_returns_none_over_ceiling` uses.
         let mut c = PizCompressor::new(&hdr, line.len() + 64, 32).unwrap();
         c.set_huf_bit_limit_for_test(8);
         let compressed = c.compress(&line, 0).unwrap().to_vec();

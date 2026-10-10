@@ -2778,7 +2778,7 @@ mod tests {
     /// `update_preview_image` and `break_tile` (mirrors `tiled::output`'s
     /// own test of the same pair).
     #[test]
-    fn d13_update_preview_image_and_break_tile() {
+    fn update_preview_image_and_break_tile() {
         use crate::attr::{PreviewImage, PreviewImageAttribute, PreviewRgba};
 
         // 2x2 image, one 2x2 tile -> a single chunk, so the on-disk chunk
@@ -2865,7 +2865,7 @@ mod tests {
     /// error (`ExrError::Logic`), matching C++'s `LogicExc` throw, instead of
     /// silently no-oping.
     #[test]
-    fn d13_update_preview_image_without_preview_errors() {
+    fn update_preview_image_without_preview_errors() {
         use crate::attr::PreviewRgba;
 
         let (w, h) = (2, 2);
@@ -2893,7 +2893,7 @@ mod tests {
     /// ZIPS (not NONE) so a byte-identical result actually proves the
     /// on-disk chunk ORDER matches, not merely that "no compression" makes
     /// order invisible.
-    fn d11_out_of_order_writes_match_in_order(lo: LineOrder) -> (Vec<u8>, Vec<u8>) {
+    fn out_of_order_vs_in_order_writes(lo: LineOrder) -> (Vec<u8>, Vec<u8>) {
         let (w, h) = (4, 4);
         let td = one_level_td();
         let mut header = make_deep_tiled_header(w, h, Compression::Zips, td);
@@ -2928,14 +2928,14 @@ mod tests {
     }
 
     #[test]
-    fn d11_increasing_y_out_of_order_writes_match_in_order_byte_for_byte() {
-        let (a, b) = d11_out_of_order_writes_match_in_order(LineOrder::IncreasingY);
+    fn increasing_y_out_of_order_writes_match_in_order_byte_for_byte() {
+        let (a, b) = out_of_order_vs_in_order_writes(LineOrder::IncreasingY);
         assert_eq!(a, b, "out-of-order write_tile calls must produce byte-identical output");
     }
 
     #[test]
-    fn d11_decreasing_y_out_of_order_writes_match_in_order_byte_for_byte() {
-        let (a, b) = d11_out_of_order_writes_match_in_order(LineOrder::DecreasingY);
+    fn decreasing_y_out_of_order_writes_match_in_order_byte_for_byte() {
+        let (a, b) = out_of_order_vs_in_order_writes(LineOrder::DecreasingY);
         assert_eq!(a, b, "out-of-order write_tile calls must produce byte-identical output");
     }
 
@@ -2944,7 +2944,7 @@ mod tests {
     /// discarded — its offset-table slot stays 0 — matching C++'s destructor,
     /// which frees `tileMap` without flushing it.
     #[test]
-    fn d11_tile_still_buffered_at_drop_is_discarded() {
+    fn tile_still_buffered_at_drop_is_discarded() {
         let (w, h) = (4, 4);
         let td = one_level_td();
         let header = make_deep_tiled_header(w, h, Compression::Zips, td);
@@ -2992,7 +2992,7 @@ mod tests {
     /// `INCREASING_Y` (walks `next_tile_coord`) and `RANDOM_Y` (walks the
     /// input's own `tile_order()`).
     #[test]
-    fn d13_copy_pixels_byte_identical() {
+    fn copy_pixels_byte_identical() {
         let (w, h) = (4, 4);
         let td = one_level_td();
 
@@ -3035,7 +3035,7 @@ mod tests {
     /// `copy_pixels` must reject copying into a file that already has
     /// pixel data (C++ LogicExc "already contains pixel data").
     #[test]
-    fn d13_copy_pixels_rejects_when_destination_already_has_pixel_data() {
+    fn copy_pixels_rejects_when_destination_already_has_pixel_data() {
         let (w, h) = (4, 4);
         let td = one_level_td();
         let header = make_deep_tiled_header(w, h, Compression::NoCompression, td);

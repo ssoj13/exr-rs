@@ -894,7 +894,7 @@ fn channel_data_sample_f32_bounds_checked() {
 
 #[test]
 fn channel_data_convert_uint_to_half_overflows_above_65504() {
-    // Pins the same boundary `s01_half_boundary.rs` verifies against the C++
+    // Pins the same boundary `half_conversion_boundary.rs` verifies against the C++
     // oracle, through the public `ChannelData::convert` surface this time.
     let cd = ChannelData::Uint(vec![65504, 65505]);
     let converted = cd.convert(PixelType::Half).unwrap();

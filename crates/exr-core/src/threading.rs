@@ -209,7 +209,7 @@ impl ThreadCount {
     /// window, so that parallel is never slower than
     /// serial. [`Self::max_in_flight`] alone sizes a window by CHUNK COUNT,
     /// which is fine for large chunks (ZIP/PIZ/DWA) but pathological for
-    /// small ones: `tests/w39b_io_vs_decode.rs::many_small_windows_thread_spawn_overhead_65536_height_none`
+    /// small ones: `tests/perf_io_vs_decode.rs::many_small_windows_thread_spawn_overhead_65536_height_none`
     /// found NONE compression (1 scanline/chunk) at 65536 height still only
     /// 0.85x of serial even after fixing the one-thread-per-window-transition
     /// bug, because a `max_in_flight()`-sized window of tiny chunks (a few KB

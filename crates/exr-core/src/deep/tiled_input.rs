@@ -3545,7 +3545,7 @@ mod tests {
     /// A HALF file channel read into a FLOAT frame-buffer slice must
     /// convert each sample, not raw-copy the file's 2 bytes into a 4-byte slot.
     #[test]
-    fn d01_converts_half_file_channel_to_float_slice() {
+    fn converts_half_file_channel_to_float_slice() {
         let img = one_tile_img(); // single HALF channel "A", counts all 1.
         let bytes =
             write_deep_tiled(&img, Compression::NoCompression, td_one(2, 2), LineOrder::IncreasingY);
@@ -3596,7 +3596,7 @@ mod tests {
     /// A compressed count table that packs down to zero bytes (every
     /// pixel of the tile has zero samples) is a valid all-zero row.
     #[test]
-    fn d05_zero_length_count_table_reads_as_zero_counts() {
+    fn zero_length_count_table_reads_as_zero_counts() {
         let img = make_img(2, 2, 0, 0, vec![0, 0, 0, 0], vec![("A".into(), PixelType::Half)]);
         let mut bytes =
             write_deep_tiled(&img, Compression::Zips, td_one(2, 2), LineOrder::IncreasingY);
@@ -3619,7 +3619,7 @@ mod tests {
     /// `set_frame_buffer` loop only walks the named deep slices). A count
     /// slice with non-unit sampling must be rejected.
     #[test]
-    fn d08_count_slice_rejects_non_unit_sampling() {
+    fn count_slice_rejects_non_unit_sampling() {
         let img = one_tile_img();
         let (_sc, xs, ys) = build_count_buffer(&img);
         let (_h, bases) = build_sample_heap(&img);
@@ -3650,7 +3650,7 @@ mod tests {
     /// `DeepTiledOutputFile::from_part` must reject a header whose
     /// `type` already names a different (non-deeptile) part.
     #[test]
-    fn d14_from_part_rejects_type_mismatched_header() {
+    fn from_part_rejects_type_mismatched_header() {
         let mut hdr = Header::with_dimensions(
             2, 2, 1.0, V2f { x: 0.0, y: 0.0 }, 1.0, LineOrder::IncreasingY,
             Compression::NoCompression,
@@ -3673,7 +3673,7 @@ mod tests {
     /// `OpenEXRCore/decoding.c:307-318`: a deep tiled part whose
     /// `version` attribute is not 1 must be rejected.
     #[test]
-    fn d03_rejects_non_unit_version_attribute() {
+    fn rejects_non_unit_version_attribute() {
         let img = one_tile_img();
         let mut header = make_header(&img, Compression::NoCompression, td_one(2, 2), LineOrder::IncreasingY);
         header.insert("version", crate::attr::IntAttribute::new(2)).unwrap();
@@ -3693,7 +3693,7 @@ mod tests {
     /// `maxSampleCountTableSize` guard (`ImfDeepTiledOutputFile.cpp:1210`,
     /// a writer-only concern with no reader counterpart in C++). A per-dimension `x_size` of 0 is invalid either way.
     #[test]
-    fn d16_rejects_zero_tile_dimension() {
+    fn rejects_zero_tile_dimension() {
         let img = one_tile_img();
         let header = make_header(&img, Compression::NoCompression, td_one(0, 4), LineOrder::IncreasingY);
         let mut is = MemIStream::new(Vec::new());
@@ -3714,7 +3714,7 @@ mod tests {
     /// (which would have wrongly rejected this legitimate large-but-valid
     /// tile description).
     #[test]
-    fn d16_accepts_tile_dimension_within_int_max_over_4() {
+    fn accepts_tile_dimension_within_int_max_over_4() {
         let img = one_tile_img();
         // 70000 * 70000 * 4 > u32::MAX, but each dimension alone is far
         // under INT_MAX/4 (~536,870,911) -- the old product-based check
@@ -3755,7 +3755,7 @@ mod tests {
     /// the sizes below, while the current code passes with a ratio close to
     /// 4. The revert was not committed.
     #[test]
-    fn d10_addressing_is_linear_not_quadratic() {
+    fn addressing_is_linear_not_quadratic() {
         fn sample_count_at_calls_for(w: i32, h: i32) -> u64 {
             // `sample_count_at`'s
             // call counter is `#[cfg(test)]` THREAD-LOCAL (see
@@ -3776,7 +3776,7 @@ mod tests {
             // instead of a silent miscount if that invariant is ever broken.
             assert_eq!(
                 crate::threading::global_thread_count(), 0,
-                "D-10's call-count regression test requires SERIAL deep construction \
+                "the call-count regression test requires SERIAL deep construction \
                  (see this assert's doc comment) -- the global thread count must stay 0 \
                  in this test binary."
             );
@@ -3819,7 +3819,7 @@ mod tests {
     /// `frame_buffer()` returns the last frame buffer installed via
     /// `set_frame_buffer`, matching C++ `frameBuffer() const`.
     #[test]
-    fn d13_frame_buffer_accessor_returns_installed_buffer() {
+    fn frame_buffer_accessor_returns_installed_buffer() {
         let img = one_tile_img();
         let bytes =
             write_deep_tiled(&img, Compression::NoCompression, td_one(2, 2), LineOrder::IncreasingY);
@@ -3841,7 +3841,7 @@ mod tests {
     /// exactly that many tiles (every tile is present since the whole file
     /// was written).
     #[test]
-    fn d13_total_tiles_and_tile_order() {
+    fn total_tiles_and_tile_order() {
         let img = make_img(4, 4, 0, 0, variable_counts_4x4(), vec![("A".into(), PixelType::Half)]);
         let td = TileDescription {
             x_size: 2,

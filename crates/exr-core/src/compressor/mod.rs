@@ -108,14 +108,13 @@ pub enum Format {
 /// — **not** once per worker thread and not once per item, only
 /// APPROXIMATING (never guaranteeing) C++'s `ScanLineProcessGroup`/
 /// per-thread `lineBuffers` pool. The measurement this doc used to say
-/// would justify a real `CodecPool` happened:
-/// a `#[cfg(test)]`
+/// would justify a real `CodecPool` happened: a `#[cfg(test)]`
 /// construction counter showed `map_init` constructing a FRESH codec for
 /// essentially EVERY chunk/tile at every thread count (256/256 scanline
 /// chunks, ~8192/8192 tiles) — rayon's adaptive splitting was fine-grained
 /// enough that "once per job split" was, in practice, indistinguishable
-/// from the pre-`map_init` "once per chunk" bug
-/// it was meant to fix. [`CodecPool`] is that real pool: checkout/checkin
+/// from the pre-`map_init` "once per chunk" bug it was meant to fix.
+/// [`CodecPool`] is that real pool: checkout/checkin
 /// around EACH item (not tied to rayon's split granularity at all), used by
 /// all four flat call sites plus deep scanline/tiled read and write.
 pub trait Compressor: Send {

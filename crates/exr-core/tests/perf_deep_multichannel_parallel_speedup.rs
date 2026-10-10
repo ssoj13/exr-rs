@@ -14,7 +14,7 @@
 //!
 //! Run explicitly (ignored by default -- real file I/O, several seconds):
 //! ```text
-//! cargo test -p exr-core --release --test w39b_deep_multichannel_parallel_speedup -- --ignored --nocapture
+//! cargo test -p exr-core --release --test perf_deep_multichannel_parallel_speedup -- --ignored --nocapture
 //! ```
 
 use std::time::Instant;
@@ -63,7 +63,7 @@ fn deep_scanline_multichannel_parallel_is_faster_than_serial() {
     // laid out with the count table driving repeats per pixel per channel,
     // channel-by-channel, matching `DeepSlice` insertion order below via
     // the write path's own per-line gather -- see `make_deep_pixels` in
-    // `w39b_deep_io_vs_decode.rs` for the established one-channel version
+    // `perf_deep_io_vs_decode.rs` for the established one-channel version
     // this generalizes).
     for (pix, &c) in counts.iter().enumerate() {
         for i in 0..c {
@@ -102,7 +102,7 @@ fn deep_scanline_multichannel_parallel_is_faster_than_serial() {
     .unwrap();
 
     let dir = std::env::temp_dir();
-    let path = dir.join("w39b_deep_multichannel_speedup.exr");
+    let path = dir.join("perf_deep_multichannel_speedup.exr");
     let path_str = path.to_str().unwrap().to_string();
     {
         let mut os = StdOfStream::create(&path_str).unwrap();

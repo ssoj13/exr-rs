@@ -893,7 +893,7 @@ mod tests {
     /// (`OpenEXRCore/compression.c:180-197`), which `undo_pxr24_impl` calls
     /// through. See the identical test in `compressor::zip::tests`.
     #[test]
-    fn pxr24_rejects_trailing_bytes_after_zlib_stream_k01() {
+    fn pxr24_rejects_trailing_bytes_after_zlib_stream() {
         let (w, h) = (9i32, 5i32);
         let chans = [("H", PixelType::Half), ("U", PixelType::Uint)];
         let hdr = make_header(w, h, &chans);
@@ -910,8 +910,8 @@ mod tests {
     }
 
     // The two process-global-default zip-level tests
-    // (`pxr24_ignores_per_header_zip_level_override_k06`,
-    // `pxr24_follows_process_global_default_zip_level_k06`) moved to
+    // (`pxr24_ignores_per_header_zip_level_override`,
+    // `pxr24_follows_process_global_default_zip_level`) moved to
     // `tests/global_compression_defaults.rs` -- a separate process from this
     // `--lib` unit-test binary, so mutating the process-global default there
     // can no longer race the many OTHER lib tests (this module's own DWA/ZIP

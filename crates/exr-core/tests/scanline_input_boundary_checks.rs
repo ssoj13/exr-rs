@@ -1,8 +1,8 @@
 //! Mutation-testing gap fix (scanline/ audit pass 1): 3 confirmed survivors
 //! in `ScanLineInputFileState`'s `set_frame_buffer`/`read_pixels`
 //! (`crates/exr-core/src/scanline/input.rs`, `pub(crate)`), killed through
-//! the public `InputFile` API -- no edits to scanline/input.rs (w39b-rayon's
-//! file) needed.
+//! the public `InputFile` API -- no edits to scanline/input.rs
+//! needed.
 //!
 //! Two other survivors on the same list are documented here as EQUIVALENT
 //! rather than force-tested, since both are mathematically unreachable:

@@ -115,9 +115,9 @@ fn golden_layout(name: &str) -> Option<GoldenLayout> {
 }
 
 #[test]
-fn ours_reads_a_truncated_cpp_golden_per_s08() {
+fn ours_reads_a_truncated_cpp_golden() {
     let Some(GoldenLayout { bytes, min_x, min_y, width, height, chunk_stride, chunk_region_start }) =
-        golden_layout("ours_reads_a_truncated_cpp_golden_per_s08")
+        golden_layout("ours_reads_a_truncated_cpp_golden")
     else {
         return;
     };
@@ -130,7 +130,7 @@ fn ours_reads_a_truncated_cpp_golden_per_s08() {
     let truncated = bytes[..cut].to_vec();
 
     let mut is = MemIStream::new(truncated);
-    let mut inf = InputFile::new(&mut is).expect("open must succeed despite missing chunks (S-08)");
+    let mut inf = InputFile::new(&mut is).expect("open must succeed despite missing chunks");
     assert!(
         !inf.is_complete(),
         "a file missing {}/{} rows' chunks must report is_complete() == false",
@@ -161,12 +161,12 @@ fn ours_reads_a_truncated_cpp_golden_per_s08() {
 }
 
 #[test]
-fn cpp_oracle_reads_our_truncated_file_per_s08() {
-    let Some(oracle) = support::oracle_or_skip("cpp_oracle_reads_our_truncated_file_per_s08") else {
+fn cpp_oracle_reads_our_truncated_file() {
+    let Some(oracle) = support::oracle_or_skip("cpp_oracle_reads_our_truncated_file") else {
         return;
     };
     let Some(GoldenLayout { bytes, height, chunk_stride, chunk_region_start, .. }) =
-        golden_layout("cpp_oracle_reads_our_truncated_file_per_s08")
+        golden_layout("cpp_oracle_reads_our_truncated_file")
     else {
         return;
     };
@@ -175,7 +175,7 @@ fn cpp_oracle_reads_our_truncated_file_per_s08() {
     // file wrote the surviving bytes is irrelevant to that contract, and
     // reusing the same fixture keeps this test independent of any Rust
     // writer bug (a real Rust-written truncated file is exercised on our
-    // side by `ours_reads_a_truncated_cpp_golden_per_s08` above; C++ must
+    // side by `ours_reads_a_truncated_cpp_golden` above; C++ must
     // treat ANY file with an intact header + offset table + a truncated
     // chunk region identically, regardless of which writer produced it).
     let k = (height / 2) as usize;
@@ -201,7 +201,7 @@ fn cpp_oracle_reads_our_truncated_file_per_s08() {
     assert_eq!(
         lines.next(),
         Some("OPEN ok"),
-        "C++ must open a file truncated only in its chunk region (S-08), not error at construction"
+        "C++ must open a file truncated only in its chunk region, not error at construction"
     );
     assert_eq!(
         lines.next(),

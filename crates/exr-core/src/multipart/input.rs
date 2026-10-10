@@ -539,8 +539,7 @@ pub(crate) fn read_prologue(
     }
 
     // --- read each part's chunk offset table ------------------------------
-    // Table
-    // positions are computed ANALYTICALLY from each part's header-derived
+    // Table positions are computed ANALYTICALLY from each part's header-derived
     // `chunkCount` -- pure arithmetic, no stream access -- mirroring C++
     // `parse_header.c`'s `chunk_table_offset` computation, which runs for
     // every part BEFORE any table is actually read. This is what lets a

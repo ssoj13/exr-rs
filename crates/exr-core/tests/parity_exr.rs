@@ -511,7 +511,7 @@ fn ours_zip_bytes_match_cpp_golden_at_level(file: &str, compression: Compression
             .unwrap_or(0);
         panic!(
             "{file} (level {level}): our ZIP file differs from C++ golden at byte {first} \
-             (ours={:#04x} cpp={:#04x}); zip-level plumbing (K-06) mismatch.",
+             (ours={:#04x} cpp={:#04x}); zip-level plumbing mismatch.",
             our_bytes[first], cpp_bytes[first]
         );
     }
@@ -523,22 +523,22 @@ fn ours_zip_bytes_match_cpp_golden_at_level(file: &str, compression: Compression
 }
 
 #[test]
-fn ours_zip_level1_bytes_byte_identical_to_cpp_golden_k06() {
+fn ours_zip_level1_bytes_byte_identical_to_cpp_golden() {
     ours_zip_bytes_match_cpp_golden_at_level("golden_zip_level1.exr", Compression::Zip, 1);
 }
 
 #[test]
-fn ours_zip_level9_bytes_byte_identical_to_cpp_golden_k06() {
+fn ours_zip_level9_bytes_byte_identical_to_cpp_golden() {
     ours_zip_bytes_match_cpp_golden_at_level("golden_zip_level9.exr", Compression::Zip, 9);
 }
 
 #[test]
-fn ours_zips_level1_bytes_byte_identical_to_cpp_golden_k06() {
+fn ours_zips_level1_bytes_byte_identical_to_cpp_golden() {
     ours_zip_bytes_match_cpp_golden_at_level("golden_zips_level1.exr", Compression::Zips, 1);
 }
 
 #[test]
-fn ours_zips_level9_bytes_byte_identical_to_cpp_golden_k06() {
+fn ours_zips_level9_bytes_byte_identical_to_cpp_golden() {
     ours_zip_bytes_match_cpp_golden_at_level("golden_zips_level9.exr", Compression::Zips, 9);
 }
 

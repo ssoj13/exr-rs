@@ -1,5 +1,5 @@
 //! Deep reader I/O share: measures whether read-ahead pipelining would pay
-//! off on the deep readers, rather than skipping it unmeasured. Same method as `tests/w39b_io_vs_decode.rs` (flat scanline):
+//! off on the deep readers, rather than skipping it unmeasured. Same method as `tests/perf_io_vs_decode.rs` (flat scanline):
 //! write a real on-disk deep file, then time
 //! * `io_only` — every chunk's RAW bytes (`raw_pixel_data`/`raw_tile_data`,
 //!   no decompress, no scatter) — the work that stays on the calling thread
@@ -23,7 +23,7 @@
 //!
 //! Run explicitly (ignored by default — real file I/O, tens of seconds):
 //! ```text
-//! cargo test -p exr-core --release --test w39b_deep_io_vs_decode -- --ignored --nocapture
+//! cargo test -p exr-core --release --test perf_deep_io_vs_decode -- --ignored --nocapture
 //! ```
 
 use std::time::{Duration, Instant};
@@ -123,7 +123,7 @@ fn run_deep_scanline(name: &str, comp: Compression) {
     let n = (WIDTH * HEIGHT) as usize;
 
     let dir = std::env::temp_dir();
-    let path = dir.join(format!("w39b_deep_scanline_{name}.exr"));
+    let path = dir.join(format!("perf_deep_scanline_{name}.exr"));
     let path_str = path.to_str().unwrap().to_string();
 
     {
@@ -165,7 +165,7 @@ fn run_deep_tiled(name: &str, comp: Compression) {
     let n = (WIDTH * HEIGHT) as usize;
 
     let dir = std::env::temp_dir();
-    let path = dir.join(format!("w39b_deep_tiled_{name}.exr"));
+    let path = dir.join(format!("perf_deep_tiled_{name}.exr"));
     let path_str = path.to_str().unwrap().to_string();
 
     let (nx, ny);

@@ -14,7 +14,7 @@
 //! Run explicitly (ignored by default — real subprocess + several seconds
 //! per codec):
 //! ```text
-//! cargo test -p exr-core --release --test w39b_codec_isolation -- --ignored --nocapture
+//! cargo test -p exr-core --release --test perf_codec_isolation -- --ignored --nocapture
 //! ```
 
 mod support;
@@ -232,7 +232,7 @@ fn cpu_load_pct() -> Option<f64> {
 /// Mandatory logging (a run without it had no visible progress for over an
 /// hour and had to be killed blind) — appends a
 /// timestamped line to BOTH stdout (`--nocapture` shows it live) and
-/// `.bughunt/bench/codec_isolation.log` (so progress is visible even
+/// `target/bench/codec_isolation.log` (so progress is visible even
 /// without an attached terminal), one line per codec-start and per repeat.
 struct BenchLog {
     file: std::fs::File,
@@ -312,12 +312,12 @@ fn codec_only_ours_vs_cpp() {
 
     // `cargo test` runs with CWD set to the CRATE's manifest directory
     // (`crates/exr-core`), not the workspace root -- a relative path here
-    // landed the log at `crates/exr-core/.bughunt/bench/...` instead of the
-    // repo-root `.bughunt/bench/...` where the other bench logs live.
+    // would land the log at `crates/exr-core/target/bench/...` instead of the
+    // workspace-root `target/bench/...` where the other bench logs live.
     // Anchor it explicitly off
     // `CARGO_MANIFEST_DIR` instead.
     let log_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.bughunt/bench/codec_isolation.log");
+        .join("../../target/bench/codec_isolation.log");
     let mut log = BenchLog::open(log_path.to_str().unwrap());
     log.line(&format!(
         "codec_only_ours_vs_cpp starting: WIDTH={WIDTH} TOTAL_LINES~={TOTAL_LINES} \

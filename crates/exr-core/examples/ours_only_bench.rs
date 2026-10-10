@@ -6,7 +6,7 @@
 //! without a noisy machine muddying an ours-vs-C++ comparison.
 //!
 //! Data generation, header, and chunk layout are copied verbatim from
-//! `tests/w39b_codec_isolation.rs`'s `sample`/`hash01`/`make_header`/
+//! `tests/perf_codec_isolation.rs`'s `sample`/`hash01`/`make_header`/
 //! `make_chunk_bytes`/`bench_size`/`time_ours` so the OLD and NEW binaries
 //! measure the exact same synthetic input -- the only difference between
 //! the two builds is the codec/compressor source itself.

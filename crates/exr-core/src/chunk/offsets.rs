@@ -902,7 +902,7 @@ mod tests {
     /// reconstruction from the end of part 0's real last chunk, independent
     /// of part 0's internal damage.
     #[test]
-    fn s09_a_and_d_one_parts_bad_middle_chunk_does_not_blind_reconstruction_of_a_later_part() {
+    fn bad_middle_chunk_in_one_part_does_not_blind_reconstruction_of_a_later_part() {
         let mut bytes = Vec::new();
         // Part 0: 3 chunks, y = 0, 1 (CORRUPTED), 2 — all 4-byte payloads, so
         // every chunk is a fixed 16 bytes (4 partNumber + 4 y + 4 size + 4

@@ -698,7 +698,7 @@ def test_legacy_uint_to_half_overflow_boundary():
     # generic float_to_half rounding rule (rounds 65505..65519 down to the
     # largest finite half, 65504), but C++'s uintToHalf (ImfConvert.cpp) is
     # stricter: ANY value > HALF_MAX (65504) becomes +inf, with no rounding
-    # window. Oracle-verified in tests/s01_half_boundary.rs.
+    # window. Oracle-verified in tests/half_conversion_boundary.rs.
     import Imath
     from array import array
     import struct

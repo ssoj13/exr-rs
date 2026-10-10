@@ -3,7 +3,7 @@
 //! the SAME bytes.
 //!
 //! The codec-isolation harness (`crates/exr-core/tests/
-//! w39b_codec_isolation.rs`) showed ZIP at ~1.8x/2.2x of C++ OpenEXR
+//! perf_codec_isolation.rs`) showed ZIP at ~1.8x/2.2x of C++ OpenEXR
 //! (which links libdeflate 1.26) for compress/decompress. That harness times
 //! the WHOLE ZIP codec (predictor/interleave + deflate), so it cannot say
 //! whether the gap is in deflate-rs itself or in exr-core's surrounding

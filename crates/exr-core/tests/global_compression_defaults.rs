@@ -20,7 +20,7 @@
 //! global itself -- every header it builds has an explicit
 //! `add_dwa_compression_level` override) intermittently saw a DWA chunk size
 //! off by a couple of bytes (1668 vs 1670) because `compressor::pxr24::
-//! tests::pxr24_follows_process_global_default_zip_level_k06` was
+//! tests::pxr24_follows_process_global_default_zip_level` was
 //! concurrently flipping the process-global default ZIP level on another
 //! thread of the SAME process, and DWA's internal AC/RLE zlib sub-streams
 //! resolve their own zip level through that same global when unset.
@@ -78,7 +78,7 @@ impl Drop for ResetGuard {
 /// `(x, y)`, shared by the planar buffer builder and the PLANAR `FrameBuffer`
 /// this test drives `OutputFile`/`InputFile` through (three separate,
 /// contiguous per-channel planes in ONE caller-owned buffer -- the same
-/// convention `s01_half_boundary.rs` and other integration tests in this
+/// convention `half_conversion_boundary.rs` and other integration tests in this
 /// crate use for their own frame buffers).
 fn pixel_value(ci: usize, x: i32, y: i32) -> f32 {
     (ci as f32) * 1000.0 + (y as f32) * 10.0 + x as f32 + 0.5
@@ -248,7 +248,7 @@ fn insert_dwa_compression_level_attribute_updates_record() {
 }
 
 /// (Ported from `compressor::pxr24::tests::
-/// pxr24_ignores_per_header_zip_level_override_k06`) — a per-header
+/// pxr24_ignores_per_header_zip_level_override`) — a per-header
 /// `set_zip_level` override must be silently IGNORED by PXR24 (C++'s
 /// `apply_pxr24_impl` calls `exr_compress_buffer(ctx, -1, ...)` with a
 /// literal `-1`, never `header->zipCompressionLevel()`,
@@ -256,7 +256,7 @@ fn insert_dwa_compression_level_attribute_updates_record() {
 /// startup value (`-1`), the WHOLE FILE must be byte-identical whether or not
 /// a per-header override is set.
 #[test]
-fn pxr24_ignores_per_header_zip_level_override_k06() {
+fn pxr24_ignores_per_header_zip_level_override() {
     let _lock = lock().lock().unwrap();
     let _reset = ResetGuard;
     assert_eq!(Header::default_zip_compression_level(), -1, "test isolation invariant");
@@ -272,7 +272,7 @@ fn pxr24_ignores_per_header_zip_level_override_k06() {
 }
 
 /// (Ported from `compressor::pxr24::tests::
-/// pxr24_follows_process_global_default_zip_level_k06`) — PXR24 DOES follow
+/// pxr24_follows_process_global_default_zip_level`) — PXR24 DOES follow
 /// the process-global default zip level (C++'s hardcoded `-1` resolves
 /// through `exr_get_default_zip_compression_level` before falling back to
 /// `EXR_DEFAULT_ZLIB_COMPRESS_LEVEL == 4`, `compression.c:89-117`), even
@@ -280,7 +280,7 @@ fn pxr24_ignores_per_header_zip_level_override_k06() {
 /// process default must change PXR24's file bytes, and the result must still
 /// round-trip.
 #[test]
-fn pxr24_follows_process_global_default_zip_level_k06() {
+fn pxr24_follows_process_global_default_zip_level() {
     let _lock = lock().lock().unwrap();
     let _reset = ResetGuard;
     assert_eq!(Header::default_zip_compression_level(), -1, "test isolation invariant");

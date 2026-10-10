@@ -145,7 +145,7 @@ fn oracle_read_half(oracle: &Path, path: &Path) -> Vec<u16> {
 }
 
 #[test]
-fn s01_float_to_half_boundary_matches_oracle_and_our_reader() {
+fn float_to_half_boundary_matches_oracle_and_our_reader() {
     let dir = std::env::temp_dir();
     let path = dir.join("exr_core_s01_float.exr");
     write_single_channel(&path, PixelType::Float, &f32_bytes(&FLOAT_VALS), FLOAT_VALS.len() as i32);
@@ -159,11 +159,11 @@ fn s01_float_to_half_boundary_matches_oracle_and_our_reader() {
 
     // When a live oracle is available, re-derive the fixture and confirm it
     // has not silently drifted from what is committed above.
-    if let Some(oracle) = support::oracle_or_skip("s01_float_to_half_boundary_matches_oracle") {
+    if let Some(oracle) = support::oracle_or_skip("float_to_half_boundary_matches_oracle") {
         let live = oracle_read_half(&oracle, &path);
         assert_eq!(
             live, EXPECTED_FLOAT_BITS,
-            "live oracle result no longer matches the committed S-01 fixture -- \
+            "live oracle result no longer matches the committed fixture -- \
              update EXPECTED_FLOAT_BITS from a fresh `oracle.exe read-half` run"
         );
     }
@@ -172,7 +172,7 @@ fn s01_float_to_half_boundary_matches_oracle_and_our_reader() {
 }
 
 #[test]
-fn s01_uint_to_half_boundary_matches_oracle_and_our_reader() {
+fn uint_to_half_boundary_matches_oracle_and_our_reader() {
     let dir = std::env::temp_dir();
     let path = dir.join("exr_core_s01_uint.exr");
     write_single_channel(&path, PixelType::Uint, &u32_bytes(&UINT_VALS), UINT_VALS.len() as i32);
@@ -183,11 +183,11 @@ fn s01_uint_to_half_boundary_matches_oracle_and_our_reader() {
         "our UINT->HALF conversion diverges from the committed C++ 3.4 fixture"
     );
 
-    if let Some(oracle) = support::oracle_or_skip("s01_uint_to_half_boundary_matches_oracle") {
+    if let Some(oracle) = support::oracle_or_skip("uint_to_half_boundary_matches_oracle") {
         let live = oracle_read_half(&oracle, &path);
         assert_eq!(
             live, EXPECTED_UINT_BITS,
-            "live oracle result no longer matches the committed S-01 fixture -- \
+            "live oracle result no longer matches the committed fixture -- \
              update EXPECTED_UINT_BITS from a fresh `oracle.exe read-half` run"
         );
     }

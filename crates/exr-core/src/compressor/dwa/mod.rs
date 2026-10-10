@@ -1176,7 +1176,7 @@ fn compress_ac(
     // (NOT a persistent field) since this function returns them by value one
     // level up to `compress_dwa`'s own header/assembly logic, exactly like
     // its sibling `dc_compressed`/`rle_compressed`/`unknown_compressed`
-    // results (those are not reused yet either).
+    // results (each a fresh `Vec` returned by `zlib_compress` per call).
     let mut huf_out = Vec::new();
     if huf::compress_with_limit(all_ac, huf_scratch, huf_limit, &mut huf_out)? {
         Ok(Some((huf_out, AcCompression::StaticHuffman)))
@@ -2359,7 +2359,7 @@ mod tests {
         assert_eq!(
             small_restored, small_restored_fresh,
             "poisoned/reused small-block decoded bytes diverged from a fresh instance -- \
-             a new E11 scratch field is not fully overwritten on reuse"
+             a new scratch field is not fully overwritten on reuse"
         );
     }
 

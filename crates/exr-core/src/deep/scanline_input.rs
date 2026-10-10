@@ -2038,7 +2038,7 @@ mod tests {
     /// whose on-disk offset table was zeroed (and cannot be reconstructed
     /// because the FIRST chunk's own bytes are also gone) reports incomplete.
     #[test]
-    fn d13_is_complete() {
+    fn is_complete_detects_unrecoverable_offset_table() {
         let img = sample_image(4, 3, 0, 0, vec![0, 1, 2, 3, 5, 0, 1, 2, 3, 4, 1, 2]);
         let bytes = write_deep(&img, Compression::NoCompression, LineOrder::IncreasingY);
 
@@ -2647,7 +2647,7 @@ mod tests {
     /// into a 4-byte slot (which would leave the upper bytes holding stale
     /// content instead of the correct value).
     #[test]
-    fn d01_converts_half_file_channel_to_float_slice() {
+    fn converts_half_file_channel_to_float_slice() {
         let img = sample_image(2, 1, 0, 0, vec![1, 2]);
         let bytes = write_deep(&img, Compression::NoCompression, LineOrder::IncreasingY);
         let total = total_samples(&img);
@@ -2726,7 +2726,7 @@ mod tests {
     /// `readPixelSampleCounts`) — pass 1 rejects it, before pass 2
     /// (and its would-be giant allocation) is ever reached.
     #[test]
-    fn d02_rejects_internally_consistent_but_oversize_chunk() {
+    fn rejects_internally_consistent_but_oversize_chunk() {
         let img = sample_image(1, 1, 0, 0, vec![0]);
         let mut bytes = write_deep(&img, Compression::NoCompression, LineOrder::IncreasingY);
         let off = first_chunk_offset(&bytes);
@@ -2756,7 +2756,7 @@ mod tests {
     /// A compressed count table that packs down to zero bytes (every
     /// pixel has zero samples) is a valid, all-zero row, not a corrupt chunk.
     #[test]
-    fn d05_zero_length_count_table_reads_as_zero_counts() {
+    fn zero_length_count_table_reads_as_zero_counts() {
         let img = sample_image(1, 1, 0, 0, vec![0]);
         let mut bytes = write_deep(&img, Compression::Zips, LineOrder::IncreasingY);
         let off = first_chunk_offset(&bytes);
@@ -2779,7 +2779,7 @@ mod tests {
     /// `InputExc` "Expect sampling of 1" at fill time; we reject it at
     /// `set_frame_buffer`.
     #[test]
-    fn d08_fill_slice_rejects_non_unit_sampling() {
+    fn fill_slice_rejects_non_unit_sampling() {
         let img = sample_image(2, 2, 0, 0, vec![1, 1, 1, 1]);
         let bytes = write_deep(&img, Compression::NoCompression, LineOrder::IncreasingY);
         let (_sc, xs, ys) = build_count_buffer(&img);
@@ -2803,7 +2803,7 @@ mod tests {
     /// `DeepScanLineOutputFile::from_part` must reject a header whose
     /// `type` already names a different (non-deepscanline) part.
     #[test]
-    fn d14_from_part_rejects_type_mismatched_header() {
+    fn from_part_rejects_type_mismatched_header() {
         let mut hdr = Header::with_dimensions(
             2, 2, 1.0, V2f { x: 0.0, y: 0.0 }, 1.0, LineOrder::IncreasingY,
             Compression::NoCompression,
@@ -2825,7 +2825,7 @@ mod tests {
     /// `OpenEXRCore/decoding.c:307-318`: a deep scanline part whose
     /// `version` attribute is not 1 must be rejected.
     #[test]
-    fn d03_rejects_non_unit_version_attribute() {
+    fn rejects_non_unit_version_attribute() {
         let img = sample_image(2, 2, 0, 0, vec![1, 1, 1, 1]);
         let mut header = make_header(&img, Compression::NoCompression, LineOrder::IncreasingY);
         header.insert("version", crate::attr::IntAttribute::new(2)).unwrap();
@@ -2846,7 +2846,7 @@ mod tests {
     /// now sourced from the caller's already-populated `sample_counts`
     /// buffer, not by re-decoding the earlier chunk's bytes from the stream.
     #[test]
-    fn d07_damaged_earlier_chunk_does_not_block_a_later_line() {
+    fn damaged_earlier_chunk_does_not_block_a_later_line() {
         let img = sample_image(2, 3, 0, 0, vec![1, 2, 0, 1, 3, 1]);
         let mut bytes = write_deep(&img, Compression::NoCompression, LineOrder::IncreasingY);
 

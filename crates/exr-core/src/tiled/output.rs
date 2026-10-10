@@ -3279,7 +3279,7 @@ mod tests {
     /// `file_name`, `break_tile`,
     /// `update_preview_image` accessors added to the writer.
     #[test]
-    fn t15_writer_accessors() {
+    fn tiled_writer_accessors() {
         use crate::attr::{PreviewImage, PreviewImageAttribute, PreviewRgba};
         use crate::tiled::TiledInputFile;
 

@@ -1935,7 +1935,7 @@ impl LoadError {
     pub fn status(&self) -> String {
         match self {
             LoadError::Unsupported(_) => {
-                "deep/multipart: use a specific part — VW-3".to_owned()
+                "deep/multipart: use a specific part".to_owned()
             }
             LoadError::Read(msg) => format!("load failed: {msg}"),
         }

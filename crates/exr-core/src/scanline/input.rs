@@ -928,7 +928,7 @@ impl ScanLineInputFileState {
     /// # Read-ahead pipelining
     /// Reading a whole window of `W = num_threads.max_in_flight()` chunks
     /// serially, THEN decoding+scattering it in parallel gives no I/O/decode
-    /// overlap. A dedicated measurement (`tests/w39b_io_vs_decode.rs`, 16384x8192, real
+    /// overlap. A dedicated measurement (`tests/perf_io_vs_decode.rs`, 16384x8192, real
     /// on-disk file) showed the serial I/O share of the already-parallel
     /// (8-thread) wall time was 12-68% across NONE/RLE/ZIP/PIZ/DWAA —
     /// nowhere close to the "negligible" the original decode-bound-DWA
@@ -953,7 +953,7 @@ impl ScanLineInputFileState {
     /// every window transition is fine at the coarse end (large
     /// multiline chunks: few, expensive windows), but at the opposite
     /// extreme — NONE compression (1 scanline/chunk) at a large height —
-    /// `tests/w39b_io_vs_decode.rs::many_small_windows_thread_spawn_overhead_65536_height_none`
+    /// `tests/perf_io_vs_decode.rs::many_small_windows_thread_spawn_overhead_65536_height_none`
     /// measured 4096 window transitions (65536 height / `max_in_flight()`=16
     /// at 8 threads) for a single `read_pixels` call, and found `num_threads=8`
     /// **3x SLOWER** than `num_threads=0` (2025ms vs 684ms) — OS thread-spawn
@@ -3032,7 +3032,7 @@ crate::probe::reset(crate::probe::Probe::ScanReadParallel);
     /// fraction of the remaining ZIP/PIZ read gap, before deciding whether
     /// porting those fast paths is worth the engineering cost. Reports
     /// GB/s so it can be compared directly against the whole-file read
-    /// throughput `tests/w39b_cpp_comparison.rs` measures.
+    /// throughput `tests/perf_ours_vs_cpp.rs` measures.
     ///
     /// Run explicitly (ignored by default):
     /// ```text
@@ -3045,10 +3045,10 @@ crate::probe::reset(crate::probe::Probe::ScanReadParallel);
 
         const WIDTH: usize = 16384;
         const LINES: usize = 8192;
-        const PIXEL_BYTES: usize = 2 + 2 + 2 + 4; // R,G,B half + A float (matches w39b_cpp_comparison.rs)
+        const PIXEL_BYTES: usize = 2 + 2 + 2 + 4; // R,G,B half + A float (matches perf_ours_vs_cpp.rs)
 
         // Interleaved RGBA(half,half,half,float) destination — the same
-        // layout `w39b_cpp_comparison.rs`'s `make_pixels` uses, confirmed
+        // layout `perf_ours_vs_cpp.rs`'s `make_pixels` uses, confirmed
         // identical to `oracle.cpp`'s `bench_io`.
         let slices = vec![
             InSliceInfo { buffer: 0, local_base: 0,

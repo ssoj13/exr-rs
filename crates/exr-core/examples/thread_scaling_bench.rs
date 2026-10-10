@@ -2,7 +2,7 @@
 //! scaling of the FLAT (non-deep) scanline and tiled read+write paths at
 //! increasing thread counts, for ZIP and PIZ, on one big synthetic image --
 //! the input for the user's decision on where to push parallelism next
-//! (deep is explicitly out of scope here: w39b-rayon owns that area).
+//! (deep is out of scope here).
 //!
 //! Methodology, matching this repo's other ad-hoc A/B tools
 //! (`ours_only_bench.rs`): a real subprocess-free, in-process measurement,
@@ -22,7 +22,7 @@
 //! ```
 //! `BENCH_CODEC_FILTER=zip` / `BENCH_PATH_FILTER=scanline,tiled` /
 //! `BENCH_DIR_FILTER=read,write` narrow the sweep (comma-separated,
-//! case-insensitive), matching `w39b_codec_isolation.rs`'s
+//! case-insensitive), matching `perf_codec_isolation.rs`'s
 //! `BENCH_CODEC_FILTER` convention.
 
 use std::io::Write;
@@ -165,7 +165,7 @@ impl BenchLog {
 }
 
 /// Best-effort current total CPU load (%), via PowerShell's `Get-Counter` --
-/// same diagnostic-only convention as `w39b_codec_isolation.rs`'s
+/// same diagnostic-only convention as `perf_codec_isolation.rs`'s
 /// `cpu_load_pct` (never fatal if unavailable, e.g. non-Windows).
 fn cpu_load_pct() -> Option<f64> {
     let output = std::process::Command::new("powershell")
@@ -188,7 +188,7 @@ fn env_filter(name: &str) -> Option<Vec<String>> {
 
 fn main() {
     let log_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.bughunt/bench/scaling.log");
+        .join("../../target/bench/scaling.log");
     let mut log = BenchLog::open(log_path.to_str().unwrap());
 
     let codec_filter = env_filter("BENCH_CODEC_FILTER");

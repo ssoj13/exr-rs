@@ -23,8 +23,8 @@
 //! methods end to end through the public API (a legitimate gap this module
 //! otherwise had no coverage for), but it does NOT and cannot kill the 6
 //! `ScanLineInputPartReader` mutants -- those need either a real call site
-//! for `ScanLineInputPartReader` to be added (out of scope: that's
-//! scanline/input.rs, owned by w39b-rayon) or the dead type deleted
+//! for `ScanLineInputPartReader` to be added (out of scope here: that's
+//! scanline/input.rs) or the dead type deleted
 //! entirely, which would remove the mutants along with the code.
 
 use exr_core::attr::{Channel, ChannelList, ChannelListAttribute, Compression, LineOrder, PixelType};

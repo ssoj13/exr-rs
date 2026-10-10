@@ -38,7 +38,7 @@
 //! Run explicitly (ignored by default — writes real temp files, several
 //! seconds per codec):
 //! ```text
-//! cargo test -p exr-core --release --test w39b_io_vs_decode -- --ignored --nocapture --test-threads=1
+//! cargo test -p exr-core --release --test perf_io_vs_decode -- --ignored --nocapture --test-threads=1
 //! ```
 
 use std::time::{Duration, Instant};
@@ -157,7 +157,7 @@ fn run_one(name: &str, comp: Compression) {
     let (pixels, fb) = make_pixels();
 
     let dir = std::env::temp_dir();
-    let path = dir.join(format!("w39b_io_vs_decode_{name}.exr"));
+    let path = dir.join(format!("perf_io_vs_decode_{name}.exr"));
     let path_str = path.to_str().unwrap().to_string();
 
     {
@@ -271,7 +271,7 @@ fn many_small_windows_thread_spawn_overhead_65536_height_none() {
     fb.insert("A", mk(PixelType::Float, 6)).unwrap();
 
     let dir = std::env::temp_dir();
-    let path = dir.join("w39b_many_small_windows_65536_none.exr");
+    let path = dir.join("perf_many_small_windows_65536_none.exr");
     let path_str = path.to_str().unwrap().to_string();
 
     {

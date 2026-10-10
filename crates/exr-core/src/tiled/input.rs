@@ -3627,7 +3627,7 @@ mod tests {
     /// `file_name`, `tile_order`, and
     /// `raw_tile_data` accessors added to the reader.
     #[test]
-    fn t15_reader_accessors() {
+    fn tiled_reader_accessors() {
         let td = TileDescription {
             x_size: 2,
             y_size: 2,
@@ -3819,7 +3819,7 @@ mod tests {
 
     /// Expected XDR (LE) HALF bytes for the tile rectangle `[min_x..=max_x] x
     /// [min_y..=max_y]` of the `make_pixels`-style value(x,y)=(y*width+x)
-    /// plane used by `t15_reader_accessors` (width = 4, origin (0,0)).
+    /// plane used by `tiled_reader_accessors` (width = 4, origin (0,0)).
     fn expected_tile_xdr_for_test(min_x: i32, min_y: i32, max_x: i32, max_y: i32) -> Vec<u8> {
         let width = 4;
         let mut out = Vec::new();

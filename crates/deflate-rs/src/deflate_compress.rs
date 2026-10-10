@@ -3616,7 +3616,8 @@ mod tests {
         assert_eq!(&out_a[..n_a], &out_b[..n_b]);
     }
 
-    /// Count static-codes table builds (1 build on two fixed-Huffman blocks). `pangram_short` (a 3x-repeated pangram,
+    /// Counts static-codes table builds: one build must serve two
+    /// fixed-Huffman blocks. `pangram_short` (a 3x-repeated pangram,
     /// small enough that a dynamic Huffman header's own overhead isn't worth
     /// it) reliably makes `flush_block`'s own cost comparison pick the
     /// STATIC/fixed Huffman block type at levels 1-6 (confirmed via a
