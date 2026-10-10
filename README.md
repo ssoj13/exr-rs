@@ -406,8 +406,8 @@ reference libraries from vcpkg, with the MSVC environment detected by `vcv-rs`. 
 `x64-windows*` triplet under `$VCPKG_ROOT/installed`. They run on Windows; elsewhere the committed
 goldens still run under `cargo test`.
 
-The user and developer guide is an [mdBook](https://rust-lang.github.io/mdBook/):
-`mdbook serve docs/book`. See also [`CHANGELOG.md`](CHANGELOG.md)
+The user and developer guide is an [mdBook](https://rust-lang.github.io/mdBook/), online at
+<https://ssoj13.github.io/exr-rs/> (locally: `mdbook serve docs/book`). See also [`CHANGELOG.md`](CHANGELOG.md)
 and [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md).
 
 ---

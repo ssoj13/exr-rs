@@ -6,6 +6,8 @@ language = "en"
 src = "src"
 
 [output.html]
+# Served from GitHub Pages under /exr-rs/ (.github/workflows/pages.yml).
+site-url = "/exr-rs/"
 default-theme = "navy"
 preferred-dark-theme = "navy"
 git-repository-url = "https://github.com/ssoj13/exr-rs"

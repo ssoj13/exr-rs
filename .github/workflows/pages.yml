@@ -1,0 +1,45 @@
+# Publishes the mdBook (docs/book) to GitHub Pages: https://ssoj13.github.io/exr-rs/
+# Runs when the book changes on main, and by hand. Needs no secrets: the book
+# builds from docs/book alone, without the private git dependencies.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs/book/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push supersedes a queued one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: taiki-e/install-action@v2.87.27
+        with:
+          tool: mdbook@0.5.3
+      - uses: actions/configure-pages@v6.0.0
+      - name: Build the book
+        run: mdbook build docs/book
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: docs/book/book
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5.0.1
