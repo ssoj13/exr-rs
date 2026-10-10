@@ -54,20 +54,20 @@ For a CPU-only CLI without GUI/OpenFX dependencies:
 cargo build --locked --release --no-default-features
 ```
 
-For the standalone viewer without OpenFX (GPU display remains required):
+With the viewer but without OpenFX effects (GPU display remains required):
 
 ```sh
-cargo build --locked --release -p exr-view --no-default-features
+cargo build --locked --release --no-default-features --features viewer
 ```
 
 Default builds enable the viewer and OpenFX. Diagnose git dependency failures against
 the checked-in lockfile. Native reference libraries are needed for parity, not for
 the Rust image-format runtime.
 
-## Binaries
+## The binary
 
-- `exr-rs` — the [command-line tool](cli.md), including inspection, conversion and whole-image tools.
-- `exr-view` — the standalone viewer (the same GUI `exr-rs view` launches).
-
-A `--no-default-features` build of the `exr-rs` binary drops the `viewer` feature
-(and its winit/egui/wgpu dependencies), leaving the CPU image tools.
+Everything ships in one binary, `exr-rs`: the [command-line tool](cli.md) with its
+inspection, conversion and whole-image tools, and the [viewer](viewer.md) as its
+`view` (`v`) subcommand. `exr-view` is the library crate behind that subcommand, not
+a separate program. A `--no-default-features` build drops the `viewer` feature (and its
+winit/egui/wgpu dependencies), leaving the CPU image tools.
