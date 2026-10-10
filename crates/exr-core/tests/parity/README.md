@@ -30,7 +30,7 @@ Two codecs need a matching C++ build for byte identity:
 ## How to run
 
 ```
-cargo run -p xtask -- parity-exr
+cargo xtask parity-exr
 ```
 
 This (Windows + vcpkg only):
@@ -57,7 +57,7 @@ The vcpkg tree is picked by the shared resolver in `xtask/src/vcpkg.rs`: `VCPKG_
   reporting PASSED. Set `EXR_ALLOW_SKIP=1` to opt out
   deliberately — the same variable `imath-rs` and `deflate-rs` use.
 
-## exrheader gate (`cargo run -p xtask -- parity-header`)
+## exrheader gate (`cargo xtask parity-header`)
 
 Builds OpenEXR's own `exrheader` (`openexr/src/bin/exrheader/main.cpp`, unmodified, same
 vcpkg/MSVC flags as the oracle via `openexr_build`) to `exrheader.exe` here, then runs the ignored

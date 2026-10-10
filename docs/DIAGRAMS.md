@@ -160,7 +160,7 @@ scopes, viewport readout, Metadata, Pixel Info and Save view all read.
 
 ```mermaid
 flowchart TD
-    X["cargo run -p xtask -- parity-exr / parity / parity-deflate"] --> V["vcv-rs: MSVC env"]
+    X["cargo xtask parity-exr / parity / parity-deflate"] --> V["vcv-rs: MSVC env"]
     X --> VP["vcpkg::Vcpkg::resolve(probe header)<br/>VCPKG_INSTALLED or first x64-windows* triplet"]
     VP --> L["static or DLL: CRT /MT or /MD,<br/>lib names, run_path"]
     V --> CL["cl oracle.cpp / oracle.c"]

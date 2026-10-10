@@ -27,11 +27,11 @@ Tests that require enabled fixtures or an oracle fail without them; the explicit
 
 | Command | Reference | Purpose |
 |---|---|---|
-| `cargo run -p xtask -- parity` | Imath 3.2.2 | Bit/ULP golden checks for the Imath 3.2.0 port |
-| `cargo run -p xtask -- parity-deflate` | libdeflate 1.26 | Byte identity across compression levels |
-| `cargo run -p xtask -- parity-exr` | OpenEXR 3.4.15 (108 tests) | C++→Rust and Rust→C++ read/write comparisons |
-| `cargo run -p xtask -- parity-header` | C++ exrheader | Header formatter comparisons |
-| `cargo run -p xtask -- parity-tools` | C++ image tools | CLI/tool behaviour comparisons |
+| `cargo xtask parity` | Imath 3.2.2 | Bit/ULP golden checks for the Imath 3.2.0 port |
+| `cargo xtask parity-deflate` | libdeflate 1.26 | Byte identity across compression levels |
+| `cargo xtask parity-exr` | OpenEXR 3.4.15 (108 tests) | C++→Rust and Rust→C++ read/write comparisons |
+| `cargo xtask parity-header` | C++ exrheader | Header formatter comparisons |
+| `cargo xtask parity-tools` | C++ image tools | CLI/tool behaviour comparisons |
 
 The native build path uses Windows/MSVC and vcpkg. On other platforms xtask reports
 a skip and returns without building the native oracle; that is not a native pass.

@@ -17,7 +17,7 @@ are involved.
 ## How to run / regenerate
 
 ```text
-cargo run -p xtask -- parity        # or: python bootstrap.py parity
+cargo xtask parity        # or: python bootstrap.py parity
 ```
 
 On **Windows** this:

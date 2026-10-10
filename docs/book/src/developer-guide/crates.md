@@ -14,7 +14,7 @@ Workspace members (plus the root `exr-rs` CLI package):
 | `exr-image` | `exr-core` + the `image` crate | EXR decoding for `image` through exr-core (`register()` installs the hooks). |
 | `exr-test-data` | test infrastructure | resolves opt-in private fixtures via `EXR_TEST_DATA`. |
 
-`xtask` is also a workspace member. `cargo run -p xtask -- <command>` with `setup`,
+`xtask` is also a workspace member. `cargo xtask <command>` with `setup`,
 `parity`, `parity-deflate`, `parity-exr`, `parity-header` or `parity-tools` builds the
 native oracles through one vcpkg resolver.
 

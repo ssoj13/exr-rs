@@ -41,7 +41,7 @@ any drift fails loudly and is never mistaken for a compression mismatch.
 ## How to run / regenerate
 
 ```text
-cargo run -p xtask -- parity-deflate      # or: python bootstrap.py parity-deflate
+cargo xtask parity-deflate      # or: python bootstrap.py parity-deflate
 ```
 
 On **Windows** this:

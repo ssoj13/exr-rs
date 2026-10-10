@@ -199,8 +199,8 @@ order. Writers take the pixel bytes on each call, so one strip buffer can stream
 | Error classes (Iex, checked arithmetic) | ✅ | 1:1 taxonomy | ✅ one documented addition: `Unsupported` for the facade |
 | Threading | IlmThread pool | rayon on all 8 read/write × storage paths | ✅ output identical at every thread count |
 | Python `OpenEXR` module | pybind11 | PyO3 drop-in, plus `OpenEXR.cryptomatte` | ✅ official OpenEXR Python tests pass |
-| `exrheader` | ✅ | `exr-rs info` | ✅ output byte-identical (`cargo run -p xtask -- parity-header`) |
-| Ten ported command-line tools (`exrcheck`, `exrmaketiled`, `exrmakepreview`, `exrenvmap`, `exrmultipart`, `exrmultiview`, `exrstdattr`, `exrmetrics`, `exrmanifest`, `exr2aces`) | ✅ | `check`, `tile`, `preview`, `envmap`, `multipart`, `multiview`, `attr`, `metrics`, `manifest`, `aces` | ✅ compared with the C++ tools (`cargo run -p xtask -- parity-tools`) |
+| `exrheader` | ✅ | `exr-rs info` | ✅ output byte-identical (`cargo xtask parity-header`) |
+| Ten ported command-line tools (`exrcheck`, `exrmaketiled`, `exrmakepreview`, `exrenvmap`, `exrmultipart`, `exrmultiview`, `exrstdattr`, `exrmetrics`, `exrmanifest`, `exr2aces`) | ✅ | `check`, `tile`, `preview`, `envmap`, `multipart`, `multiview`, `attr`, `metrics`, `manifest`, `aces` | ✅ compared with the C++ tools (`cargo xtask parity-tools`) |
 | OpenEXRUtil (`ImfImage`, `ImfFlatImage`, `ImfDeepImage`, `ImfCheckFile`) | ✅ | `exr-util` | ✅ |
 | Native code | C / C++ | Rust; `unsafe` only in `deflate-rs` SIMD and `codec-simd`, none in `exr-core` | ✅ no FFI |
 | GPU upload, GPU viewer, Cryptomatte encode | — | `exr-gpu`, `exr-view`, `cryptomatte` | ➕ beyond OpenEXR |
@@ -256,10 +256,10 @@ flowchart LR
 
 | Gate | Result |
 |---|---|
-| `cargo run -p xtask -- parity-exr`: 108 tests against real C++ OpenEXR 3.4.15, both directions | ✅ 108/108 |
-| `cargo run -p xtask -- parity`: Imath goldens | ✅ bit-exact / within ULP |
-| `cargo run -p xtask -- parity-deflate`: libdeflate | ✅ byte-identical |
-| `cargo run -p xtask -- parity-header`: `exr-rs info` vs `exrheader` | ✅ byte-identical |
+| `cargo xtask parity-exr`: 108 tests against real C++ OpenEXR 3.4.15, both directions | ✅ 108/108 |
+| `cargo xtask parity`: Imath goldens | ✅ bit-exact / within ULP |
+| `cargo xtask parity-deflate`: libdeflate | ✅ byte-identical |
+| `cargo xtask parity-header`: `exr-rs info` vs `exrheader` | ✅ byte-identical |
 | Corpus runner over OpenEXR's own test images | ✅ no panics; lossless files round-trip bit-exact |
 | Official OpenEXR Python tests (vendored) against `openexr-py` | ✅ |
 | `exr-view` tests, including GPU render and present-pass tests | ✅ |
@@ -402,7 +402,7 @@ python bootstrap.py t          # the full gate: tests, clippy, oracles, pytest
 python bootstrap.py c          # clippy -D warnings
 ```
 
-The C/C++ oracle gates (`cargo run -p xtask -- parity-exr`, `parity`, `parity-deflate`) compile
+The C/C++ oracle gates (`cargo xtask parity-exr`, `parity`, `parity-deflate`) compile
 small oracles against the vcpkg-installed reference libraries, with the MSVC environment detected
 by `vcv-rs`. They run on Windows; elsewhere the committed goldens still run under `cargo test`.
 Setup (`VCPKG_INSTALLED`, triplets) is in the guide's
@@ -446,7 +446,7 @@ The OpenJPH port lives in [`jph-rs`](https://github.com/ssoj13/jph-rs), which pi
 reference.
 
 Nothing here needs these trees checked out. The oracles link the vcpkg libraries pinned in
-`xtask/vcpkg.json`; the two oracles that compile OpenEXR's own tools (`cargo run -p xtask --
+`xtask/vcpkg.json`; the two oracles that compile OpenEXR's own tools (`cargo xtask
 parity-header`, `parity-tools`) fetch the v3.4.15 sources themselves into
 `target/ref/openexr-v3.4.15` and check the commit. The tests read only the private image set
 (`EXR_TEST_DATA`), which holds the same OpenEXR and openexr-images commits; `EXR_CORPUS_DIR`
