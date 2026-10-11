@@ -94,7 +94,8 @@ pub struct Config {
     /// `RECENTS_MAX`.
     #[serde(default)]
     pub recents: Vec<PathBuf>,
-    /// Folder and Open filter the file dialogs last confirmed.
+    /// Where every file dialog last confirmed a pick, by request key (Open, Save, the OCIO
+    /// config browser, OpenFX path parameters), and the Open filter.
     #[serde(default)]
     pub dialogs: crate::file_pick::DialogMemory,
     /// Status-bar section widths (draggable splitters). Empty = the bar fills it
@@ -136,9 +137,6 @@ pub struct Config {
     /// The window output (the Settings tab's Display).
     #[serde(default)]
     pub display: DisplayPrefs,
-    /// Where the Colour panel's config browser starts (`egui-file-field`'s remembered folder).
-    #[serde(default)]
-    pub ocio_dir: egui_file_field::FileFieldState,
     /// Text sizes and the dock tab height (the Settings tab's UI).
     #[serde(default)]
     pub fonts: Fonts,
@@ -288,7 +286,6 @@ impl Default for Config {
             backdrop: egui_display::Backdrop::default(),
             ocio: crate::ocio::Sel::default(),
             display: DisplayPrefs::default(),
-            ocio_dir: egui_file_field::FileFieldState::default(),
             fonts: Fonts::default(),
         }
     }
@@ -362,7 +359,7 @@ impl Config {
         let stored: serde_json::Value = serde_json::from_str(text)?;
         // The usual case: everything reads.
         if let Ok(cfg) = serde_json::from_value::<Config>(stored.clone()) {
-            return Ok(cfg);
+            return Ok(Self::migrated(cfg, &stored));
         }
         let serde_json::Value::Object(stored) = stored else {
             return Err(serde_json::Error::custom("the config is not a JSON object"));
@@ -370,6 +367,7 @@ impl Config {
         let serde_json::Value::Object(mut kept) = serde_json::to_value(Config::default())? else {
             return Err(serde_json::Error::custom("a config does not serialize to an object"));
         };
+        let stored_all = stored.clone();
         // Admit the stored fields one at a time, each on top of the defaults and what was admitted.
         for (key, value) in stored {
             let mut trial = kept.clone();
@@ -381,7 +379,17 @@ impl Config {
                 Err(e) => log::warn!("config: `{key}` no longer reads ({e}); using its default"),
             }
         }
-        serde_json::from_value(serde_json::Value::Object(kept))
+        let cfg = serde_json::from_value(serde_json::Value::Object(kept))?;
+        Ok(Self::migrated(cfg, &serde_json::Value::Object(stored_all)))
+    }
+
+    /// Fold the settings of older configs into today's fields: the Colour panel's own remembered
+    /// folder (`ocio_dir.last_dir`) now lives in the dialog memory under the key `"ocio"`.
+    fn migrated(mut cfg: Config, stored: &serde_json::Value) -> Config {
+        if let Some(dir) = stored.pointer("/ocio_dir/last_dir").and_then(serde_json::Value::as_str) {
+            cfg.dialogs.migrate_ocio(dir);
+        }
+        cfg
     }
 
     /// Write the config to disk as pretty JSON, creating the parent directory
@@ -481,11 +489,9 @@ mod tests {
         c.toolbar.vertical_offset = 12.0;
         c.status_bar_locked = true;
         c.exposure_hold = 1.5;
-        c.ocio_dir.remember("C:/cfg/a.ocio");
         let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert!(!back.toolbar.expanded && back.toolbar.vertical_offset == 12.0 && back.status_bar_locked);
         assert_eq!(back.exposure_hold, 1.5);
-        assert_eq!(back.ocio_dir, c.ocio_dir);
     }
 
     /// A field whose stored shape changed (a foreign crate's type, or one of ours, or a scalar)
@@ -505,7 +511,7 @@ mod tests {
         // ...a foreign type, one of ours and scalars each fall back alone.
         assert_eq!(c.toolbar, egui_viewport_toolbar::ToolbarState::default());
         assert_eq!(c.status_bar_layout, egui_statusbar::StatusBarLayout::default());
-        assert_eq!(c.ocio_dir, egui_file_field::FileFieldState::default());
+        assert!(c.dialogs.dirs.is_empty(), "a malformed ocio_dir migrates nothing");
         assert_eq!(c.display, DisplayPrefs::default());
         assert_eq!(c.fonts, Fonts::default());
         assert_eq!(c.budgets, Budgets::default());
@@ -520,8 +526,6 @@ mod tests {
     /// A config with EVERY field off its default (a new field left at its default fails
     /// `a_full_config_round_trips`'s guard until it is set here).
     fn full_config() -> Config {
-        let mut ocio_dir = egui_file_field::FileFieldState::default();
-        ocio_dir.remember("C:/cfg/a.ocio");
         let mut layouts = egui_dock_layout::LayoutStore::default();
         layouts.save("Wide", "{}");
         Config {
@@ -537,9 +541,11 @@ mod tests {
             open_seq: false,
             recents: vec![PathBuf::from("a.exr"), PathBuf::from("b.exr")],
             dialogs: crate::file_pick::DialogMemory {
-                open_dir: Some(PathBuf::from("shots")),
-                open_filter: Some("PNG".to_owned()),
-                save_dir: Some(PathBuf::from("out")),
+                dirs: [("open", "shots"), ("save", "out"), ("ocio", "C:/cfg")]
+                    .into_iter()
+                    .map(|(k, d)| (k.to_owned(), PathBuf::from(d)))
+                    .collect(),
+                filters: [("open".to_owned(), "PNG".to_owned())].into_iter().collect(),
             },
             status_bar_layout: egui_statusbar::StatusBarLayout::new(vec![111.0, 222.0]),
             status_bar_locked: true,
@@ -553,7 +559,6 @@ mod tests {
             backdrop: egui_display::Backdrop { kind: egui_display::BackdropKind::Color, color: [0.2, 0.4, 0.6, 1.0], ..Default::default() },
             ocio: crate::ocio::Sel { on: true, config: "x.ocio".into(), input: "i".into(), display: "d".into(), view: "v".into(), look: "l".into() },
             display: DisplayPrefs { output: crate::present::Output::Hlg, white: Some(250.0), peak: Some(1200.0) },
-            ocio_dir,
             fonts: Fonts { heading: 12.0, body: 13.0, monospace: 11.0, button: 12.5, small: 8.0, dock_tab: 30.0, sidebar: 14.0 },
         }
     }
@@ -711,5 +716,22 @@ mod tests {
         assert_eq!(old.budgets, Budgets::default());
         let partial: Config = serde_json::from_str(r#"{"budgets": {"ram": 0.5}}"#).unwrap();
         assert_eq!(partial.budgets, Budgets { ram: 0.5, ..Budgets::default() });
+    }
+
+    /// A config written before the dialog memory was one map: the Colour panel's `ocio_dir` and the
+    /// per-purpose Open / Save fields load into the map under their keys.
+    #[test]
+    fn an_old_config_migrates_its_dialog_folders() {
+        let c = Config::parse(
+            r#"{"ocio_dir": {"last_dir": "C:/cfg"},
+                "dialogs": {"open_dir": "shots", "open_filter": "PNG", "save_dir": "out"}}"#,
+        )
+        .unwrap();
+        let dir = |k: &str| c.dialogs.dirs[k].clone();
+        assert_eq!((dir("ocio"), dir("open"), dir("save")), ("C:/cfg".into(), "shots".into(), "out".into()));
+        assert_eq!(c.dialogs.filters["open"], "PNG");
+        // Through the field-by-field path (one other field is malformed) as well.
+        let c = Config::parse(r#"{"gamma": "x", "ocio_dir": {"last_dir": "C:/cfg"}}"#).unwrap();
+        assert_eq!(c.dialogs.dirs["ocio"], std::path::Path::new("C:/cfg"));
     }
 }

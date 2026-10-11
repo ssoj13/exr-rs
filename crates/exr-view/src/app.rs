@@ -30,7 +30,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use crate::dock::{self, DockTab, DockTabViewer, default_dock_state};
-use crate::file_pick::{DialogMemory, FilePick, Pick};
+use crate::file_pick::{FilePick, Pick};
 use crate::gpu_ctx::GpuContext;
 use crate::channels;
 use crate::commands::{self, Action, COMMANDS, NavCmd};
@@ -766,7 +766,7 @@ impl AppState {
             channel: channel_from_u8(config.channel),
             tonemap: crate::transfer::tonemap::known(config.tonemap),
             backdrop: config.backdrop,
-            colour: crate::ocio::State::with_dir(config.ocio.clone(), config.ocio_dir.clone()),
+            colour: crate::ocio::State::new(config.ocio.clone()),
             target: crate::present::Target::default(),
             // Active layer / crypto pick are per-file (set on load), never persisted.
             view: Selection::default(),
@@ -1569,7 +1569,7 @@ impl AppState {
         }
         self.display_gpu.upload = config.budgets.upload_bytes();
         if browse {
-            self.file_pick.pick_config(colour.start_dir());
+            self.file_pick.pick_config(&self.config.dialogs, colour.start_dir().or_else(|| self.last_dir()));
         }
         if open_colour {
             self.prefs.selected = 3;
@@ -2440,7 +2440,6 @@ impl Viewer {
         let c = &self.app_state.controls;
         self.app_state.config.exposure = c.exposure;
         self.app_state.config.exposure_hold = c.exposure_hold;
-        self.app_state.config.ocio_dir = c.colour.dir_state().clone();
         self.app_state.config.gamma = c.gamma;
         self.app_state.config.channel = channel_to_u8(c.channel);
         self.app_state.config.tonemap = c.tonemap;
@@ -2543,12 +2542,26 @@ impl Viewer {
         let mut full_output = ctx.run_ui(raw_input, |ui| {
             build_ui(ui, dock_state, app_state, &mut viewport_gpu, gpu_status);
             // After every panel, on each exit path of `build_ui`: the modal paints on top.
-            let picked = app_state.file_pick.poll(ui.ctx());
-            // A confirmed pick only: a cancelled dialog yields `None` and leaves the memory alone.
-            if app_state.config.dialogs.record(picked.as_ref(), app_state.file_pick.filter_key()) {
+            // The OpenFX panel asked for a dialog while the UI was built: it is this dialog.
+            #[cfg(feature = "ofx")]
+            if let Some(request) = app_state.effects.picker().take_request() {
+                let fallback = app_state.last_dir();
+                app_state.file_pick.ofx(&app_state.config.dialogs, fallback, request);
+            }
+            // `poll` records a confirmed pick in the memory (a cancel leaves it alone).
+            let picked = app_state.file_pick.poll(ui.ctx(), &mut app_state.config.dialogs);
+            if picked.is_some() {
                 app_state.config.save();
             }
+            #[cfg(feature = "ofx")]
+            if app_state.file_pick.take_ofx_cancel() {
+                app_state.effects.picker().answer(ofx_host_egui::PickOutcome::Cancelled);
+            }
             match picked {
+                #[cfg(feature = "ofx")]
+                Some((Pick::Ofx, path)) => app_state.effects.picker().answer(ofx_host_egui::PickOutcome::Picked(path)),
+                #[cfg(not(feature = "ofx"))]
+                Some((Pick::Ofx, _)) => {}
                 Some((Pick::Open, path)) => app_state.open_picked(path),
                 Some((Pick::OcioConfig, path)) => app_state.controls.colour.set_config(path.display().to_string()),
                 Some((pick @ (Pick::SaveView | Pick::SaveViewHdr), path)) => {
@@ -3053,27 +3066,27 @@ fn build_ui(
 fn run(action: Action, app_state: &mut AppState, dock_state: &mut DockState<DockTab>, ctx: &egui::Context) {
     match action {
         Action::Open => {
-            // Start where the last pick was confirmed, else where the file shown last lives.
-            let dir = DialogMemory::start(app_state.config.dialogs.open_dir.as_deref(), app_state.last_dir());
-            // The dialog's box shows the option as it is now (Settings may have changed it).
+            // The dialog starts where the last pick was confirmed, else where the file shown last lives.
+            // Its box shows the option as it is now (Settings may have changed it).
             app_state.file_pick.seq = app_state.config.open_seq;
-            app_state.file_pick.open(dir, app_state.config.dialogs.open_filter.as_deref());
+            let fallback = app_state.last_dir();
+            app_state.file_pick.open(&app_state.config.dialogs, fallback);
         }
         Action::SaveView => {
-            let dir = DialogMemory::start(app_state.config.dialogs.save_dir.as_deref(), app_state.last_dir());
             let name = app_state
                 .current_backend()
                 .map(|img| format!("{}.png", img.frame.path.file_stem().and_then(|s| s.to_str()).unwrap_or("view")))
                 .unwrap_or_else(|| "view.png".to_owned());
-            app_state.file_pick.save_view(dir, &name);
+            let fallback = app_state.last_dir();
+            app_state.file_pick.save_view(&app_state.config.dialogs, fallback, &name);
         }
         Action::SaveViewHdr => {
-            let dir = DialogMemory::start(app_state.config.dialogs.save_dir.as_deref(), app_state.last_dir());
             let name = app_state
                 .current_backend()
                 .map(|img| format!("{}.hdr.png", img.frame.path.file_stem().and_then(|s| s.to_str()).unwrap_or("view")))
                 .unwrap_or_else(|| "view.hdr.png".to_owned());
-            app_state.file_pick.save_view_hdr(dir, &name);
+            let fallback = app_state.last_dir();
+            app_state.file_pick.save_view_hdr(&app_state.config.dialogs, fallback, &name);
         }
         Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         Action::Nav(cmd) => app_state.controls.nav = Some(cmd),
@@ -4087,7 +4100,7 @@ mod key_path_tests {
         frame(&ctx, vec![press(Key::R, Modifiers::NONE)], |ui| read_keys(ui.ctx(), &mut app, &mut dock));
         assert_eq!(app.controls.channel, ChannelDisplay::R);
         frame(&ctx, vec![Event::Key { key: Key::R, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::NONE }], |_| {});
-        app.file_pick.open(None, None);
+        app.file_pick.open(&Default::default(), None);
         assert!(app.file_pick.is_open());
         frame(&ctx, vec![press(Key::G, Modifiers::NONE)], |ui| read_keys(ui.ctx(), &mut app, &mut dock));
         assert_eq!(app.controls.channel, ChannelDisplay::R, "bare keys are the dialog's while it is open");

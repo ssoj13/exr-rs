@@ -161,6 +161,8 @@ impl Plugin for ConsumerEffect {
         Ok(())
     }
 }
+/// The fixture effect's plug-in ID, for tests elsewhere.
+pub(crate) const EFFECT_ID: &str = ConsumerEffect::ID;
 /// This module's linked fixtures; called once by `OfxEffects::test_scan` before any test
 /// opens the process's plug-in registry.
 pub(crate) fn register_linked() {

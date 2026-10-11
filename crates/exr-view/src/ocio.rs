@@ -437,8 +437,8 @@ pub struct State {
     active: Option<Arc<Transform>>,
     /// Why OCIO is on but not shown.
     pub err: Option<String>,
-    /// Where the config browser starts: the folder of the last config that LOADED
-    /// (persisted as `Config::ocio_dir`).
+    /// The path field's widget state. Only the field's own bookkeeping: where the config dialog
+    /// starts is the dialog memory's (`file_pick::DialogMemory`, key `"ocio"`).
     field: egui_file_field::FileFieldState,
 }
 
@@ -446,20 +446,10 @@ impl State {
     /// A state for `sel`, built (the device is assumed to filter until
     /// [`Self::set_filterable`] says otherwise).
     pub fn new(sel: Sel) -> Self {
-        Self::with_dir(sel, egui_file_field::FileFieldState::default())
-    }
-
-    /// [`Self::new`] with the config browser's folder remembered by a previous session: it is in
-    /// place BEFORE the first load, which may update it (a loaded config's own folder wins).
-    pub fn with_dir(sel: Sel, field: egui_file_field::FileFieldState) -> Self {
+        let field = egui_file_field::FileFieldState::default();
         let mut s = Self { sel, filterable: true, hdr: false, cfg: None, active: None, err: None, field };
         s.rebuild();
         s
-    }
-
-    /// The browser's remembered folder, for the app to persist.
-    pub fn dir_state(&self) -> &egui_file_field::FileFieldState {
-        &self.field
     }
 
     /// Tell what the device can do (after the GPU is up) and rebuild.
@@ -521,12 +511,6 @@ impl State {
         let src = source(&self.sel.config);
         if self.cfg.as_ref().is_none_or(|(s, _)| *s != src) {
             let loaded = Ocio::load(&src).map_err(|e| format!("{e:#}"));
-            // Only a file the user chose that really loaded sets where the browser starts next
-            // time: a mistyped path must not replace the last good folder, and `$OCIO` and the
-            // `ocio://` built-ins are not the user's folder.
-            if loaded.is_ok() && !self.sel.config.trim().is_empty() && !src.contains("://") {
-                self.field.remember(&src);
-            }
             self.cfg = Some((src, loaded));
         }
     }
@@ -547,8 +531,8 @@ impl State {
         self.rebuild();
     }
 
-    /// The folder the config file dialog opens in: the current config's, else the last one
-    /// picked from; `None` lets the dialog choose.
+    /// The folder of the current config: where the config file dialog opens when nothing is
+    /// remembered; `None` when the config is built in or its folder is gone.
     pub fn start_dir(&self) -> Option<std::path::PathBuf> {
         let dir = std::path::PathBuf::from(self.field.start_dir(&self.sel.config));
         dir.is_dir().then_some(dir)
@@ -826,10 +810,10 @@ mod tests {
     }
 
     /// A typed or browsed config path that does not load is an error on the state (the panel and
-    /// the toolbar show it), never a silent fallback to the default config; and it must not
-    /// replace the folder of the last config that DID load as the browser's start.
+    /// the toolbar show it), never a silent fallback to the default config; the dialog then starts
+    /// from the dialog memory, not from the bad path.
     #[test]
-    fn a_bad_config_path_is_an_error_and_keeps_the_last_good_folder() {
+    fn a_bad_config_path_is_an_error_and_offers_no_folder() {
         let mut s = State::new(Sel { on: true, config: "ocio://default".to_owned(), ..Sel::default() });
         assert!(s.err.is_none() && s.active().is_some());
         s.set_config("no/such/dir/config.ocio".to_owned());
@@ -841,27 +825,9 @@ mod tests {
         assert_eq!(s.start_dir(), Some(dir.clone()));
         s.set_config("no/such/dir/config.ocio".to_owned());
         assert!(s.err.is_some());
-        assert_eq!(s.start_dir(), Some(dir), "the failed path did not overwrite the last good folder");
+        assert_eq!(s.start_dir(), None, "a missing folder is not offered");
         s.set_config("ocio://default".to_owned());
         assert!(s.err.is_none(), "a built-in URI loads");
-        // The remembered folder is what the app persists and the next session starts from.
-        let next = State::with_dir(Sel::default(), s.dir_state().clone());
-        assert!(next.dir_state() == s.dir_state());
-        // The folder saved by a previous session is in place before the first load: it survives
-        // when the saved config does not load...
-        let (_, file_a) = good_config("saved-a");
-        let mut saved = egui_file_field::FileFieldState::default();
-        saved.remember(&file_a.display().to_string());
-        let kept = State::with_dir(Sel { on: true, config: "no/such/dir/config.ocio".to_owned(), ..Sel::default() }, saved.clone());
-        assert_eq!(kept.dir_state(), &saved);
-        // ...and a saved config that DOES load puts its own folder over it. Applying the saved
-        // folder after construction instead (the old order) would bring the stale one back.
-        let (_, file_b) = good_config("saved-b");
-        let loaded = State::with_dir(Sel { on: true, config: file_b.display().to_string(), ..Sel::default() }, saved.clone());
-        let mut expect = egui_file_field::FileFieldState::default();
-        expect.remember(&file_b.display().to_string());
-        assert_eq!(loaded.dir_state(), &expect, "the loaded config's folder wins");
-        assert_ne!(expect, saved, "the probe folders differ");
     }
 
     /// The path field keeps one draft PER INSTANCE (keyed by its `Ui` id): typing in one neither

@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use ofx_host_egui::{
     Backend, CanonicalView, EffectStack, EffectUi, MessageKind, StackAction, StackRow, StackStatus,
-    UiEvents, backend_options, plugin_menu,
+    OfxParamsUi, UiEvents, backend_options, plugin_menu,
 };
 use ofx_runtime::ofx_host::{HostContext, HostInfo, RenderSite};
 use ofx_runtime::{
@@ -41,6 +41,9 @@ use crate::tiles::effect::EffectSource;
 use crate::tiles::effect_frames::Inputs;
 use crate::tiles::region::RegionBudget;
 use crate::tiles::source::TileSource;
+
+/// Where users get ofx-rs's effects bundle.
+const RELEASES_URL: &str = "https://github.com/ssoj13/ofx-rs/releases/latest";
 
 /// The operating system's OpenFX plug-in directory (the last entry of the standard search).
 #[cfg(windows)]
@@ -108,6 +111,9 @@ pub struct OfxEffects {
     frame_rate: Option<f64>,
     frame_range: Option<[f64; 2]>,
     wake: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// The dialog behind the parameter panel's browse buttons; installed in every attached UI.
+    /// The panel's `PathPicker`: a mailbox the viewer answers from its one file dialog (`file_pick`).
+    adapter: Arc<crate::file_pick::OfxPicker>,
     /// Why the last render or selection failed.
     error: Option<String>,
     /// Why the effect cannot run on the shown image at all (the viewer's
@@ -183,6 +189,7 @@ impl OfxEffects {
         let runtime = Runtime::new(info, scan);
         let events = Arc::new(UiEvents::new());
         runtime.inbox().set_observer(Some(events.clone()));
+        let adapter = Arc::new(crate::file_pick::OfxPicker::default());
         Self {
             ui: None,
             effect: None,
@@ -200,6 +207,7 @@ impl OfxEffects {
             frame_rate: None,
             frame_range: None,
             wake: None,
+            adapter,
             error: None,
             blocked: None,
         }
@@ -224,6 +232,12 @@ impl OfxEffects {
             }
         }
 
+    }
+
+    /// The mailbox of the parameter panel's browse dialogs: the app turns a request into its one
+    /// file dialog and posts the answer back.
+    pub fn picker(&self) -> &crate::file_pick::OfxPicker {
+        &self.adapter
     }
 
     /// Whether an effect is applied to the shown image.
@@ -371,6 +385,10 @@ impl OfxEffects {
                 ui.label(format!(
                     "No OpenFX plug-ins found. Searched: the OFX_PLUGIN_PATH directories, then {OS_PLUGIN_DIR}."
                 ));
+                ui.hyperlink_to(RELEASES_URL, RELEASES_URL);
+                ui.label(format!(
+                    "Download the ofx-rs effects bundle (ofx-effects.ofx.bundle) and unzip it into {OS_PLUGIN_DIR},                      or point OFX_PLUGIN_PATH at its folder."
+                ));
             }
             if !problems.is_empty() {
                 ui.collapsing(format!("{} scan problem(s)", problems.len()), |ui| {
@@ -479,8 +497,15 @@ impl OfxEffects {
         if self.ui.as_ref().is_some_and(|ui| ui.shows(effect)) { return; }
         if let Some(attached) = EffectUi::attach(effect) {
             match attached {
-                Ok(ui) => {
+                Ok(mut ui) => {
                     for problem in ui.problems() { log::warn!("OpenFX effect UI: {problem}"); }
+                    // `EffectUi` builds its editor without a file dialog: rebuild it with ours, or the
+                    // path parameters' browse buttons report "no file dialog installed".
+                    // TODO: ofx-rs lacks `EffectUi::with_picker`; replace this rebuild when it lands.
+                    match OfxParamsUi::for_instance(ui.instance()) {
+                        Ok(params) => *ui.params_mut() = params.with_picker(self.adapter.clone()),
+                        Err(error) => log::warn!("OpenFX browse dialog not installed: {error:#}"),
+                    }
                     self.ui = Some(ui);
                 }
                 Err(error) => self.error = Some(format!("{error:#}")),
@@ -751,5 +776,51 @@ mod tests {
         harness.run();
         assert_eq!(harness.state().rendered(), None);
         assert_eq!(harness.query_all_by_label_contains("images").count(), 0);
+    }
+
+    /// The browse button of a path parameter reaches the viewer's picker mailbox (what `app.rs` turns into
+    /// its one file dialog), and the path the viewer answers with lands in the parameter (the preset file
+    /// every ofx-crate plug-in declares). RED: no picker installed = the click only reports "the application
+    /// has installed no file dialog".
+    #[test]
+    fn a_browse_click_reaches_the_picker_and_the_pick_lands_in_the_parameter() {
+        let mut fx = OfxEffects::with_scan(OfxEffects::test_scan());
+        fx.choose(Some(PluginKey::new(crate::image::consumer_tests::EFFECT_ID, 1)));
+        render_once(&fx);
+        fx.attach_ui();
+        // As the viewer's frame does: tick (finished edits, redraws), then the panel.
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(700.0, 500.0))
+            .build_ui_state(|ui, fx: &mut OfxEffects| { fx.tick(ui.ctx()); fx.panel(ui) }, fx);
+        harness.run_steps(3);
+        // The "Presets" group is closed by default: open it, then press the Preset File browse icon.
+        harness.get_by_label("Presets").click();
+        harness.run_steps(3);
+        harness
+            .get_all_by_role_and_label(Role::Button, egui_widgets_config::icons::FILE)
+            .next()
+            .expect("a browse button")
+            .click();
+        // The viewer answers the request like `app.rs` does once its dialog confirms; the edit goes to the
+        // instance as an event and comes back on a later frame.
+        let mut asked = Vec::new();
+        for _ in 0..200 {
+            harness.step();
+            if let Some(request) = harness.state().picker().take_request() {
+                asked.push(request);
+                harness.state().picker().answer(ofx_host_egui::PickOutcome::Picked("picked.json".into()));
+            }
+            if harness.query_all_by_value("picked.json").next().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(asked.len(), 1, "one dialog was asked for");
+        assert_eq!(asked[0].kind, ofx_host_egui::PickKind::Save, "the preset file is a path that need not exist");
+        assert!(
+            harness.query_all_by_value("picked.json").next().is_some(),
+            "the picked path is the parameter's value; text inputs: {:?}",
+            harness.get_all_by_role(Role::TextInput).map(|n| n.accesskit_node().value()).collect::<Vec<_>>()
+        );
     }
 }
