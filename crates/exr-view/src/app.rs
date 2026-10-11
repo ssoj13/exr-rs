@@ -30,7 +30,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use crate::dock::{self, DockTab, DockTabViewer, default_dock_state};
-use crate::file_pick::{FilePick, Pick};
+use crate::file_pick::{DialogMemory, FilePick, Pick};
 use crate::gpu_ctx::GpuContext;
 use crate::channels;
 use crate::commands::{self, Action, COMMANDS, NavCmd};
@@ -861,6 +861,12 @@ impl AppState {
     /// opens as its whole sequence; off, like [`Self::open_path`].
     pub fn open_chosen(&mut self, path: PathBuf) {
         self.open_path_with(path, self.config.open_seq);
+    }
+
+    /// The folder of the file shown last, whichever way it was opened: where a dialog starts
+    /// when it has no remembered folder.
+    fn last_dir(&self) -> Option<PathBuf> {
+        self.config.last_file.as_deref().and_then(Path::parent).map(Path::to_path_buf)
     }
 
     /// Open a File > Open pick: its dialog box is the same option, so take it over first.
@@ -2540,7 +2546,12 @@ impl Viewer {
         let mut full_output = ctx.run_ui(raw_input, |ui| {
             build_ui(ui, dock_state, app_state, &mut viewport_gpu, gpu_status);
             // After every panel, on each exit path of `build_ui`: the modal paints on top.
-            match app_state.file_pick.poll(ui.ctx()) {
+            let picked = app_state.file_pick.poll(ui.ctx());
+            // A confirmed pick only: a cancelled dialog yields `None` and leaves the memory alone.
+            if app_state.config.dialogs.record(picked.as_ref(), app_state.file_pick.filter_key()) {
+                app_state.config.save();
+            }
+            match picked {
                 Some((Pick::Open, path)) => app_state.open_picked(path),
                 Some((Pick::OcioConfig, path)) => app_state.controls.colour.set_config(path.display().to_string()),
                 Some((pick @ (Pick::SaveView | Pick::SaveViewHdr), path)) => {
@@ -3024,14 +3035,14 @@ fn build_ui(
 fn run(action: Action, app_state: &mut AppState, dock_state: &mut DockState<DockTab>, ctx: &egui::Context) {
     match action {
         Action::Open => {
-            // Start where the file shown last lives, whichever way it was opened.
-            let dir = app_state.config.last_file.as_deref().and_then(Path::parent).map(Path::to_path_buf);
+            // Start where the last pick was confirmed, else where the file shown last lives.
+            let dir = DialogMemory::start(app_state.config.dialogs.open_dir.as_deref(), app_state.last_dir());
             // The dialog's box shows the option as it is now (Settings may have changed it).
             app_state.file_pick.seq = app_state.config.open_seq;
-            app_state.file_pick.open(dir);
+            app_state.file_pick.open(dir, app_state.config.dialogs.open_filter.as_deref());
         }
         Action::SaveView => {
-            let dir = app_state.config.last_file.as_deref().and_then(Path::parent).map(Path::to_path_buf);
+            let dir = DialogMemory::start(app_state.config.dialogs.save_dir.as_deref(), app_state.last_dir());
             let name = app_state
                 .current_backend()
                 .map(|img| format!("{}.png", img.frame.path.file_stem().and_then(|s| s.to_str()).unwrap_or("view")))
@@ -3039,7 +3050,7 @@ fn run(action: Action, app_state: &mut AppState, dock_state: &mut DockState<Dock
             app_state.file_pick.save_view(dir, &name);
         }
         Action::SaveViewHdr => {
-            let dir = app_state.config.last_file.as_deref().and_then(Path::parent).map(Path::to_path_buf);
+            let dir = DialogMemory::start(app_state.config.dialogs.save_dir.as_deref(), app_state.last_dir());
             let name = app_state
                 .current_backend()
                 .map(|img| format!("{}.hdr.png", img.frame.path.file_stem().and_then(|s| s.to_str()).unwrap_or("view")))
@@ -4058,7 +4069,7 @@ mod key_path_tests {
         frame(&ctx, vec![press(Key::R, Modifiers::NONE)], |ui| read_keys(ui.ctx(), &mut app, &mut dock));
         assert_eq!(app.controls.channel, ChannelDisplay::R);
         frame(&ctx, vec![Event::Key { key: Key::R, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::NONE }], |_| {});
-        app.file_pick.open(None);
+        app.file_pick.open(None, None);
         assert!(app.file_pick.is_open());
         frame(&ctx, vec![press(Key::G, Modifiers::NONE)], |ui| read_keys(ui.ctx(), &mut app, &mut dock));
         assert_eq!(app.controls.channel, ChannelDisplay::R, "bare keys are the dialog's while it is open");

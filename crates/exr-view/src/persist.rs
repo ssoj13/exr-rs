@@ -94,6 +94,9 @@ pub struct Config {
     /// `RECENTS_MAX`.
     #[serde(default)]
     pub recents: Vec<PathBuf>,
+    /// Folder and Open filter the file dialogs last confirmed.
+    #[serde(default)]
+    pub dialogs: crate::file_pick::DialogMemory,
     /// Status-bar section widths (draggable splitters). Empty = the bar fills it
     /// with the section defaults on first draw.
     #[serde(default)]
@@ -272,6 +275,7 @@ impl Default for Config {
             last_sequence: false,
             open_seq: default_open_seq(),
             recents: Vec::new(),
+            dialogs: Default::default(),
             status_bar_layout: egui_statusbar::StatusBarLayout::default(),
             status_bar_locked: false,
             toolbar: egui_viewport_toolbar::ToolbarState::default(),
@@ -532,6 +536,11 @@ mod tests {
             last_sequence: true,
             open_seq: false,
             recents: vec![PathBuf::from("a.exr"), PathBuf::from("b.exr")],
+            dialogs: crate::file_pick::DialogMemory {
+                open_dir: Some(PathBuf::from("shots")),
+                open_filter: Some("PNG".to_owned()),
+                save_dir: Some(PathBuf::from("out")),
+            },
             status_bar_layout: egui_statusbar::StatusBarLayout::new(vec![111.0, 222.0]),
             status_bar_locked: true,
             toolbar: egui_viewport_toolbar::ToolbarState { expanded: false, vertical_offset: 40.0 },

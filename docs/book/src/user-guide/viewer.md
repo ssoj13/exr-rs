@@ -140,6 +140,9 @@ Metadata panel starts with the source format, colour space, depth and alpha hand
 alpha (PNG, TGA, WebP, unassociated TIFF) is premultiplied in linear light; other formats are
 taken as associated, as OIIO does.
 
+File > Open remembers the last folder and the last format filter across openings and restarts
+(Save view remembers its own folder); the filter list is the format registry.
+
 ## OpenFX and current limits
 
 The Effects dock hosts the built-in effects and installed OpenFX plug-ins (from

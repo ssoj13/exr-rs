@@ -15,6 +15,8 @@ All notable changes to **exr-rs** are documented here. The format follows
   linear for floats; straight alpha premultiplied in linear light); EXR keeps the exr-core paths.
   Sequences of these formats play; `exr-rs info` summarises them. The Open dialog filters come
   from the one format registry.
+- **File dialogs remember.** File > Open restores the last folder and format filter (also across
+  restarts), Save view its own last folder; stored in the config, older configs load unchanged.
 - **exr-view**: the Effects tab is ofx-host-egui's `EffectStack`; the effect's render-site picker is ofx-runtime's
   `SiteMenu` (GPU sites listed and refused with the reason: the viewer renders on the CPU site) and the status shows
   the delivery site with the compute backend the plug-in reported ("CPU images, WGPU compute") after each render.
