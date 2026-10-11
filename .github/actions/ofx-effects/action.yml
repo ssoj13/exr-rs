@@ -1,0 +1,47 @@
+# Installs ofx-rs's built-in effects (ofx-effects.ofx.bundle) for the tests that render a real
+# OpenFX effect, and exports OFX_PLUGIN_PATH for the following steps. Hosts do not ship plug-ins:
+# this is test infrastructure only. The bundle is built from exactly the ofx-rs commit
+# Cargo.lock pins for ofx-runtime, with ofx-rs's own `bootstrap.py u`, and cached per commit + OS.
+# A missing bundle fails the exr-view tests loudly (EXR_ALLOW_SKIP does not bypass it).
+name: ofx-effects bundle
+description: Build ofx-rs's ofx-effects.ofx.bundle at the Cargo.lock-pinned commit and point OFX_PLUGIN_PATH at it
+inputs:
+  token:
+    description: Token with read access to the private ssoj13/ofx-rs repository
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Pinned ofx-rs commit
+      id: pin
+      shell: bash
+      run: |
+        rev=$(grep -A3 '^name = "ofx-runtime"' Cargo.lock | grep -o '#[0-9a-f]\{40\}' | head -n1 | tr -d '#')
+        test -n "$rev" || { echo "::error::Cargo.lock pins no git ofx-runtime"; exit 1; }
+        echo "rev=$rev" >> "$GITHUB_OUTPUT"
+        echo "dir=${RUNNER_TEMP}/ofx-plugins" >> "$GITHUB_OUTPUT"
+    - name: Cached bundle
+      id: cache
+      uses: actions/cache@v6.1.0
+      with:
+        path: ${{ steps.pin.outputs.dir }}
+        key: ofx-effects-bundle-${{ runner.os }}-${{ steps.pin.outputs.rev }}
+    - name: Check out ofx-rs at that commit
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/checkout@v7.0.1
+      with:
+        repository: ssoj13/ofx-rs
+        ref: ${{ steps.pin.outputs.rev }}
+        token: ${{ inputs.token }}
+        path: ofx-rs-src
+        persist-credentials: false
+    - name: Build the bundle
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: ofx-rs-src
+      run: python bootstrap.py u -o "${{ steps.pin.outputs.dir }}" -f
+    - name: Export OFX_PLUGIN_PATH
+      shell: bash
+      run: |
+        test -d "${{ steps.pin.outputs.dir }}/ofx-effects.ofx.bundle" || { echo "::error::ofx-effects.ofx.bundle was not built"; exit 1; }
+        echo "OFX_PLUGIN_PATH=${{ steps.pin.outputs.dir }}" >> "$GITHUB_ENV"

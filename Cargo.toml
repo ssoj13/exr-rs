@@ -81,5 +81,5 @@ png = "0.18"
 default = ["viewer", "ofx"]
 viewer = ["dep:exr-view"]
 # OpenFX image effects in the viewer (ofx-rs `ofx-runtime` + `ofx-host-egui`; the built-in effects
-# linked in, installed plug-ins from OFX_PLUGIN_PATH and the OS plug-in dirs).
+# as the installed `ofx-effects.ofx` bundle, like any plug-in: OFX_PLUGIN_PATH and the OS plug-in dir).
 ofx = ["viewer", "exr-view/ofx"]

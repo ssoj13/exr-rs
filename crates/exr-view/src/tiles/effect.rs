@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn actual_builtin_worker_request_preserves_top_first_original_precision() {
-        let runtime=Runtime::new(crate::ofx::OfxEffects::host_info(),crate::ofx::OfxEffects::test_scan());
+        let runtime=Runtime::new(crate::ofx::OfxEffects::host_info(),crate::ofx::OfxEffects::bundle_scan());
         let described=runtime.describe(&PluginKey::new("net.ofxrs.basic_gain",1),HostContext::Filter).unwrap();
         let effect=runtime.effect(0,&described,EffectSetup::default());
         let mut primary=frame_with(&["R","G","B","A"]);
@@ -313,7 +313,7 @@ mod tests {
     }
     #[test]
     fn actual_gaussian_tiles_stitch_to_one_whole_render_with_roi_halos_and_display_canvas() {
-        let runtime = Runtime::new(crate::ofx::OfxEffects::host_info(), crate::ofx::OfxEffects::test_scan());
+        let runtime = Runtime::new(crate::ofx::OfxEffects::host_info(), crate::ofx::OfxEffects::bundle_scan());
         let described = runtime.describe(&PluginKey::new("net.ofxrs.gaussian_blur", 1), HostContext::Filter).unwrap();
         assert!(described.tiling.tiles);
         let effect = runtime.effect(11, &described, EffectSetup::default());
@@ -374,7 +374,7 @@ mod tests {
         let primary = Arc::new(DecodedFrame::open(&path, 0).unwrap());
         assert!(primary.file_types.is_some() && primary.channels.is_empty());
         let inputs = Arc::new(Inputs::Static { frame: primary.clone(), index: 0 });
-        let runtime = Runtime::new(crate::ofx::OfxEffects::host_info(), crate::ofx::OfxEffects::test_scan());
+        let runtime = Runtime::new(crate::ofx::OfxEffects::host_info(), crate::ofx::OfxEffects::bundle_scan());
         let described = runtime.describe(&PluginKey::new("net.ofxrs.basic_gain", 1), HostContext::Filter).unwrap();
         let effect = runtime.effect(12, &described, EffectSetup::default());
         let budget = RegionBudget::new(1024);

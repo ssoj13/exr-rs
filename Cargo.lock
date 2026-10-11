@@ -3659,7 +3659,6 @@ dependencies = [
  "anyhow",
  "gpu-info-rs",
  "log",
- "ofx",
  "ofx-effects",
  "ofx-format",
  "ofx-host",

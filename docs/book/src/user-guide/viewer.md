@@ -150,8 +150,9 @@ File > Open remembers the last folder and the last format filter across openings
 
 ## OpenFX and current limits
 
-The Effects dock hosts the built-in effects and installed OpenFX plug-ins (from
-`OFX_PLUGIN_PATH` and the OS plug-in directories), with parameters, overlays and
+The Effects dock hosts the installed OpenFX plug-ins (the standard search: `OFX_PLUGIN_PATH`, then the OS
+plug-in directory; ofx-rs's effects are its `ofx-effects.ofx.bundle`; the empty dock names the searched
+places), with parameters, overlays and
 plug-in scan diagnostics. Effects read source pixels lazily through checked f32
 region providers within a bounded CPU memory budget; their output feeds the scopes,
 viewport readout, Metadata, Pixel Info and Save view. If preparing a non-tiled effect

@@ -62,7 +62,9 @@ With the viewer but without OpenFX effects (GPU display remains required):
 cargo build --locked --release --no-default-features --features viewer
 ```
 
-Default builds enable the viewer and OpenFX. Diagnose git dependency failures against
+Default builds enable the viewer and OpenFX. Effects are installed OpenFX plug-ins: the viewer scans the standard OpenFX search (`OFX_PLUGIN_PATH`,
+then the OS plug-in directory) and ships none. ofx-rs's effects are one such bundle,
+`ofx-effects.ofx.bundle`, installed from ofx-rs (`python bootstrap.py u -o <plug-in dir> -f`). Diagnose git dependency failures against
 the checked-in lockfile. Native reference libraries are needed for parity, not for
 the Rust image-format runtime.
 

@@ -93,6 +93,11 @@ jobs:
       - uses: taiki-e/install-action@v2.87.27
         with:
           tool: cargo-about@0.9.2
+      # The exr-view tests that render a real effect need ofx-rs's effects bundle (test-only; the
+      # ZIP ships no plug-ins). A missing bundle fails them: EXR_ALLOW_SKIP does not bypass it.
+      - uses: ./.github/actions/ofx-effects
+        with:
+          token: ${{ secrets.DEPS_TOKEN }}
       - name: Clippy, test, build and package
         run: python bootstrap.py ci --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v7.0.2
@@ -168,6 +173,9 @@ jobs:
       # The oracles first: they leave oracle.exe where the cargo tests find it.
       - name: C++ parity oracles
         run: python bootstrap.py t parity deflate exr
+      - uses: ./.github/actions/ofx-effects
+        with:
+          token: ${{ secrets.DEPS_TOKEN }}
       - name: Workspace and Python tests on the private image set
         run: python bootstrap.py t cargo python
       - name: The C++ oracles reproduce the committed goldens

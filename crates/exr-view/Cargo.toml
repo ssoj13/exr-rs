@@ -117,11 +117,14 @@ dirs = "7"
 sysinfo = "0.39"
 
 # OpenFX image effects over the shown image (feature `ofx`): ofx-rs's shared application layer
-# (`ofx-runtime`, with the built-in effects linked in) and its egui UI (`ofx-host-egui`: parameter
-# panel, parameter interacts, overlays, questions). On by default.
-ofx-runtime = { git = "ssh://git@github.com/ssoj13/ofx-rs.git", branch = "main", optional = true }
+# (`ofx-runtime`) and its egui UI (`ofx-host-egui`: parameter panel, parameter interacts, overlays,
+# questions). On by default. `default-features = false` + `wgpu` (the GPU renderer): NOT the
+# runtime's `effects` feature, which links `ofx-effects` -> ofx-fractal -> render-env -> exr-core
+# from the exr-rs git repo, a second copy of exr-core / deflate-rs / imath-rs / exr-image in this
+# build. The built-in effects are an ordinary installed OpenFX bundle (`ofx.rs`).
+ofx-runtime = { git = "ssh://git@github.com/ssoj13/ofx-rs.git", branch = "main", default-features = false, features = ["wgpu"], optional = true }
 ofx-host-egui = { git = "ssh://git@github.com/ssoj13/ofx-rs.git", branch = "main", optional = true }
-# Native test effects share the runtime's published OpenFX source.
+# Native test effects share the runtime's published OpenFX source (the unit tests' linked fixtures).
 ofx = { git = "ssh://git@github.com/ssoj13/ofx-rs.git", branch = "main", optional = true }
 
 # OpenColorIO display transform (`ocio.rs`): vfx-ocio, the OCIO 2.5 port shared with Playa and

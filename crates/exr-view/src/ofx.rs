@@ -4,7 +4,8 @@
 //!
 //! ```text
 //! OfxEffects::new()  Runtime<u32> (host "exr-view": overlays, custom interacts, pages; the built-in
-//!                    effects, then OFX_PLUGIN_PATH and the OS plug-in dirs) + UiEvents as observer
+//!                    plug-ins of the standard OpenFX search: OFX_PLUGIN_PATH, then the OS plug-in dir)
+//!                    + UiEvents as observer
 //! Effects tab        ofx-host-egui's EffectStack of one row: the "+" catalog menu (Filter / General /
 //!                    Generator plug-ins, grouped) -> one Effect; enable, remove, the site picker
 //!                    (ofx-runtime's SiteMenu: Default / Auto / CPU, every GPU site refused with its
@@ -40,6 +41,14 @@ use crate::tiles::effect::EffectSource;
 use crate::tiles::effect_frames::Inputs;
 use crate::tiles::region::RegionBudget;
 use crate::tiles::source::TileSource;
+
+/// The operating system's OpenFX plug-in directory (the last entry of the standard search).
+#[cfg(windows)]
+const OS_PLUGIN_DIR: &str = r"C:\Program Files\Common Files\OFX\Plugins";
+#[cfg(target_os = "macos")]
+const OS_PLUGIN_DIR: &str = "/Library/OFX/Plugins";
+#[cfg(not(any(windows, target_os = "macos")))]
+const OS_PLUGIN_DIR: &str = "/usr/OFX/Plugins";
 
 /// The runtime key of the viewer's one effect.
 const EFFECT: u32 = 0;
@@ -107,36 +116,65 @@ pub struct OfxEffects {
 }
 
 impl OfxEffects {
-    /// Start the host and scan for plug-ins: the built-in effects, then `OFX_PLUGIN_PATH` and the
-    /// operating system's plug-in directories.
+    /// Start the host and scan for plug-ins like any OpenFX application: `OFX_PLUGIN_PATH`, then the
+    /// operating system's plug-in directory. The built-in effects of ofx-rs are an ordinary
+    /// installed bundle (`ofx-effects.ofx.bundle`), not linked in.
     pub fn new() -> Self {
-        Self::with_scan(Self::with_builtins(ScanSpec::standard()))
+        Self::with_scan(ScanSpec::standard())
     }
 
-    /// `base` plus the built-in effects: THE one place this crate opens the process's linked
-    /// plug-in registry (`ofx::linked`, which the built-in effects' binary is).
+    /// Tests only: the crate's linked fixture plug-ins as a scan with no search directory.
     ///
-    /// The host enumerates that binary once, at its first open (ofxCore.h
+    /// The host enumerates a linked binary once, at its first open (ofxCore.h
     /// `OfxGetNumberOfPlugins`): a type registered later is missing for the rest of the process.
-    /// A test build therefore registers every test fixture of the crate here, before the first
-    /// open, whichever test (or `AppState::new` in an app test) gets here first; before this,
-    /// fixtures registered per module came out `PluginMissing` depending on test order.
-    fn with_builtins(base: ScanSpec) -> ScanSpec {
-        #[cfg(test)]
-        {
-            static REGISTER: std::sync::Once = std::sync::Once::new();
-            REGISTER.call_once(|| {
-                crate::image::consumer_tests::register_linked();
-                crate::tiles::effect_tests::register_linked();
-            });
-        }
-        base.with_builtin_effects()
-    }
-
-    /// Tests only: the built-in effects and the crate's fixtures, no installed plug-ins.
+    /// So every fixture of the crate is registered here, before the first open, whichever test
+    /// gets here first.
     #[cfg(test)]
     pub(crate) fn test_scan() -> ScanSpec {
-        Self::with_builtins(ScanSpec::new())
+        Self::fixtures(ScanSpec::new())
+    }
+
+    #[cfg(test)]
+    fn fixtures(base: ScanSpec) -> ScanSpec {
+        static REGISTER: std::sync::Once = std::sync::Once::new();
+        REGISTER.call_once(|| {
+            crate::image::consumer_tests::register_linked();
+            crate::tiles::effect_tests::register_linked();
+        });
+        let points = ofx::linked::entry_points();
+        // SAFETY: the discovery functions of the process's own plug-in registry (`ofx::linked`),
+        // valid and unchanged for the life of the process (ofxCore.h:611-635).
+        let fixtures = unsafe {
+            ofx_runtime::ofx_host::LinkedBinary::new(
+                "exr-view-fixtures",
+                points.get_number_of_plugins,
+                points.get_plugin,
+                Some(points.set_host),
+            )
+        };
+        match fixtures {
+            Ok(linked) => base.with_linked(linked),
+            Err(error) => panic!("the fixture registry is not a linked binary: {error:#}"),
+        }
+    }
+
+    /// Tests only: the fixtures plus the standard OpenFX search, for tests that need a real effect
+    /// (ofx-rs's Basic and Gaussian Blur, from the installed `ofx-effects.ofx.bundle`). A missing
+    /// bundle FAILS the test loudly, never skips: deploy it from ofx-rs with
+    /// `python bootstrap.py u -o "<OFX plug-in dir>" -f` (or put it on `OFX_PLUGIN_PATH`).
+    #[cfg(test)]
+    pub(crate) fn bundle_scan() -> ScanSpec {
+        let probe = Runtime::<u32>::new(Self::host_info(), Self::fixtures(ScanSpec::standard()));
+        for id in ["net.ofxrs.basic_gain", "net.ofxrs.gaussian_blur"] {
+            assert!(
+                probe.catalog().get(&PluginKey::new(id, 1)).is_some(),
+                "OpenFX plug-in {id} not found: install ofx-rs's ofx-effects.ofx.bundle with \
+                 `python bootstrap.py u -o \"<OFX plug-in dir>\" -f` in ofx-rs, or set OFX_PLUGIN_PATH; \
+                 scan problems: {:?}",
+                probe.catalog().problems()
+            );
+        }
+        Self::fixtures(ScanSpec::standard())
     }
 
     /// Start the host with the plug-ins `scan` finds.
@@ -329,6 +367,11 @@ impl OfxEffects {
             .inner;
         if self.effect.is_none() {
             let problems = self.runtime.catalog().problems();
+            if self.runtime.catalog().plugins().is_empty() {
+                ui.label(format!(
+                    "No OpenFX plug-ins found. Searched: the OFX_PLUGIN_PATH directories, then {OS_PLUGIN_DIR}."
+                ));
+            }
             if !problems.is_empty() {
                 ui.collapsing(format!("{} scan problem(s)", problems.len()), |ui| {
                     for problem in problems {
@@ -528,9 +571,8 @@ mod tests {
     /// once the instance exists; "None" turns the stage off.
     #[test]
     fn a_builtin_effect_processes_the_shown_pixels() {
-        // The built-in effects (and the crate's fixtures) only: an installed plug-in has no
-        // business in a unit test.
-        let mut fx = OfxEffects::with_scan(OfxEffects::test_scan());
+        // The installed ofx-effects bundle (and the crate's fixtures).
+        let mut fx = OfxEffects::with_scan(OfxEffects::bundle_scan());
         assert!(!fx.active());
         assert_eq!(fx.key(), 0);
         fx.choose(Some(PluginKey::new("net.ofxrs.basic_gain", 1)));
@@ -596,7 +638,7 @@ mod tests {
     }
 
     fn with_basic() -> OfxEffects {
-        let mut fx = OfxEffects::with_scan(OfxEffects::test_scan());
+        let mut fx = OfxEffects::with_scan(OfxEffects::bundle_scan());
         fx.choose(Some(PluginKey::new("net.ofxrs.basic_gain", 1)));
         assert!(fx.effect.is_some(), "{:?}", fx.error);
         fx
@@ -633,7 +675,8 @@ mod tests {
     /// option list, or a refused entry that sets the choice.
     #[test]
     fn the_site_picker_is_the_runtime_menu_and_takes_only_what_is_open() {
-        let mut harness = tab(with_basic());
+        let fx = with_basic();
+        let mut harness = tab(fx);
         let picker = |h: &Harness<'static, OfxEffects>| {
             h.get_all_by_role(Role::ComboBox).next().expect("site picker").value()
         };

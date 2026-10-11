@@ -31,7 +31,7 @@ Outside the workspace:
 | `vcv-rs` (git) | detects the MSVC / Windows SDK / UCRT environment so the oracles build without manual `vcvars`. |
 | `codec-simd` (git) | shared safe SIMD codec primitives with scalar references. |
 | `oiio-rs` (git, package `vfx-ocio`) | Rust OCIO/colour-math components used by viewer transforms. |
-| `ofx-rs` (git, optional `ofx`) | runtime, host UI and native/built-in OpenFX effect integration. |
+| `ofx-rs` (git, optional `ofx`) | runtime and host UI; the built-in effects load as the `ofx-effects.ofx` bundle, not linked. |
 | `egui-widgets-rs` (git) | the shared egui widgets of the viewer: timeline, status bar, outliner, attribute grid, HUD, preferences, display/present helpers. |
 | `murmur3` (git) | MurmurHash3 x86_32 and x64_128: Cryptomatte IDs and the ID manifest hash schemes in `exr-core`. |
 

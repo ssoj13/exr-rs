@@ -160,7 +160,7 @@ fn verify_trace(source: &EffectSource, level: u32, output: OfxRectI) {
 fn actual_gaussian_proxy_levels_preserve_roi_halos_odd_anchor_and_stitched_pixels() {
     let runtime = Runtime::new(
         crate::ofx::OfxEffects::host_info(),
-        crate::ofx::OfxEffects::test_scan(),
+        crate::ofx::OfxEffects::bundle_scan(),
     );
     let described = runtime
         .describe(

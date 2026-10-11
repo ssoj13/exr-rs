@@ -14,6 +14,11 @@ All notable changes to **exr-rs** are documented here. The format follows
   channel spans instead of a rescan, the idle stage shows the materialized pixels without a copy,
   other layers materialize through a typed, cache-blocked fill, and open scopes read the display's
   texture instead of uploading the frame a second time.
+- **exr-view**: the viewer no longer links ofx-rs's built-in effects (`ofx-runtime` feature `effects`); they
+  are the standard OpenFX bundle `ofx-effects.ofx.bundle`, found by the usual search (`OFX_PLUGIN_PATH`, then
+  the OS plug-in directory). Linking `ofx-effects` pulled ofx-fractal -> render-env -> exr-core from the exr-rs
+  git repo, so the build carried two copies of exr-core, deflate-rs, imath-rs and exr-image. Plug-in IDs are
+  unchanged, so saved effects stay valid. The empty Effects tab names the searched places.
 
 ### 2026-10-10
 
