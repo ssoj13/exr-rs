@@ -309,7 +309,7 @@ fn export_scope_view_layer_coverage_and_effect_share_one_source() {
         .unwrap();
     assert_eq!(&export[..], &[0.0, 0.5, 1.0, 1.0]);
     image
-        .ensure_linear(&d, &q, &mut target, Some(&mut stage))
+        .ensure_linear(&d, &q, &mut renderer, &mut target, Some(&mut stage))
         .unwrap();
     let cb = image
         .present(
@@ -346,7 +346,7 @@ fn export_scope_view_layer_coverage_and_effect_share_one_source() {
             .direct
     );
     image
-        .ensure_linear(&d, &q, &mut target, Some(&mut stage))
+        .ensure_linear(&d, &q, &mut renderer, &mut target, Some(&mut stage))
         .unwrap();
     assert_eq!(stage.calls, 2);
     image.set_coverage_overlay(None, None);
@@ -767,7 +767,7 @@ fn resident_present_bypasses_workers_and_reuses_upload() {
         .unwrap();
     assert_eq!((level, w, h), (0, 1, 1));
     assert_eq!(&rgba[..], &[0.0, 1.0, 2.0, 1.0]);
-    img.ensure_linear(&d, &q, &mut target, None).unwrap();
+    img.ensure_linear(&d, &q, &mut renderer, &mut target, None).unwrap();
     let mut next = frame_with(&["R", "G", "B"]);
     next.id = 2;
     img.set_frame(Arc::new(next));
@@ -809,6 +809,58 @@ fn resident_present_bypasses_workers_and_reuses_upload() {
         2
     );
 }
+/// The scopes read the resident display's original texture: one upload per
+/// frame whichever of viewport and scopes asks first, no scope texture, and
+/// the scopes see exactly the materialized level 0.
+#[test]
+#[ignore = "needs a GPU adapter"]
+fn scopes_read_the_resident_original_without_a_second_upload() {
+    use crate::image::tests_support::frame_of;
+    use exr_core::api::ChannelData;
+    let (d, q) = device();
+    let mut renderer = egui_wgpu::Renderer::new(&d, crate::present::CANVAS_FORMAT, Default::default());
+    renderer.callback_resources.insert(TileGpu::new(&d, 64 << 20));
+    let mut target = DisplayTarget::new(8 << 20, usize::MAX);
+    let (w, h) = (3u32, 2u32);
+    let frame = |id: u64, base: f32| {
+        let plane = |k: f32| ChannelData::Float((0..6).map(|i| base + k + i as f32 / 8.0).collect());
+        let mut f = frame_of(w, h, vec![("B".into(), plane(0.25)), ("G".into(), plane(0.5)), ("R".into(), plane(0.75))]);
+        f.id = id;
+        Arc::new(f)
+    };
+    let direct = |r: &egui_wgpu::Renderer| {
+        let gpu = r.callback_resources.get::<TileGpu>().unwrap();
+        let direct = gpu.direct.as_ref().unwrap();
+        (direct.uploads, direct.original_texture().cloned())
+    };
+    let expect = |base: f32| -> Vec<f32> {
+        (0..6).flat_map(|i| {
+            let v = |k: f32| base + k + i as f32 / 8.0;
+            [v(0.75), v(0.5), v(0.25), 1.0]
+        }).collect()
+    };
+    let mut img = ImageBackend::from_frame(frame(1, 0.0));
+    assert!(img.present(&d, &q, &mut renderer, &mut target, None, place(w, h, 1.0), look(), None).unwrap().direct);
+    let (_, sw, sh) = img.ensure_linear(&d, &q, &mut renderer, &mut target, None).unwrap();
+    assert_eq!((sw, sh), (w, h));
+    let (uploads, tex) = direct(&renderer);
+    assert_eq!(uploads, 1, "the scopes reuse the display's upload");
+    assert!(target.scope_texture().is_none(), "no separate scope texture");
+    let read = |tex: &wgpu::Texture| bytemuck::pod_collect_to_vec::<u8, f32>(&read_texture(&d, &q, tex, w, h, 16));
+    assert_eq!(read(&tex.unwrap()), expect(0.0));
+
+    // A sequence step whose scopes run before the viewport: they upload, the
+    // viewport then only reduces.
+    img.set_frame(frame(2, 4.0));
+    img.ensure_linear(&d, &q, &mut renderer, &mut target, None).unwrap();
+    assert_eq!(direct(&renderer).0, 2);
+    assert!(img.present(&d, &q, &mut renderer, &mut target, None, place(w, h, 1.0), look(), None).unwrap().direct);
+    let (uploads, tex) = direct(&renderer);
+    assert_eq!(uploads, 2, "the viewport reuses the scopes' upload");
+    assert!(target.scope_texture().is_none());
+    assert_eq!(read(&tex.unwrap()), expect(4.0));
+}
+
 #[test]
 #[ignore = "needs a GPU adapter"]
 fn direct_reduction_matches_clipped_f64_half_reference() {

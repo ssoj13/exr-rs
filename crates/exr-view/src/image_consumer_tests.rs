@@ -565,7 +565,7 @@ fn accepted_native_mosaic_drives_display_scopes_readout_and_frozen_two_pass_expo
         }
     }
     let (_, w, h) = image
-        .ensure_linear(&device, &queue, &mut display, Some(&mut stage))
+        .ensure_linear(&device, &queue, &mut renderer, &mut display, Some(&mut stage))
         .unwrap();
     assert_eq!((w, h), (513, 7));
     let scope = display.scope.as_ref().unwrap();
@@ -745,7 +745,7 @@ fn accepted_native_mosaic_drives_display_scopes_readout_and_frozen_two_pass_expo
         old_overlay_line,
     );
     let (_, w, h) = image
-        .ensure_linear(&device, &queue, &mut display, Some(&mut stage))
+        .ensure_linear(&device, &queue, &mut renderer, &mut display, Some(&mut stage))
         .unwrap();
     assert_eq!((w, h), (513, 7));
     let held_scope = display.scope.as_ref().unwrap();

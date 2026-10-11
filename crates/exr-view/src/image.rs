@@ -658,6 +658,12 @@ struct ScopeTex {
 }
 
 impl DisplayTarget {
+    /// The scopes' own linear texture, if one was ever needed.
+    #[cfg(test)]
+    pub(crate) fn scope_texture(&self) -> Option<&wgpu::Texture> {
+        self.scope.as_ref().map(|scope| &scope.tex)
+    }
+
     #[cfg(feature = "ofx")]
     pub(crate) fn accepted_effect(&self) -> Option<crate::tiles::view::AcceptedEffect> {
         self.tiles.accepted_effect()
@@ -1343,6 +1349,14 @@ impl ImageBackend {
         tiles.set_source(desc, Arc::new(FrameSource { rgba, w, h }));
     }
 
+    /// Whether the shown content takes the resident direct display (one
+    /// texture, reduced on the GPU): an in-RAM frame within one texture, not
+    /// fed by an effect worker. `present` and the scopes decide alike.
+    fn direct_eligible(&self, worker: bool, max_dim: u32) -> bool {
+        let limit = max_dim.min(crate::tiles::direct::MAX_DIM);
+        !worker && !self.is_file_backed() && self.width <= limit && self.height <= limit
+    }
+
     fn prepare_source_cpu(&mut self, target: &mut DisplayTarget) -> Result<(), ExrError> {
         if self.materialized.as_ref() != Some(&self.view) {
             target.tiles.retire_cpu_source();
@@ -1408,10 +1422,7 @@ impl ImageBackend {
         let reserve = target
             .scope_reserve(max_dim)
             .saturating_add(gpu.canvas_bytes);
-        let eligible = !worker && !self.is_file_backed()
-            && self.width <= max_dim.min(crate::tiles::direct::MAX_DIM)
-            && self.height <= max_dim.min(crate::tiles::direct::MAX_DIM);
-        if eligible {
+        if self.direct_eligible(worker, max_dim) {
             let desc = target
                 .tiles
                 .description()
@@ -1421,10 +1432,7 @@ impl ImageBackend {
                 .tiles
                 .scope_level(u64::MAX, u32::MAX)
                 .ok_or("resident display pixels are absent")?;
-            let allowance = gpu
-                .vram_budget
-                .saturating_sub(reserve)
-                .saturating_sub(gpu.atlas.bytes().0);
+            let allowance = direct_allowance(gpu, target, max_dim);
             let direct = gpu
                 .direct
                 .get_or_insert_with(|| crate::tiles::direct::DirectGpu::new(device));
@@ -1548,20 +1556,23 @@ impl ImageBackend {
     }
 
     /// The scopes' linear source: the finest pyramid level of the shown content
-    /// within `SCOPE_MAX_PIXELS` (level 0, exact, for images up to 4K x 4K),
-    /// uploaded to a small `Rgba32Float` texture when the content or level
+    /// within `SCOPE_MAX_PIXELS` (level 0, exact, for images up to 4K x 4K).
+    /// Level 0 of the resident direct display is its original texture, shared
+    /// with the viewport (one upload per frame); anything else is uploaded to
+    /// the scopes' own `Rgba32Float` texture when the content or level
     /// changes. Returns its view and extent; `None` for an empty image or a
     /// texture the device cannot hold.
-    pub fn ensure_linear<'t>(
+    pub fn ensure_linear(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        target: &'t mut DisplayTarget,
+        renderer: &mut egui_wgpu::Renderer,
+        target: &mut DisplayTarget,
         stage: Option<&mut (dyn ImageStage + '_)>,
-    ) -> Option<(&'t wgpu::TextureView, u32, u32)> {
+    ) -> Option<(wgpu::TextureView, u32, u32)> {
         #[cfg(feature = "ofx")]
         if let Some(pixels) = target.accepted_pixels() {
-            return target.ensure_processed_linear(device, queue, pixels);
+            return target.ensure_processed_linear(device, queue, pixels).map(|(view, w, h)| (view.clone(), w, h));
         }
         if self.width == 0 || self.height == 0 {
             return None;
@@ -1582,6 +1593,29 @@ impl ImageBackend {
         let level = crate::tiles::source::finest_level(&grid, SCOPE_MAX_PIXELS, max_dim);
         let (lw, lh) = grid.level_size(level);
         let key = (false, target.tiles.generation(), level);
+
+        // While the resident display shows this content, its original texture
+        // is level 0 of the same source: read it instead of uploading the frame
+        // a second time (whichever of viewport and scopes runs first uploads).
+        if level == 0
+            && matches!(target.path, Some(DisplayPath::Direct { .. }))
+            && self.direct_eligible(false, max_dim)
+            && let Some(gpu) = renderer.callback_resources.get_mut::<TileGpu>()
+            && let Some(desc) = target.tiles.description().cloned()
+            && let Some((_, rgba)) = target.tiles.scope_level(u64::MAX, u32::MAX)
+        {
+            let allowance = direct_allowance(gpu, target, max_dim);
+            let direct = gpu.direct.get_or_insert_with(|| crate::tiles::direct::DirectGpu::new(device));
+            match direct.upload(device, queue, &desc, &rgba, (self.width, self.height), allowance) {
+                Ok(true) => {
+                    if let Some(view) = direct.original_view(&desc) {
+                        return Some((view, lw, lh));
+                    }
+                }
+                Ok(false) => {}
+                Err(e) => log::warn!("scope source: the resident original is unavailable: {e}"),
+            }
+        }
 
         if !target.scope.as_ref().is_some_and(|t| fits(t.cap, (lw, lh))) {
             let next = ScopeTex::new(device, lw, lh, max_dim)?;
@@ -1605,7 +1639,7 @@ impl ImageBackend {
             scope.key = Some(key);
         }
         let scope = target.scope.as_ref()?;
-        Some((&scope.view, lw, lh))
+        Some((scope.view.clone(), lw, lh))
     }
 }
 
@@ -1638,6 +1672,13 @@ impl ImageBackend {
 }
 
 // ── GPU helpers ───────────────────────────────────────────────────────────────
+
+/// VRAM the resident direct display may hold: the budget less the scopes'
+/// reserve, the canvas and the tile atlas still held.
+fn direct_allowance(gpu: &TileGpu, target: &DisplayTarget, max_dim: u32) -> u64 {
+    let reserve = target.scope_reserve(max_dim).saturating_add(gpu.canvas_bytes);
+    gpu.vram_budget.saturating_sub(reserve).saturating_sub(gpu.atlas.bytes().0)
+}
 
 /// Upload an interleaved linear RGBA f32 buffer (`w*h*4`) into a `Rgba32Float`
 /// texture (the scopes' source).

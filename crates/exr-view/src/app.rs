@@ -1433,7 +1433,7 @@ impl AppState {
         // Ensure the linear source texture is on the GPU (no-op if present()
         // already uploaded it this frame) and grab its view + dimensions.
         let Some((src_view, src_w, src_h)) =
-            img.ensure_linear(gpu.device, gpu.queue, display_gpu, stage)
+            img.ensure_linear(gpu.device, gpu.queue, gpu.renderer, display_gpu, stage)
         else {
             ui.centered_and_justified(|ui| {
                 ui.label("Empty image — nothing to analyse.");
@@ -1465,7 +1465,7 @@ impl AppState {
             queue: gpu.queue,
             renderer: gpu.renderer,
         };
-        panel.tick(&mut ctx, src_view, src_w, src_h, out_w, out_h);
+        panel.tick(&mut ctx, &src_view, src_w, src_h, out_w, out_h);
         show_panel(panel, ui, square);
     }
 

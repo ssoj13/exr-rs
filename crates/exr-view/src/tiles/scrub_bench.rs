@@ -156,7 +156,7 @@ fn resident_frame_switch_cost() {
             let present_total = ms(switch);
 
             let t = Instant::now();
-            img.ensure_linear(&d, &q, &mut target, Some(&mut Idle)).expect("scope source");
+            img.ensure_linear(&d, &q, &mut renderer, &mut target, Some(&mut Idle)).expect("scope source");
             q.submit([]);
             d.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).expect("poll");
             record("4 scopes ensure_linear + gpu", ms(t), 0, warm);

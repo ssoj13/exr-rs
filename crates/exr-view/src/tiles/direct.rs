@@ -112,6 +112,9 @@ pub struct DirectGpu {
     reducer: Reducer,
     retired: super::retire::RetiredTextures,
     original: Option<Original>,
+    /// The source the original holds (it may run ahead of `desc`: the scopes
+    /// can upload a new frame before the viewport reduces it).
+    original_desc: Option<SourceDesc>,
     reduced: Option<Reduced>,
     pub desc: Option<SourceDesc>,
     profile_desc: Option<SourceDesc>,
@@ -136,6 +139,7 @@ impl DirectGpu {
             reducer: Reducer::new(device),
             retired: Default::default(),
             original: None,
+            original_desc: None,
             reduced: None,
             desc: None,
             profile_desc: None,
@@ -168,6 +172,7 @@ impl DirectGpu {
         if let Some(t) = self.original.take() {
             self.retired.retire(queue, t.tex, t.bytes);
         }
+        self.original_desc = None;
     }
     pub fn retire_display(&mut self, queue: &wgpu::Queue) {
         self.retire_original(queue);
@@ -241,7 +246,6 @@ impl DirectGpu {
         }
         // `None` = outside the exact domain: `main_wide`, which picks `low` per cell.
         let profile = self.profile.unwrap_or([0; 4]);
-        let reducer = if self.profile.is_some() { &self.reducer.pipeline } else { &self.reducer.pipeline_wide };
         let grid = Grid::new(extent.0, extent.1);
         let level = grid.pick_level(place.zoom);
         let size = grid.level_size(level);
@@ -255,30 +259,18 @@ impl DirectGpu {
         if required.is_none_or(|bytes| bytes > allowance) {
             return Ok(false);
         }
-        let changed = self.desc.as_ref() != Some(desc) || !input_fits;
-        let recalculate = changed || self.level != level || !output_fits;
+        if !self.upload(device, queue, desc, rgba, extent, allowance)? {
+            return Ok(false);
+        }
+        let recalculate = self.desc.as_ref() != Some(desc) || self.level != level || !output_fits;
 
-        // Create replacements while the old reduced image is still intact.
-        let alloc = (!input_fits || !output_fits).then(|| crate::timing::Lap::start("direct alloc"));
-        let oom = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let mut next_original = if input_fits {
-            None
-        } else {
-            Some(Original {
-                tex: texture(
-                    device,
-                    &input,
-                    wgpu::TextureFormat::Rgba32Float,
-                    wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                ),
-                cap: extent,
-                bytes: input.byte_size,
-            })
-        };
+        // Create the replacement while the old reduced image is still intact.
         let next_reduced = if output_fits {
             None
         } else {
+            let _alloc = crate::timing::Lap::start("direct alloc");
+            let oom = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+            let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
             let tex = texture(
                 device,
                 &output,
@@ -296,48 +288,20 @@ impl DirectGpu {
                     resource: wgpu::BindingResource::TextureView(&view),
                 }],
             });
+            if let Some(error) = pollster::block_on(validation.pop()).or(pollster::block_on(oom.pop())) {
+                return Err(format!("direct texture allocation: {error}"));
+            }
             Some(Reduced {
                 page: Page { tex, bind },
                 cap: size,
                 bytes: output.byte_size,
             })
         };
-        if let Some(error) = pollster::block_on(validation.pop()).or(pollster::block_on(oom.pop()))
-        {
-            return Err(format!("direct texture allocation: {error}"));
-        }
-        drop(alloc);
-        let original = next_original
-            .as_ref()
-            .or(self.original.as_ref())
-            .expect("checked direct original");
+        let original = self.original.as_ref().expect("checked direct original");
         let reduced = next_reduced
             .as_ref()
             .or(self.reduced.as_ref())
             .expect("checked direct output");
-        if changed {
-            let mut lap = crate::timing::Lap::start("direct upload");
-            lap.bytes(input.cpu_size as u64);
-            queue.write_texture(
-                original.tex.as_image_copy(),
-                bytemuck::cast_slice(rgba),
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(input.row_bytes),
-                    rows_per_image: Some(extent.1),
-                },
-                wgpu::Extent3d {
-                    width: extent.0,
-                    height: extent.1,
-                    depth_or_array_layers: 1,
-                },
-            );
-            drop(lap);
-            #[cfg(test)]
-            {
-                self.uploads += 1;
-            }
-        }
         if recalculate {
             let _lap = crate::timing::Lap::start("direct reduce");
             let source = original.tex.create_view(&Default::default());
@@ -377,7 +341,7 @@ impl DirectGpu {
             let mut enc = device.create_command_encoder(&Default::default());
             {
                 let mut pass = enc.begin_compute_pass(&Default::default());
-                pass.set_pipeline(reducer);
+                pass.set_pipeline(if self.profile.is_some() { &self.reducer.pipeline } else { &self.reducer.pipeline_wide });
                 pass.set_bind_group(0, &group, &[]);
                 pass.dispatch_workgroups(size.0.div_ceil(8), size.1.div_ceil(8), 1);
             }
@@ -386,11 +350,6 @@ impl DirectGpu {
             {
                 self.dispatches += 1;
             }
-        }
-        if let Some(t) = next_original.take()
-            && let Some(old) = self.original.replace(t)
-        {
-            self.retired.retire(queue, old.tex, old.bytes);
         }
         if let Some(t) = next_reduced
             && let Some(old) = self.reduced.replace(t)
@@ -402,6 +361,88 @@ impl DirectGpu {
         self.level = level;
         self.place = Some(place);
         Ok(true)
+    }
+
+    /// Make the original texture hold `desc`'s level-0 pixels `rgba`; a no-op
+    /// when it already does. The display ([`Self::prepare`]) and the scopes
+    /// (`ImageBackend::ensure_linear`) share it, so a frame is uploaded once
+    /// whichever of them asks first. `Ok(false)` when a new texture would
+    /// exceed `allowance`.
+    pub fn upload(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        desc: &SourceDesc,
+        rgba: &[f32],
+        extent: (u32, u32),
+        allowance: u64,
+    ) -> Result<bool, String> {
+        let limit = device.limits().max_texture_dimension_2d.min(MAX_DIM);
+        let input = UploadLayout::compute(extent.0, extent.1, 16, limit).map_err(|e| e.to_string())?;
+        if rgba.len() != input.cpu_size / 4 {
+            return Err("direct source length differs from its checked layout".into());
+        }
+        let input_fits = self.original.as_ref().is_some_and(|t| fits(t.cap, extent));
+        if input_fits && self.original_desc.as_ref() == Some(desc) {
+            return Ok(true);
+        }
+        if !input_fits {
+            if self.bytes().checked_add(input.byte_size).is_none_or(|bytes| bytes > allowance) {
+                return Ok(false);
+            }
+            let _alloc = crate::timing::Lap::start("direct alloc");
+            let oom = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+            let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let tex = texture(
+                device,
+                &input,
+                wgpu::TextureFormat::Rgba32Float,
+                wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | if cfg!(test) { wgpu::TextureUsages::COPY_SRC } else { wgpu::TextureUsages::empty() },
+            );
+            if let Some(error) = pollster::block_on(validation.pop()).or(pollster::block_on(oom.pop())) {
+                return Err(format!("direct texture allocation: {error}"));
+            }
+            self.retire_original(queue);
+            self.original = Some(Original { tex, cap: extent, bytes: input.byte_size });
+        }
+        let original = self.original.as_ref().ok_or("direct original is absent")?;
+        let mut lap = crate::timing::Lap::start("direct upload");
+        lap.bytes(input.cpu_size as u64);
+        queue.write_texture(
+            original.tex.as_image_copy(),
+            bytemuck::cast_slice(rgba),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(input.row_bytes),
+                rows_per_image: Some(extent.1),
+            },
+            wgpu::Extent3d {
+                width: extent.0,
+                height: extent.1,
+                depth_or_array_layers: 1,
+            },
+        );
+        drop(lap);
+        #[cfg(test)]
+        {
+            self.uploads += 1;
+        }
+        self.original_desc = Some(desc.clone());
+        Ok(true)
+    }
+
+    /// The original texture's view while it holds `desc`'s pixels (the
+    /// scopes' level-0 source).
+    pub fn original_view(&self, desc: &SourceDesc) -> Option<wgpu::TextureView> {
+        let original = self.original.as_ref().filter(|_| self.original_desc.as_ref() == Some(desc))?;
+        Some(original.tex.create_view(&Default::default()))
+    }
+
+    #[cfg(test)]
+    pub fn original_texture(&self) -> Option<&wgpu::Texture> {
+        self.original.as_ref().map(|t| &t.tex)
     }
 
     /// Preserve level-0 geometry; ragged cells are not stretched to ceil extent.
