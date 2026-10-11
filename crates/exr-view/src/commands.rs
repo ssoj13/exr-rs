@@ -22,7 +22,7 @@ use crate::image::ChannelDisplay;
 
 /// A keyboard panel: one per dock tab (the three scope tabs share one) plus the transport
 /// timeline. EVERY panel is registered each frame, keys or not, so a panel without keys still
-/// takes the keyboard from the previous owner (typing in the Colour tab must not frame the image).
+/// takes the keyboard from the previous owner (typing in Settings must not frame the image).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
     /// The image viewport (also drawn alone when the panels are hidden).
@@ -37,22 +37,19 @@ pub enum Scope {
     Scopes,
     /// The OpenFX tab.
     Effects,
-    /// The OCIO tab.
-    Colour,
     /// Preferences.
     Settings,
 }
 
 impl Scope {
     /// Every scope.
-    pub const ALL: [Scope; 8] = [
+    pub const ALL: [Scope; 7] = [
         Scope::Viewport,
         Scope::Timeline,
         Scope::Metadata,
         Scope::PixelInfo,
         Scope::Scopes,
         Scope::Effects,
-        Scope::Colour,
         Scope::Settings,
     ];
 
@@ -64,7 +61,6 @@ impl Scope {
             DockTab::PixelInfo => Scope::PixelInfo,
             DockTab::Histogram | DockTab::Waveform | DockTab::Vectorscope => Scope::Scopes,
             DockTab::Effects => Scope::Effects,
-            DockTab::Colour => Scope::Colour,
             DockTab::Settings => Scope::Settings,
         }
     }
@@ -252,7 +248,6 @@ pub const COMMANDS: &[Command] = &[
     Command { id: "tab.waveform", label: "Waveform", keys: &[], at: Where::Global, action: Action::Tab(DockTab::Waveform) },
     Command { id: "tab.vectorscope", label: "Vectorscope", keys: &[], at: Where::Global, action: Action::Tab(DockTab::Vectorscope) },
     Command { id: "tab.effects", label: "Effects", keys: &[], at: Where::Global, action: Action::Tab(DockTab::Effects) },
-    Command { id: "tab.colour", label: "Colour (OCIO)", keys: &[], at: Where::Global, action: Action::Tab(DockTab::Colour) },
     Command { id: "window.reset_layout", label: "Reset layout", keys: &[], at: Where::Global, action: Action::ResetLayout },
     Command { id: "tab.settings", label: "Settings", keys: &[ctrl(Key::Comma)], at: Where::Global, action: Action::Tab(DockTab::Settings) },
     Command { id: "play.toggle", label: "Play / pause", keys: &[key(Key::Space)], at: Where::Global, action: Action::PlayPause },
@@ -403,7 +398,6 @@ pub const MENU: &[MenuNode] = &[
             Item("tab.vectorscope"),
             Sep,
             Item("tab.effects"),
-            Item("tab.colour"),
             Item("tab.settings"),
             Sep,
             Item("window.reset_layout"),
@@ -707,7 +701,7 @@ mod tests {
             assert_eq!(step(scope, Key::Home, true).actions, [Action::First]);
             assert_eq!(step(scope, Key::End, true).actions, [Action::Last]);
         }
-        for scope in [Scope::Metadata, Scope::PixelInfo, Scope::Scopes, Scope::Effects, Scope::Colour, Scope::Settings] {
+        for scope in [Scope::Metadata, Scope::PixelInfo, Scope::Scopes, Scope::Effects, Scope::Settings] {
             for key in [Key::ArrowRight, Key::ArrowLeft, Key::Home, Key::End] {
                 assert_eq!(step(scope, key, true), Pressed { actions: vec![], left: true }, "{key:?} over {scope:?}");
             }

@@ -8,6 +8,8 @@ All notable changes to **exr-rs** are documented here. The format follows
 
 ### 2026-10-10
 
+- **exr-view**: the Colour dock tab is gone; the OCIO controls live in Settings > Colour only (one home,
+  not two copies). A saved layout that still names the tab is replaced by the default once.
 - **Any colour tag opens.** `exr-import` resolves a still's colour-space tag through `vfx-io`'s
   table instead of a short list of its own: `g24_rec709_display` (the PNG sequence that failed with
   "unsupported colour space"), `lin_ap1_scene`, `srgb_p3d65_display`, `pq_rec2020_display` and the

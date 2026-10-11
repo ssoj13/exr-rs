@@ -1495,15 +1495,6 @@ impl AppState {
         self.ram_partitions.frames(self.display_gpu.tiles_ram().0, holding)
     }
 
-    /// The Colour tab: the OCIO display transform (`ocio::State::ui`); the config path field's
-    /// Browse button opens the file dialog for a config.
-    pub fn ui_colour(&mut self, ui: &mut egui::Ui) {
-        let mut browse = false;
-        self.controls.colour.ui(ui, &mut browse);
-        if browse {
-            self.file_pick.pick_config(self.controls.colour.start_dir());
-        }
-    }
 
     /// What the output in use encodes for (SDR white, display peak): the user's,
     /// else the OS's, else the output's default (`persist::DisplayPrefs::target`,
@@ -1512,8 +1503,8 @@ impl AppState {
         self.config.display.target(self.display.active, &self.display.info)
     }
 
-    /// The Settings tab: memory, output, UI and the same OCIO controls as the
-    /// Colour tab. Both entry points edit one persisted colour selection.
+    /// The Settings tab: memory, output, UI and Colour, the one home of the OCIO controls
+    /// (`ocio::State::ui`; the config field's Browse opens the config file dialog).
     pub fn ui_settings(&mut self, ui: &mut egui::Ui) {
         use egui_phosphor::regular as icon;
         let target = self.target();
@@ -1846,7 +1837,7 @@ impl AppState {
             .on_hover_text("Display gamma dial — pow(c, 1/gamma) before the sRGB encode.\n1.0 = off (correct sRGB look).\nCtrl+click or right-click: reset to 1.0.");
         ui.separator();
         // One control for the display transform of the colour image: a built-in
-        // tone operator + sRGB, or OCIO (configured in the Colour tab).
+        // tone operator + sRGB, or OCIO (configured in Settings > Colour).
         ui.label("Display");
         let c = &mut self.controls;
         let ocio_on = c.colour.sel.on;
@@ -1870,7 +1861,7 @@ impl AppState {
                     }
                 }
                 ui.separator();
-                if ui.selectable_label(ocio_on, "OCIO").on_hover_text("Configure in Window > Colour (OCIO).").clicked() {
+                if ui.selectable_label(ocio_on, "OCIO").on_hover_text("Configure in Settings > Colour.").clicked() {
                     pick = Some(None);
                 }
             })

@@ -86,7 +86,7 @@ it is not the application default or a calibration recommendation. Reference whi
 HDR output; its manual range is 80–1000 nits, independent of the OCIO rendering peak.
 The display-peak override shapes HLG output only.
 
-Settings → Colour exposes the same OCIO controls as the Colour dock tab. Quick
+Settings → Colour holds the OCIO controls (config, input, display, view, look). Quick
 monitor presets appear before the detailed input/display/view/look choices,
 including HDR 1000 nits when an HDR output and the loaded config support it (it
 selects an ACES HDR rendering, not a 1000-nit UI white). Display and Colour link

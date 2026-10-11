@@ -30,8 +30,6 @@ pub enum DockTab {
     /// OpenFX effect over the shown image: plug-in, parameters (feature `ofx`; without it the tab
     /// says so, so a saved layout loads in either build).
     Effects,
-    /// The OCIO display transform: config, input, display, view, look.
-    Colour,
     /// Preferences (memory budgets).
     Settings,
 }
@@ -47,7 +45,6 @@ impl DockTab {
             Self::Waveform => "Waveform",
             Self::Vectorscope => "Vectorscope",
             Self::Effects => "Effects",
-            Self::Colour => "Colour",
             Self::Settings => "Settings",
         }
     }
@@ -56,7 +53,7 @@ impl DockTab {
     pub const SCOPES: [DockTab; 3] = [Self::Histogram, Self::Waveform, Self::Vectorscope];
 
     /// Every tab, in the order the Window menu lists them (a test pins that each has a command).
-    pub const ALL: [DockTab; 9] = [
+    pub const ALL: [DockTab; 8] = [
         Self::Viewport,
         Self::Metadata,
         Self::PixelInfo,
@@ -64,7 +61,6 @@ impl DockTab {
         Self::Waveform,
         Self::Vectorscope,
         Self::Effects,
-        Self::Colour,
         Self::Settings,
     ];
 }
@@ -139,7 +135,6 @@ impl TabViewer for DockTabViewer<'_> {
                 self.state.display_scope(ui, scope, self.gpu)
             }
             DockTab::Effects => self.state.ui_effects(ui),
-            DockTab::Colour => self.state.ui_colour(ui),
             DockTab::Settings => self.state.ui_settings(ui),
         })
     }

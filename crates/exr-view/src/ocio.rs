@@ -760,8 +760,8 @@ struct PathEdit {
 
 /// The config path field: a typed path applies on Enter, not per keystroke (every change loads
 /// the whole config; one that does not load shows the error under the panel). The draft lives
-/// in egui's temp memory under the field's own `Ui` id, so each instance (Colour tab, Settings
-/// > Colour) keeps its own text; it is dropped when the field loses the keyboard.
+/// in egui's temp memory under the field's own `Ui` id, so each instance keeps its own
+/// text; it is dropped when the field loses the keyboard.
 fn path_edit(ui: &mut egui::Ui, field: &mut egui_file_field::FileFieldState, current: &str) -> PathEdit {
     let key = ui.id().with("ocio_config_draft");
     let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or_else(|| current.to_owned());
@@ -864,9 +864,8 @@ mod tests {
         assert_ne!(expect, saved, "the probe folders differ");
     }
 
-    /// The path field keeps one draft PER INSTANCE (Colour tab and Settings > Colour are both
-    /// on screen at times): typing in one neither leaks into the other nor is lost, and Enter
-    /// applies the trimmed text once.
+    /// The path field keeps one draft PER INSTANCE (keyed by its `Ui` id): typing in one neither
+    /// leaks into another nor is lost, and Enter applies the trimmed text once.
     #[test]
     fn each_path_field_keeps_its_own_draft() {
         let ctx = egui::Context::default();
