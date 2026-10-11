@@ -13,6 +13,15 @@ use std::time::Instant;
 
 const ROUNDS: usize = 6;
 
+/// The viewer always hands its effect host to the display as the stage; with
+/// no effect chosen it is this: key 0, pixels passed through.
+struct Idle;
+impl crate::image::ImageStage for Idle {
+    fn key(&self) -> u64 {
+        0
+    }
+}
+
 /// The viewer's device: high-performance adapter, its own maximum limits.
 fn device() -> (wgpu::Device, wgpu::Queue) {
     let instance = wgpu::Instance::default();
@@ -130,7 +139,7 @@ fn resident_frame_switch_cost() {
 
             let t = Instant::now();
             let callback = img
-                .present(&d, &q, &mut renderer, &mut target, None, place, look, None)
+                .present(&d, &q, &mut renderer, &mut target, Some(&mut Idle), place, look, None)
                 .expect("present");
             assert!(callback.direct, "a resident frame must take the direct path");
             record("2 present (cpu)", ms(t), 0, warm);
@@ -144,7 +153,7 @@ fn resident_frame_switch_cost() {
             let present_total = ms(switch);
 
             let t = Instant::now();
-            img.ensure_linear(&d, &q, &mut target, None).expect("scope source");
+            img.ensure_linear(&d, &q, &mut target, Some(&mut Idle)).expect("scope source");
             q.submit([]);
             d.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).expect("poll");
             record("4 scopes ensure_linear + gpu", ms(t), 0, warm);
@@ -178,7 +187,7 @@ fn resident_frame_switch_cost() {
     };
     for (i, zoom) in [zoom * 2.0, zoom].into_iter().cycle().take(2 * ROUNDS).enumerate() {
         let t = Instant::now();
-        img.present(&d, &q, &mut renderer, &mut target, None, Placement { zoom, ..place }, look, None)
+        img.present(&d, &q, &mut renderer, &mut target, Some(&mut Idle), Placement { zoom, ..place }, look, None)
             .expect("present");
         let cpu = ms(t);
         wait();
