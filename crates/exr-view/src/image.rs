@@ -43,9 +43,10 @@ use exr_gpu::UploadLayout;
 use imath_rs::Box2i;
 
 use crate::tiles::file::{FileSource, RowCache};
+use crate::tiles::direct::{HalfSlot, Texels};
 use crate::tiles::precision::Span;
 use crate::tiles::render::{Look, TileCallback, TileGpu};
-use crate::tiles::source::{FrameSource, TileSource};
+use crate::tiles::source::{FrameSource, LayerSource, TileSource};
 use crate::tiles::view::{Placement, SourceDesc, TileState};
 use crate::transfer;
 
@@ -491,6 +492,29 @@ impl DecodedFrame {
         }))
     }
 
+    /// The RGBA slots of `view` when every one is a half channel (its first
+    /// `w * h` samples) or a constant a half holds exactly: what the direct
+    /// display uploads as `Rgba16Float` without materializing f32. `None` for
+    /// any float/uint channel or a file-backed frame.
+    pub(crate) fn half_slots(&self, view: &Selection) -> Option<[HalfSlot<'_>; 4]> {
+        if self.file_types.is_some() {
+            return None;
+        }
+        let n = self.width as usize * self.height as usize;
+        let mapping = Mapping::of(&names_of(&self.channels), self.resolve(view).as_deref());
+        let slots = mapping.slots.map(|slot| match slot {
+            SlotSrc::Chan(i) => match &self.channels.get(i)?.1 {
+                ChannelData::Half(v) => Some(HalfSlot::Plane(v.get(..n)?)),
+                ChannelData::Float(_) | ChannelData::Uint(_) => None,
+            },
+            SlotSrc::Const(c) => {
+                let h = imath_rs::Half::from(c);
+                (h.to_f32().to_bits() == c.to_bits()).then_some(HalfSlot::Const(h))
+            }
+        });
+        Some([slots[0]?, slots[1]?, slots[2]?, slots[3]?])
+    }
+
     /// File name for titles/status.
     pub fn file_name(&self) -> &str {
         self.path
@@ -878,6 +902,11 @@ pub struct ImageBackend {
     /// The layer name actually materialized into `pixels` (the dirty marker:
     /// `None` = nothing materialized yet, re-materialize on next present).
     materialized: Option<Selection>,
+    /// The shown layer is all-half and goes to the resident display straight
+    /// from its planes (`Rgba16Float`): `pixels` stays empty, the readout reads
+    /// the planes, and the tile source materializes f32 only on demand
+    /// ([`LayerSource`]). Decided per prepare by [`Self::planes_eligible`].
+    planes: bool,
     /// Interleaved linear RGBA f32 of the materialized active layer (`w*h*4`).
     /// The tile source and the pixel-readout source. Built lazily. Shared with
     /// the tile workers (`Arc`); re-materializing reuses the allocation unless a
@@ -994,6 +1023,7 @@ impl ImageBackend {
             coverage_failed: None,
             pixels_gen: 0,
             materialized: None,
+            planes: false,
             pixels: Arc::new(Vec::new()),
             readout: Vec::new(),
             file_source: None,
@@ -1152,7 +1182,8 @@ impl ImageBackend {
             self.materialized = Some(self.view.clone());
             return Ok(());
         }
-        let want_fresh = self.materialized.as_ref() == Some(&self.view)
+        let want_fresh = !self.planes
+            && self.materialized.as_ref() == Some(&self.view)
             && self.pixels.len() == (self.width as usize) * (self.height as usize) * 4;
         if want_fresh {
             return Ok(());
@@ -1187,7 +1218,41 @@ impl ImageBackend {
         }
         self.readout = rows;
         self.materialized = Some(self.view.clone());
+        self.planes = false;
         Ok(())
+    }
+
+    /// Show the active layer from its half planes: readout labels only, no
+    /// f32 buffer (released, so a half sequence holds none).
+    fn prepare_planes(&mut self) {
+        if self.planes && self.materialized.as_ref() == Some(&self.view) {
+            return;
+        }
+        let group = self.frame.resolve(&self.view);
+        self.readout = readout_rows(&self.frame.channels, group.as_deref());
+        self.pixels = Arc::new(Vec::new());
+        self.planes = true;
+        self.materialized = Some(self.view.clone());
+    }
+
+    /// Whether the shown layer goes to the display from its half planes: an
+    /// all-half layer of a direct-eligible frame, shown as is (idle stage
+    /// `stage == 0`, no Cryptomatte overlay).
+    fn planes_eligible(&self, stage: u64, max_dim: u32) -> bool {
+        stage == 0
+            && self.coverage_overlay.is_none()
+            && self.direct_eligible(false, max_dim)
+            && self.frame.half_slots(&self.view).is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shows_planes(&self) -> bool {
+        self.planes
+    }
+
+    #[cfg(test)]
+    pub(crate) fn materialized_len(&self) -> usize {
+        self.pixels.len()
     }
 
     /// Raw materialized pixel at `(x, y)` of the active layer (linear RGBA) —
@@ -1201,6 +1266,13 @@ impl ImageBackend {
         // usize, not u32: `(y * width + x) * 4` overflows u32 past 2^30 pixels,
         // which 32768x32768 (allowed by Vulkan adapters reporting a 32768 limit)
         // already exceeds — a debug panic, or a silently wrong readout in release.
+        if self.planes {
+            // The same values the materialize would hold, from the planes.
+            let names = names_of(&self.frame.channels);
+            let group = self.frame.resolve(&self.view);
+            let bound = Mapping::of(&names, group.as_deref()).bind(&self.frame.channels).ok()?;
+            return bound.sample(y as usize * self.width as usize + x as usize).ok();
+        }
         let i = (y as usize * self.width as usize + x as usize) * 4;
         Some([
             *self.pixels.get(i)?,
@@ -1342,11 +1414,14 @@ impl ImageBackend {
             return;
         }
         self.file_source = None;
-        let rgba = match stage {
-            Some(s) if desc.stage != 0 => Arc::new(s.process(&self.pixels, w, h).to_vec()),
-            _ => Arc::clone(&self.pixels),
+        let source: Arc<dyn TileSource> = match stage {
+            Some(s) if desc.stage != 0 => {
+                Arc::new(FrameSource { rgba: Arc::new(s.process(&self.pixels, w, h).to_vec()), w, h })
+            }
+            _ if self.planes => Arc::new(LayerSource::new(Arc::clone(&self.frame), self.view.clone())),
+            _ => Arc::new(FrameSource { rgba: Arc::clone(&self.pixels), w, h }),
         };
-        tiles.set_source(desc, Arc::new(FrameSource { rgba, w, h }));
+        tiles.set_source(desc, source);
     }
 
     /// Whether the shown content takes the resident direct display (one
@@ -1357,11 +1432,31 @@ impl ImageBackend {
         !worker && !self.is_file_backed() && self.width <= limit && self.height <= limit
     }
 
-    fn prepare_source_cpu(&mut self, target: &mut DisplayTarget) -> Result<(), ExrError> {
-        if self.materialized.as_ref() != Some(&self.view) {
+    /// The resident display's level 0 of the shown content: the half planes
+    /// when shown from them, else the tile source's f32 level 0 (the
+    /// materialized or processed pixels).
+    fn level0(&self, tiles: &mut TileState) -> Option<Level0<'_>> {
+        if self.planes {
+            self.frame.half_slots(&self.view).map(Level0::Half)
+        } else {
+            tiles.scope_level(u64::MAX, u32::MAX).map(|(_, rgba)| Level0::F32(rgba))
+        }
+    }
+
+    /// Make the shown layer ready for the tile source: from its half planes
+    /// when [`Self::planes_eligible`] (with the stage's key `stage`), else
+    /// materialized. A change of layer or of form retires the old source.
+    fn prepare_source_cpu(&mut self, target: &mut DisplayTarget, stage: u64, max_dim: u32) -> Result<(), ExrError> {
+        let planes = self.planes_eligible(stage, max_dim);
+        if self.materialized.as_ref() != Some(&self.view) || self.planes != planes {
             target.tiles.retire_cpu_source();
         }
-        self.prepare_cpu()
+        if planes {
+            self.prepare_planes();
+            Ok(())
+        } else {
+            self.prepare_cpu()
+        }
     }
 
     /// Materialize the active layer (if stale), keep the tile source current,
@@ -1395,7 +1490,9 @@ impl ImageBackend {
         let worker = stage.as_ref().is_some_and(|stage| stage.uses_worker());
         #[cfg(not(feature = "ofx"))]
         let worker = false;
-        if !worker { self.prepare_source_cpu(target).map_err(|e| e.to_string())?; }
+        let max_dim = device.limits().max_texture_dimension_2d;
+        let stage_key = stage.as_ref().map_or(0, |s| s.key());
+        if !worker { self.prepare_source_cpu(target, stage_key, max_dim).map_err(|e| e.to_string())?; }
         let sync = _lap.as_ref().map(|_| crate::timing::Lap::start("present sync_source"));
         self.sync_source(
             device.limits().max_texture_dimension_2d,
@@ -1418,7 +1515,6 @@ impl ImageBackend {
             direct.reap();
         }
         drop(reap);
-        let max_dim = device.limits().max_texture_dimension_2d;
         let reserve = target
             .scope_reserve(max_dim)
             .saturating_add(gpu.canvas_bytes);
@@ -1428,10 +1524,7 @@ impl ImageBackend {
                 .description()
                 .cloned()
                 .ok_or("display source is absent")?;
-            let (_, rgba) = target
-                .tiles
-                .scope_level(u64::MAX, u32::MAX)
-                .ok_or("resident display pixels are absent")?;
+            let level0 = self.level0(&mut target.tiles).ok_or("resident display pixels are absent")?;
             let allowance = direct_allowance(gpu, target, max_dim);
             let direct = gpu
                 .direct
@@ -1445,7 +1538,7 @@ impl ImageBackend {
                 queue,
                 &gpu.pipe.page_bgl,
                 &desc,
-                &rgba,
+                level0.texels(),
                 known,
                 (self.width, self.height),
                 place,
@@ -1579,7 +1672,9 @@ impl ImageBackend {
         }
         #[cfg(feature = "ofx")]
         if stage.as_ref().is_some_and(|stage| stage.uses_worker()) { return None; }
-        if let Err(e) = self.prepare_source_cpu(target) {
+        let max_dim = device.limits().max_texture_dimension_2d;
+        let stage_key = stage.as_ref().map_or(0, |s| s.key());
+        if let Err(e) = self.prepare_source_cpu(target, stage_key, max_dim) {
             log::error!(
                 "ensure_linear: materialize failed for {}: {e}",
                 self.file_name()
@@ -1587,7 +1682,6 @@ impl ImageBackend {
             return None;
         }
         target.retired_scopes.reap();
-        let max_dim = device.limits().max_texture_dimension_2d;
         self.sync_source(max_dim, &mut target.tiles, stage);
         let grid = *target.tiles.grid()?;
         let level = crate::tiles::source::finest_level(&grid, SCOPE_MAX_PIXELS, max_dim);
@@ -1602,11 +1696,11 @@ impl ImageBackend {
             && self.direct_eligible(false, max_dim)
             && let Some(gpu) = renderer.callback_resources.get_mut::<TileGpu>()
             && let Some(desc) = target.tiles.description().cloned()
-            && let Some((_, rgba)) = target.tiles.scope_level(u64::MAX, u32::MAX)
+            && let Some(level0) = self.level0(&mut target.tiles)
         {
             let allowance = direct_allowance(gpu, target, max_dim);
             let direct = gpu.direct.get_or_insert_with(|| crate::tiles::direct::DirectGpu::new(device));
-            match direct.upload(device, queue, &desc, &rgba, (self.width, self.height), allowance) {
+            match direct.upload(device, queue, &desc, level0.texels(), (self.width, self.height), allowance) {
                 Ok(true) => {
                     if let Some(view) = direct.original_view(&desc) {
                         return Some((view, lw, lh));
@@ -1657,7 +1751,8 @@ impl ImageBackend {
     ) -> Option<(u32, u32, u32, Arc<Vec<f32>>)> {
         #[cfg(feature = "ofx")]
         if stage.as_ref().is_some_and(|stage| stage.uses_worker()) { return None; }
-        if let Err(e) = self.prepare_source_cpu(target) {
+        let stage_key = stage.as_ref().map_or(0, |s| s.key());
+        if let Err(e) = self.prepare_source_cpu(target, stage_key, max_dim) {
             log::error!("export: materialize failed for {}: {e}", self.file_name());
             return None;
         }
@@ -1672,6 +1767,22 @@ impl ImageBackend {
 }
 
 // ── GPU helpers ───────────────────────────────────────────────────────────────
+
+/// Level 0 of the shown content as the direct display takes it (see
+/// [`ImageBackend::level0`]).
+enum Level0<'a> {
+    Half([HalfSlot<'a>; 4]),
+    F32(Arc<Vec<f32>>),
+}
+
+impl Level0<'_> {
+    fn texels(&self) -> Texels<'_> {
+        match self {
+            Self::Half(slots) => Texels::Half(*slots),
+            Self::F32(rgba) => Texels::F32(rgba),
+        }
+    }
+}
 
 /// VRAM the resident direct display may hold: the budget less the scopes'
 /// reserve, the canvas and the tile atlas still held.
@@ -2009,6 +2120,16 @@ fn materialize_into(
     Mapping::of(&names_of(&frame.channels), group).fill(out, &frame.channels, width, height)
 }
 
+/// `view` of `frame` materialized into a fresh f32 RGBA buffer: the tile
+/// source of a layer shown from its planes, when a consumer needs f32.
+pub(crate) fn materialize_layer(frame: &DecodedFrame, view: &Selection) -> Result<Vec<f32>, ExrError> {
+    let _lap = crate::timing::Lap::start("materialize (on demand)");
+    let group = frame.resolve(view);
+    let mut out = Vec::new();
+    materialize_into(&mut out, frame, frame.width, frame.height, group.as_deref())?;
+    Ok(out)
+}
+
 /// Size `out` to `width * height * 4` samples for a full overwrite, reusing
 /// its allocation: only samples beyond its current length are zeroed (fresh
 /// memory is touched either way). Returns the pixel count.
@@ -2260,6 +2381,90 @@ pub(crate) mod tests {
         assert!(some > 20 && none > 20, "both kernels exercised: {some} exact, {none} wide");
     }
 
+    /// An all-half layer is shown from its planes: no f32 buffer, yet the
+    /// readout and the on-demand f32 (export, tiles) are the materialized
+    /// values bit for bit. Anything else (float/uint channels, an overlay, an
+    /// active stage) stays materialized.
+    #[test]
+    fn an_all_half_layer_is_shown_from_its_planes() {
+        let (w, h) = (4u32, 3u32);
+        let n = (w * h) as usize;
+        let plane = |seed: u16| {
+            ChannelData::Half((0..n as u16).map(|i| imath_rs::Half::from_bits(i.wrapping_mul(0x2468) ^ seed)).collect())
+        };
+        let half_rgb = vec![("B".into(), plane(0x3c00)), ("G".into(), plane(0x8001)), ("R".into(), plane(0x0400))];
+        let bits = |v: &[f32]| v.iter().map(|f| f.to_bits()).collect::<Vec<_>>();
+        for view in [Selection::default(), Selection::channel("", "G")] {
+            let frame = Arc::new(tests_support::frame_of(w, h, half_rgb.clone()));
+            let mut image = ImageBackend::from_frame(Arc::clone(&frame));
+            image.set_view(&view);
+            let mut target = DisplayTarget::new(8 << 20, usize::MAX);
+            let (_, _, _, rgba) = image.export_level(&mut target, 8192, None).unwrap();
+            assert!(image.shows_planes(), "{view:?}");
+            assert_eq!(image.materialized_len(), 0, "no f32 buffer is kept");
+            let names = names_of(&frame.channels);
+            let group = frame.resolve(&view);
+            let want = fill_reference(&Mapping::of(&names, group.as_deref()), &frame.channels, n).unwrap();
+            assert_eq!(bits(&rgba), bits(&want), "on-demand f32 equals the materialize");
+            for (i, px) in want.chunks(4).enumerate() {
+                let got = image.pixel_at(i as u32 % w, i as u32 / w).unwrap();
+                assert_eq!(bits(&got), bits(px), "readout of pixel {i}");
+            }
+            assert!(!image.readout.is_empty());
+        }
+        let shown_from_planes = |channels: Vec<(String, ChannelData)>, overlay: bool, stage: u64| {
+            let mut image = ImageBackend::from_frame(Arc::new(tests_support::frame_of(w, h, channels)));
+            if overlay {
+                image.set_coverage_overlay(Some(vec![0.5; n]), Some(("crypto".into(), "object".into())));
+            }
+            let mut target = DisplayTarget::new(8 << 20, usize::MAX);
+            image.prepare_source_cpu(&mut target, stage, 8192).unwrap();
+            (image.shows_planes(), image.materialized_len())
+        };
+        assert_eq!(shown_from_planes(half_rgb.clone(), false, 0), (true, 0));
+        assert_eq!(shown_from_planes(half_rgb.clone(), true, 0), (false, n * 4), "an overlay is baked into f32");
+        assert_eq!(shown_from_planes(half_rgb.clone(), false, 7), (false, n * 4), "an active stage processes f32");
+        let mut mixed = half_rgb.clone();
+        mixed[1].1 = ChannelData::Float(vec![0.5; n]);
+        assert_eq!(shown_from_planes(mixed, false, 0), (false, n * 4), "a float channel is materialized");
+    }
+
+    /// A layer shown from its planes still feeds the tile fallback, the scope
+    /// levels and effect regions: its on-demand f32 serves them exactly as
+    /// the materialized source does.
+    #[test]
+    fn the_planes_source_serves_tiles_like_the_materialized_one() {
+        use crate::tiles::source::{LayerSource, ProductionContext, Production};
+        let (w, h) = (700u32, 9u32);
+        let n = (w * h) as usize;
+        let plane = |seed: u16| ChannelData::Half((0..n).map(|i| imath_rs::Half::from_bits((i as u16).wrapping_mul(7) ^ seed)).collect());
+        let frame = Arc::new(tests_support::frame_of(w, h, vec![("G".into(), plane(0x3c00)), ("R".into(), plane(0x0800))]));
+        let view = Selection::default();
+        let lazy = LayerSource::new(Arc::clone(&frame), view.clone());
+        let eager = FrameSource { rgba: Arc::new(materialize_layer(&frame, &view).unwrap()), w, h };
+        let grid = lazy.grid();
+        assert_eq!(grid, eager.grid());
+        let tiles = |p: Production| match p {
+            Production::Ready(tiles) => tiles.into_iter().map(|(id, t)| (id, t.rgba)).collect::<Vec<_>>(),
+            _ => panic!("tile production failed"),
+        };
+        for level in 0..grid.levels() {
+            let (cols, rows) = grid.tiles(level);
+            for (tx, ty) in (0..rows).flat_map(|ty| (0..cols).map(move |tx| (tx, ty))) {
+                let unit = lazy.unit(crate::tiles::grid::TileId { level, tx, ty });
+                let context = ProductionContext::default();
+                assert_eq!(tiles(lazy.produce(&grid, unit, &context)), tiles(eager.produce(&grid, unit, &context)));
+            }
+        }
+        let level_bits = |l: Option<(u32, Arc<Vec<f32>>)>| l.map(|(k, v)| (k, v.iter().map(|f| f.to_bits()).collect::<Vec<_>>()));
+        for max_pixels in [u64::MAX, 1000] {
+            assert_eq!(
+                level_bits(lazy.scope_level(&grid, max_pixels, 8192)),
+                level_bits(eager.scope_level(&grid, max_pixels, 8192))
+            );
+        }
+    }
+
     /// The per-sample materialize the typed fill replaced: the bit-exact reference.
     fn fill_reference(m: &Mapping, channels: &[(String, ChannelData)], n: usize) -> Result<Vec<f32>, ExrError> {
         let bound = m.bind(channels)?;
@@ -2363,7 +2568,7 @@ pub(crate) mod tests {
         };
         let mut image = ImageBackend::from_frame(frame(1));
         let mut target = DisplayTarget::new(8 << 20, usize::MAX);
-        image.prepare_source_cpu(&mut target).unwrap();
+        image.prepare_source_cpu(&mut target, 0, 8192).unwrap();
         image.sync_source(8192, &mut target.tiles, None);
         assert_eq!(
             Arc::strong_count(&image.pixels),
@@ -2372,7 +2577,7 @@ pub(crate) mod tests {
         );
         let first = image.pixels.as_ptr();
         image.set_frame(frame(2));
-        image.prepare_source_cpu(&mut target).unwrap();
+        image.prepare_source_cpu(&mut target, 0, 8192).unwrap();
         assert_eq!(
             first,
             image.pixels.as_ptr(),
@@ -2382,7 +2587,7 @@ pub(crate) mod tests {
         let (_, snapshot) = target.tiles.scope_level(u64::MAX, u32::MAX).unwrap();
         let saved = snapshot.clone();
         image.set_frame(frame(3));
-        image.prepare_source_cpu(&mut target).unwrap();
+        image.prepare_source_cpu(&mut target, 0, 8192).unwrap();
         assert_ne!(
             snapshot.as_ptr(),
             image.pixels.as_ptr(),

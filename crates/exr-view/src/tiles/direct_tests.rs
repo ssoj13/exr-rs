@@ -45,7 +45,7 @@ fn precision_half_domain_cancellation_and_rounding_edges() {
                     &q,
                     &pipe.page_bgl,
                     &desc,
-                    &rgba,
+                    super::direct::Texels::F32(&rgba),
                     None,
                     (2048, 1),
                     place(512, 1, zoom),
@@ -229,7 +229,7 @@ fn wide_kernel_matches_the_f64_reference_on_render_like_floats() {
         assert_eq!(k, case as u32 + 1);
         let desc = SourceDesc { frame: case as u64 + 1, view: Default::default(), pixels_gen: 0, stage: 0 };
         let (lw, lh) = grid.level_size(k);
-        assert!(direct.prepare(&d, &q, &pipe.page_bgl, &desc, &rgba, None, (w, h), place(lw, lh, zoom), 256 << 20).unwrap());
+        assert!(direct.prepare(&d, &q, &pipe.page_bgl, &desc, super::direct::Texels::F32(&rgba), None, (w, h), place(lw, lh, zoom), 256 << 20).unwrap());
         let reference = level_from_rgba(&rgba, &grid, k).unwrap();
         let bytes = read_texture(&d, &q, &direct.pages()[0].tex, lw, lh, 8);
         let mut mismatches = 0;
@@ -861,6 +861,64 @@ fn scopes_read_the_resident_original_without_a_second_upload() {
     assert_eq!(read(&tex.unwrap()), expect(4.0));
 }
 
+/// An all-half frame reaches the resident display as `Rgba16Float` straight
+/// from its planes (no f32 materialize), and the GPU sees exactly what the
+/// f32 path gives it: the same original values and bit-identical reduced
+/// levels, at several zooms.
+#[test]
+#[ignore = "needs a GPU adapter"]
+fn half_planes_upload_matches_the_f32_path() {
+    use crate::image::tests_support::frame_of;
+    use exr_core::api::ChannelData;
+    let (d, q) = device();
+    let (w, h) = (67u32, 43u32);
+    let n = (w * h) as usize;
+    let plane = |mul: u16, seed: u16| {
+        ChannelData::Half((0..n as u16).map(|i| Half::from_bits((i.wrapping_mul(mul) % 0x7800) ^ seed)).collect())
+    };
+    let mut frame = frame_of(w, h, vec![("B".into(), plane(37, 0)), ("G".into(), plane(101, 0x8000)), ("R".into(), plane(13, 0))]);
+    frame.id = 9;
+    let frame = Arc::new(frame);
+    let rgba = crate::image::materialize_layer(&frame, &Default::default()).unwrap();
+    for zoom in [1.0, 0.5, 0.125] {
+        let mut renderer = egui_wgpu::Renderer::new(&d, crate::present::CANVAS_FORMAT, Default::default());
+        renderer.callback_resources.insert(TileGpu::new(&d, 64 << 20));
+        let mut target = DisplayTarget::new(8 << 20, usize::MAX);
+        let mut img = ImageBackend::from_frame(Arc::clone(&frame));
+        crate::timing::take();
+        assert!(img.present(&d, &q, &mut renderer, &mut target, None, place(w, h, zoom), look(), None).unwrap().direct);
+        let laps: Vec<_> = crate::timing::take().into_iter().map(|(what, _, _)| what).collect();
+        assert!(img.shows_planes() && img.materialized_len() == 0, "shown from the planes");
+        assert!(!laps.iter().any(|l| l.starts_with("materialize")), "no f32 materialize: {laps:?}");
+        assert!(laps.contains(&"direct texels f16"), "{laps:?}");
+        let gpu = renderer.callback_resources.get::<TileGpu>().unwrap();
+        let direct = gpu.direct.as_ref().unwrap();
+        assert_eq!(direct.original_format(), Some(wgpu::TextureFormat::Rgba16Float));
+        assert_eq!((direct.uploads, direct.scans), (1, 0));
+        let original = halves(&read_texture(&d, &q, direct.original_texture().unwrap(), w, h, 8));
+        assert_eq!(
+            original.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            rgba.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            "the half original holds the materialized values"
+        );
+        let grid = Grid::new(w, h);
+        let level = grid.pick_level(zoom);
+        let (lw, lh) = grid.level_size(level);
+        let planes_reduced = read_texture(&d, &q, &direct.pages()[0].tex, lw, lh, 8);
+
+        // The f32 path over the same source description and placement.
+        let mut reference = DirectGpu::new(&d);
+        let desc = direct.desc.clone().unwrap();
+        assert!(
+            reference
+                .prepare(&d, &q, &gpu.pipe.page_bgl, &desc, super::direct::Texels::F32(&rgba), None, (w, h), place(w, h, zoom), 64 << 20)
+                .unwrap()
+        );
+        assert_eq!(reference.exact(), direct.exact());
+        assert_eq!(read_texture(&d, &q, &reference.pages()[0].tex, lw, lh, 8), planes_reduced, "zoom {zoom}");
+    }
+}
+
 #[test]
 #[ignore = "needs a GPU adapter"]
 fn direct_reduction_matches_clipped_f64_half_reference() {
@@ -908,7 +966,7 @@ fn direct_reduction_matches_clipped_f64_half_reference() {
                     &q,
                     &gpu.pipe.page_bgl,
                     &desc,
-                    &rgba,
+                    super::direct::Texels::F32(&rgba),
                     None,
                     (w, h),
                     place(w, h, zoom),

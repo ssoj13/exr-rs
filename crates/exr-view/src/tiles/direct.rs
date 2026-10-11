@@ -96,8 +96,81 @@ impl Reducer {
     }
 }
 
+/// One RGBA slot of an all-half layer: a half plane (`w * h` samples) or a
+/// constant.
+#[derive(Clone, Copy, Debug)]
+pub enum HalfSlot<'a> {
+    Plane(&'a [imath_rs::Half]),
+    Const(imath_rs::Half),
+}
+
+/// The level-0 pixels of the shown content, as the original texture takes
+/// them: interleaved f32 RGBA (`Rgba32Float`), or the half planes of an
+/// all-half layer, interleaved here into `Rgba16Float`. Both hold the same
+/// values (a half widens to f32 exactly), so the reduce, the display and the
+/// scopes see identical numbers; the half form skips the f32 materialize on
+/// the CPU and halves the upload.
+#[derive(Clone, Copy, Debug)]
+pub enum Texels<'a> {
+    F32(&'a [f32]),
+    Half([HalfSlot<'a>; 4]),
+}
+
+impl Texels<'_> {
+    fn format(&self) -> (wgpu::TextureFormat, u32) {
+        match self {
+            Self::F32(_) => (wgpu::TextureFormat::Rgba32Float, 16),
+            Self::Half(_) => (wgpu::TextureFormat::Rgba16Float, 8),
+        }
+    }
+
+    /// Whether the texels cover exactly `n` pixels.
+    fn covers(&self, n: usize) -> bool {
+        match self {
+            Self::F32(rgba) => Some(rgba.len()) == n.checked_mul(4),
+            Self::Half(slots) => slots.iter().all(|s| match s {
+                HalfSlot::Plane(v) => v.len() == n,
+                HalfSlot::Const(_) => true,
+            }),
+        }
+    }
+
+    /// The precision profile, scanning the pixels.
+    fn profile(&self) -> Option<[i32; 4]> {
+        match self {
+            Self::F32(rgba) => super::precision::profile(rgba),
+            Self::Half(slots) => super::precision::finish(slots.map(|s| match s {
+                HalfSlot::Plane(v) => super::precision::Span::of_halves(v.iter().map(|h| h.bits())),
+                HalfSlot::Const(h) => super::precision::Span::of([h.to_f32()]),
+            })),
+        }
+    }
+}
+
+/// Interleave half `slots` into `out` (`n` RGBA half texels), reusing its
+/// allocation; every texel is written, so only growth is zeroed.
+fn interleave(out: &mut Vec<u16>, slots: &[HalfSlot<'_>; 4], n: usize) {
+    out.truncate(n * 4);
+    out.resize(n * 4, 0);
+    // Blocks small enough that all four slot passes hit the cache.
+    const BLOCK: usize = 4096;
+    for (b, texels) in out.as_chunks_mut::<4>().0.chunks_mut(BLOCK).enumerate() {
+        let at = b * BLOCK;
+        for (slot, src) in slots.iter().enumerate() {
+            match src {
+                HalfSlot::Plane(v) => texels
+                    .iter_mut()
+                    .zip(v.get(at..).unwrap_or_default())
+                    .for_each(|(t, h)| t[slot] = h.bits()),
+                HalfSlot::Const(h) => texels.iter_mut().for_each(|t| t[slot] = h.bits()),
+            }
+        }
+    }
+}
+
 struct Original {
     tex: wgpu::Texture,
+    format: wgpu::TextureFormat,
     cap: (u32, u32),
     bytes: u64,
 }
@@ -116,6 +189,8 @@ pub struct DirectGpu {
     /// can upload a new frame before the viewport reduces it).
     original_desc: Option<SourceDesc>,
     reduced: Option<Reduced>,
+    /// Interleaved half texels of the last half upload (reused per frame).
+    staging: Vec<u16>,
     pub desc: Option<SourceDesc>,
     profile_desc: Option<SourceDesc>,
     profile: Option<[i32; 4]>,
@@ -141,6 +216,7 @@ impl DirectGpu {
             original: None,
             original_desc: None,
             reduced: None,
+            staging: Vec::new(),
             desc: None,
             profile_desc: None,
             profile: None,
@@ -196,7 +272,7 @@ impl DirectGpu {
 
     /// Prepare a drawable generation without dropping the old reduced image.
     /// `known` is the source's precision profile when the caller has it (a
-    /// resident frame's channel spans); `None` rescans `rgba` once per source.
+    /// resident frame's channel spans); `None` rescans `texels` once per source.
     /// `allowance` excludes canvas, scopes and the still-held tile atlas.
     /// The peak includes old allocations until their replacements are ready.
     #[allow(clippy::too_many_arguments)]
@@ -206,7 +282,7 @@ impl DirectGpu {
         queue: &wgpu::Queue,
         page_bgl: &wgpu::BindGroupLayout,
         desc: &SourceDesc,
-        rgba: &[f32],
+        texels: Texels<'_>,
         known: Option<Option<[i32; 4]>>,
         extent: (u32, u32),
         place: Placement,
@@ -215,9 +291,10 @@ impl DirectGpu {
         let _lap = (self.desc.as_ref() != Some(desc)).then(|| crate::timing::Lap::start("direct prepare"));
         self.retired.reap();
         let limit = device.limits().max_texture_dimension_2d.min(MAX_DIM);
+        let (format, texel) = texels.format();
         let input =
-            UploadLayout::compute(extent.0, extent.1, 16, limit).map_err(|e| e.to_string())?;
-        if rgba.len() != input.cpu_size / 4 {
+            UploadLayout::compute(extent.0, extent.1, texel, limit).map_err(|e| e.to_string())?;
+        if !texels.covers(input.cpu_size / texel as usize) {
             return Err("direct source length differs from its checked layout".into());
         }
         if self.profile_desc.as_ref() != Some(desc) {
@@ -230,7 +307,7 @@ impl DirectGpu {
                     {
                         self.scans += 1;
                     }
-                    super::precision::profile(rgba)
+                    texels.profile()
                 }
             };
             self.profile_desc = Some(desc.clone());
@@ -250,7 +327,7 @@ impl DirectGpu {
         let level = grid.pick_level(place.zoom);
         let size = grid.level_size(level);
         let output = UploadLayout::compute(size.0, size.1, 8, limit).map_err(|e| e.to_string())?;
-        let input_fits = self.original.as_ref().is_some_and(|t| fits(t.cap, extent));
+        let input_fits = self.original.as_ref().is_some_and(|t| t.format == format && fits(t.cap, extent));
         let output_fits = self.reduced.as_ref().is_some_and(|t| fits(t.cap, size));
         let required = self
             .bytes()
@@ -259,7 +336,7 @@ impl DirectGpu {
         if required.is_none_or(|bytes| bytes > allowance) {
             return Ok(false);
         }
-        if !self.upload(device, queue, desc, rgba, extent, allowance)? {
+        if !self.upload(device, queue, desc, texels, extent, allowance)? {
             return Ok(false);
         }
         let recalculate = self.desc.as_ref() != Some(desc) || self.level != level || !output_fits;
@@ -373,16 +450,18 @@ impl DirectGpu {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         desc: &SourceDesc,
-        rgba: &[f32],
+        texels: Texels<'_>,
         extent: (u32, u32),
         allowance: u64,
     ) -> Result<bool, String> {
         let limit = device.limits().max_texture_dimension_2d.min(MAX_DIM);
-        let input = UploadLayout::compute(extent.0, extent.1, 16, limit).map_err(|e| e.to_string())?;
-        if rgba.len() != input.cpu_size / 4 {
+        let (format, texel) = texels.format();
+        let input = UploadLayout::compute(extent.0, extent.1, texel, limit).map_err(|e| e.to_string())?;
+        let n = input.cpu_size / texel as usize;
+        if !texels.covers(n) {
             return Err("direct source length differs from its checked layout".into());
         }
-        let input_fits = self.original.as_ref().is_some_and(|t| fits(t.cap, extent));
+        let input_fits = self.original.as_ref().is_some_and(|t| t.format == format && fits(t.cap, extent));
         if input_fits && self.original_desc.as_ref() == Some(desc) {
             return Ok(true);
         }
@@ -396,7 +475,7 @@ impl DirectGpu {
             let tex = texture(
                 device,
                 &input,
-                wgpu::TextureFormat::Rgba32Float,
+                format,
                 wgpu::TextureUsages::TEXTURE_BINDING
                     | wgpu::TextureUsages::COPY_DST
                     | if cfg!(test) { wgpu::TextureUsages::COPY_SRC } else { wgpu::TextureUsages::empty() },
@@ -405,14 +484,23 @@ impl DirectGpu {
                 return Err(format!("direct texture allocation: {error}"));
             }
             self.retire_original(queue);
-            self.original = Some(Original { tex, cap: extent, bytes: input.byte_size });
+            self.original = Some(Original { tex, format, cap: extent, bytes: input.byte_size });
         }
+        let bytes: &[u8] = match texels {
+            Texels::F32(rgba) => bytemuck::cast_slice(rgba),
+            Texels::Half(slots) => {
+                let mut lap = crate::timing::Lap::start("direct texels f16");
+                lap.bytes(input.cpu_size as u64);
+                interleave(&mut self.staging, &slots, n);
+                bytemuck::cast_slice(&self.staging)
+            }
+        };
         let original = self.original.as_ref().ok_or("direct original is absent")?;
         let mut lap = crate::timing::Lap::start("direct upload");
         lap.bytes(input.cpu_size as u64);
         queue.write_texture(
             original.tex.as_image_copy(),
-            bytemuck::cast_slice(rgba),
+            bytes,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(input.row_bytes),
@@ -443,6 +531,11 @@ impl DirectGpu {
     #[cfg(test)]
     pub fn original_texture(&self) -> Option<&wgpu::Texture> {
         self.original.as_ref().map(|t| &t.tex)
+    }
+
+    #[cfg(test)]
+    pub fn original_format(&self) -> Option<wgpu::TextureFormat> {
+        self.original.as_ref().map(|t| t.format)
     }
 
     /// Preserve level-0 geometry; ragged cells are not stretched to ceil extent.

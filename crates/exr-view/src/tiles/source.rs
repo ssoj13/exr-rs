@@ -5,7 +5,7 @@
 //! unit, so a row is decoded once however many of its tiles are wanted.
 
 use std::sync::{
-    Arc,
+    Arc, OnceLock,
     atomic::{AtomicBool, Ordering},
 };
 
@@ -238,6 +238,69 @@ impl TileSource for FrameSource {
             return Some((0, Arc::clone(&self.rgba)));
         }
         super::reduce::level_from_rgba(&self.rgba, grid, level).map(|v| (level, Arc::new(v)))
+    }
+}
+
+/// A resident frame's layer that the direct display shows from its half
+/// planes: its f32 RGBA exists only once a consumer asks for it (the tile
+/// fallback, export, a coarse scope level, an effect region) and is then
+/// materialized once, through the same [`crate::image::materialize_layer`]
+/// as the eager path, and served like a [`FrameSource`].
+pub struct LayerSource {
+    frame: Arc<crate::image::DecodedFrame>,
+    view: crate::image::Selection,
+    rgba: OnceLock<Result<FrameSource, String>>,
+}
+
+impl LayerSource {
+    pub fn new(frame: Arc<crate::image::DecodedFrame>, view: crate::image::Selection) -> Self {
+        Self { frame, view, rgba: OnceLock::new() }
+    }
+
+    fn frame_source(&self) -> Result<&FrameSource, String> {
+        self.rgba
+            .get_or_init(|| {
+                let rgba = crate::image::materialize_layer(&self.frame, &self.view).map_err(|e| e.to_string())?;
+                Ok(FrameSource { rgba: Arc::new(rgba), w: self.frame.width, h: self.frame.height })
+            })
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+}
+
+impl TileSource for LayerSource {
+    fn read_region(
+        &self,
+        plan: super::region::RegionPlan,
+        context: &ProductionContext,
+        budget: &super::region::RegionBudget,
+    ) -> Result<Arc<super::region::RegionData>, super::region::RegionError> {
+        self.frame_source().map_err(super::region::RegionError::Failed)?.region(plan, context, budget)
+    }
+
+    fn size(&self) -> (u32, u32) {
+        (self.frame.width, self.frame.height)
+    }
+
+    fn unit(&self, id: TileId) -> Unit {
+        Unit::Tile(id)
+    }
+
+    fn produce(&self, grid: &Grid, unit: Unit, context: &ProductionContext) -> Production {
+        match self.frame_source() {
+            Ok(source) => source.produce(grid, unit, context),
+            Err(error) => context.finish(Err(error)),
+        }
+    }
+
+    fn scope_level(&self, grid: &Grid, max_pixels: u64, max_dim: u32) -> Option<(u32, Arc<Vec<f32>>)> {
+        match self.frame_source() {
+            Ok(source) => source.scope_level(grid, max_pixels, max_dim),
+            Err(error) => {
+                log::error!("{}: the layer cannot be materialized: {error}", self.frame.file_name());
+                None
+            }
+        }
     }
 }
 
