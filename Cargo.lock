@@ -1006,7 +1006,7 @@ version = "0.1.0"
 [[package]]
 name = "deflate-rs"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#6912334d7315130459d8ea764bf03b7dd96c0922"
+source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#04d6174dbe369d2c807ceba9b7d241c36629d6bc"
 
 [[package]]
 name = "deflate64"
@@ -1203,7 +1203,7 @@ dependencies = [
 [[package]]
 name = "egui-attr-grid"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-colorpicker",
@@ -1219,7 +1219,7 @@ dependencies = [
 [[package]]
 name = "egui-colorpicker"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-widgets-config",
@@ -1229,7 +1229,7 @@ dependencies = [
 [[package]]
 name = "egui-display"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "bytemuck",
  "egui",
@@ -1251,7 +1251,7 @@ dependencies = [
 [[package]]
 name = "egui-dock-layout"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-layout-manager",
@@ -1277,7 +1277,7 @@ dependencies = [
 [[package]]
 name = "egui-file-field"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-widgets-config",
@@ -1287,7 +1287,7 @@ dependencies = [
 [[package]]
 name = "egui-font-picker"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
 ]
@@ -1295,7 +1295,7 @@ dependencies = [
 [[package]]
 name = "egui-hotkeys"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
 ]
@@ -1303,7 +1303,7 @@ dependencies = [
 [[package]]
 name = "egui-layout-manager"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-widgets-config",
@@ -1314,7 +1314,7 @@ dependencies = [
 [[package]]
 name = "egui-menubar"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
 ]
@@ -1322,7 +1322,7 @@ dependencies = [
 [[package]]
 name = "egui-outliner"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-widgets-config",
@@ -1339,7 +1339,7 @@ dependencies = [
 [[package]]
 name = "egui-prefs2"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "box-rs",
  "egui",
@@ -1351,7 +1351,7 @@ dependencies = [
 [[package]]
 name = "egui-preset"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-widgets-config",
@@ -1361,7 +1361,7 @@ dependencies = [
 [[package]]
 name = "egui-ramp"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "curves",
  "egui",
@@ -1372,7 +1372,7 @@ dependencies = [
 [[package]]
 name = "egui-slider"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-widgets-config",
@@ -1381,7 +1381,7 @@ dependencies = [
 [[package]]
 name = "egui-splitter-table"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-widgets-config",
@@ -1391,7 +1391,7 @@ dependencies = [
 [[package]]
 name = "egui-statusbar"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-widgets-config",
@@ -1401,7 +1401,7 @@ dependencies = [
 [[package]]
 name = "egui-timeline"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-widgets-config",
@@ -1410,7 +1410,7 @@ dependencies = [
 [[package]]
 name = "egui-titlebar"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-widgets-config",
@@ -1419,7 +1419,7 @@ dependencies = [
 [[package]]
 name = "egui-viewport-hud"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
 ]
@@ -1427,7 +1427,7 @@ dependencies = [
 [[package]]
 name = "egui-viewport-toolbar"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-colorpicker",
@@ -1457,7 +1457,7 @@ dependencies = [
 [[package]]
 name = "egui-widgets-config"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#b195161e76fb6a3e55b1a7841213e60654f1896c"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#e8ec7af16c33d4bb5c48ab499a4381a9c3d7764f"
 dependencies = [
  "egui",
  "egui-phosphor",
@@ -1635,7 +1635,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1689,7 +1689,7 @@ dependencies = [
 [[package]]
 name = "exr-core"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#6912334d7315130459d8ea764bf03b7dd96c0922"
+source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#04d6174dbe369d2c807ceba9b7d241c36629d6bc"
 dependencies = [
  "codec-simd",
  "deflate-rs 0.1.0 (git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main)",
@@ -1720,15 +1720,6 @@ dependencies = [
  "exr-core 0.1.0",
  "image",
  "imath-rs 0.1.0",
-]
-
-[[package]]
-name = "exr-image"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#111d4a6f581a8345cb919ca2d0a54d79192210e6"
-dependencies = [
- "exr-core 0.1.0 (git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main)",
- "image",
 ]
 
 [[package]]
@@ -1979,9 +1970,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "fractal-core"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#3ac7254b05903e0a4c7a624345a2e68993264802"
+dependencies = [
+ "standard-surface-bsdf",
+]
+
+[[package]]
+name = "fractal-env"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#3ac7254b05903e0a4c7a624345a2e68993264802"
+dependencies = [
+ "fractal-core",
+ "pt-integrator",
+ "render-env",
+]
+
+[[package]]
 name = "fractal-materials"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#3ac7254b05903e0a4c7a624345a2e68993264802"
 
 [[package]]
 name = "futures-core"
@@ -2411,7 +2420,7 @@ version = "0.1.0"
 [[package]]
 name = "imath-rs"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#6912334d7315130459d8ea764bf03b7dd96c0922"
+source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#04d6174dbe369d2c807ceba9b7d241c36629d6bc"
 
 [[package]]
 name = "imgref"
@@ -3462,7 +3471,7 @@ dependencies = [
 [[package]]
 name = "ofx"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "cudarc",
  "gpu-info-rs",
@@ -3477,7 +3486,7 @@ dependencies = [
 [[package]]
 name = "ofx-cuda"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "bytemuck",
  "cudarc",
@@ -3487,7 +3496,7 @@ dependencies = [
 [[package]]
 name = "ofx-density"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -3496,7 +3505,7 @@ dependencies = [
 [[package]]
 name = "ofx-effects"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "gpu-info-rs",
  "ofx",
@@ -3518,7 +3527,7 @@ dependencies = [
 [[package]]
 name = "ofx-finish"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "bytemuck",
  "libm",
@@ -3529,7 +3538,7 @@ dependencies = [
 [[package]]
 name = "ofx-flare"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -3539,7 +3548,7 @@ dependencies = [
 [[package]]
 name = "ofx-format"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "ofx-sys",
 ]
@@ -3547,9 +3556,11 @@ dependencies = [
 [[package]]
 name = "ofx-fractal"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "cudarc",
+ "fractal-core",
+ "fractal-env",
  "fractal-materials",
  "gpu-info-rs",
  "libm",
@@ -3563,10 +3574,11 @@ dependencies = [
 [[package]]
 name = "ofx-gen"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "bytemuck",
  "gpu-info-rs",
+ "log",
  "ofx-cuda",
  "realfft",
  "rustfft",
@@ -3575,7 +3587,7 @@ dependencies = [
 [[package]]
 name = "ofx-host"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -3593,7 +3605,7 @@ dependencies = [
 [[package]]
 name = "ofx-host-egui"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "anyhow",
  "egui",
@@ -3602,6 +3614,7 @@ dependencies = [
  "egui-titlebar",
  "egui-widgets-config",
  "ofx-host",
+ "ofx-preset",
  "ofx-runtime",
  "ofx-sys",
 ]
@@ -3609,7 +3622,7 @@ dependencies = [
 [[package]]
 name = "ofx-host-gl"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "anyhow",
  "libloading 0.9.0",
@@ -3619,7 +3632,7 @@ dependencies = [
 [[package]]
 name = "ofx-host-wgpu"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "anyhow",
  "ash",
@@ -3635,7 +3648,7 @@ dependencies = [
 [[package]]
 name = "ofx-noise"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -3644,7 +3657,7 @@ dependencies = [
 [[package]]
 name = "ofx-preset"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "serde",
  "serde_json",
@@ -3654,7 +3667,7 @@ dependencies = [
 [[package]]
 name = "ofx-runtime"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "anyhow",
  "gpu-info-rs",
@@ -3669,7 +3682,7 @@ dependencies = [
 [[package]]
 name = "ofx-sim"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -3678,12 +3691,12 @@ dependencies = [
 [[package]]
 name = "ofx-sys"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 
 [[package]]
 name = "ofx-warp"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#ca3d20538fab55fab3a196b115871ffd57e75947"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#597457bccc048cf188a7bb3e2cc6cac9d59aa3e7"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -4025,7 +4038,7 @@ dependencies = [
 [[package]]
 name = "pt-core"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#d4d55e4aa327fa6086623d6dda66b60f75071911"
+source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#65de24a6357099afde12a89bb6224c262a20b196"
 dependencies = [
  "bytemuck",
  "glam",
@@ -4034,7 +4047,7 @@ dependencies = [
 [[package]]
 name = "pt-integrator"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#d4d55e4aa327fa6086623d6dda66b60f75071911"
+source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#65de24a6357099afde12a89bb6224c262a20b196"
 dependencies = [
  "half",
  "pt-core",
@@ -4368,11 +4381,9 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "render-env"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#d4d55e4aa327fa6086623d6dda66b60f75071911"
+source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#65de24a6357099afde12a89bb6224c262a20b196"
 dependencies = [
  "bytemuck",
- "exr-core 0.1.0 (git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main)",
- "exr-image 0.1.0 (git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main)",
  "image",
 ]
 
@@ -4482,7 +4493,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4873,7 +4884,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "standard-surface-bsdf"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#d4d55e4aa327fa6086623d6dda66b60f75071911"
+source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#65de24a6357099afde12a89bb6224c262a20b196"
 dependencies = [
  "libm",
 ]
@@ -4921,7 +4932,7 @@ version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c2499c2d826531388872b2268718aed907a39bd785ab0dcfe57fab26283f92e"
 dependencies = [
- "skrifa 0.40.0",
+ "skrifa 0.44.0",
  "yazi",
  "zeno",
 ]
@@ -4993,7 +5004,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6069,7 +6080,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
