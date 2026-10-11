@@ -135,8 +135,13 @@ Colour follows OpenImageIO: the format reader's colour-space tag wins (PNG honou
 chunks, Radiance HDR is linear, DPX maps its transfer code, PNM is Rec.709 as in OIIO), and an
 untagged file is sRGB when it holds 8/16-bit integers and linear when it holds floats. Cineon and
 DPX log (`KodakLog`) use the Kodak printing-density curve (white 685, black 95, step 0.002,
-gamma 0.6). A tag with no curve here (`CMYK`, `lin_ap1_scene`, ...) is an error, not a guess. The
-Metadata panel starts with the source format, colour space, depth and alpha handling. Straight
+gamma 0.6). Any other tag is resolved through the colour-space table of `vfx-io` (Color Interop IDs
+such as `g24_rec709_display`, `lin_ap1_scene`, `pq_rec2020_display`): its curve is applied and
+primaries other than Rec.709 are rotated into linear Rec.709 (Bradford-adapted, out-of-gamut values
+kept). A tag the table does not know, or that is not RGB (`CMYK`, XYZ), is an error, not a guess.
+A sequence frame that fails to decode is marked red on the timeline and is not retried until its
+file changes; the viewport and the log say why. The Metadata panel starts with the source format,
+colour space, depth and alpha handling. Straight
 alpha (PNG, TGA, WebP, unassociated TIFF) is premultiplied in linear light; other formats are
 taken as associated, as OIIO does.
 

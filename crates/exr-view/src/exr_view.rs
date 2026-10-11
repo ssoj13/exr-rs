@@ -23,6 +23,7 @@ mod commands;
 mod dock;
 mod export;
 mod file_pick;
+mod frame_loader;
 mod gpu_ctx;
 mod image;
 #[cfg(feature = "ofx")]

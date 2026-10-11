@@ -73,6 +73,8 @@ pub fn proxy_wake(proxy: EventLoopProxy<UserEvent>) -> scancache::Wake {
 const CACHE_LOADED: egui::Color32 = egui::Color32::from_rgb(70, 150, 70);
 /// Transport-timeline cache-fill tint: a frame queued / decoding (not yet resident).
 const CACHE_INFLIGHT: egui::Color32 = egui::Color32::from_rgb(150, 130, 60);
+/// Transport-timeline cache-fill tint: a frame that failed to decode.
+const CACHE_FAILED: egui::Color32 = egui::Color32::from_rgb(170, 60, 60);
 
 /// Compact human-readable byte count for the status bar (e.g. `12 GB`).
 fn humanize_bytes(bytes: u64) -> String {
@@ -472,6 +474,9 @@ pub struct SequenceState {
     /// Async CPU frame cache of `Arc<DecodedFrame>` (background work-stealing
     /// decode + epoch cancel + byte-budget LRU — the `scancache` engine).
     pub cache: Scancache<DecodedFrame>,
+    /// Frames whose decode failed (terminal until the file changes): the timeline marks them
+    /// and the viewport says why instead of "loading".
+    fails: Arc<crate::frame_loader::Fails>,
     /// The cache's live byte cap, [`RamPartitions::frames`], re-set every tick by
     /// `tick_sequence` from what the tile cache and the OpenFX inputs hold.
     frame_budget: scancache::SharedBudget,
@@ -565,6 +570,7 @@ impl SequenceState {
             self.playback.set_indices(indices);
         }
         for &f in &rewritten {
+            self.fails.clear(f);
             self.cache.invalidate(f);
         }
         if !rewritten.is_empty() {
@@ -1052,27 +1058,14 @@ impl AppState {
         // rows per frame), with the single-image rule; computed once here.
         let backing_budget = self.backing_budget();
         // `exr_core::api::read` (inside `DecodedFrame::open`) is not interruptible
-        // mid-decode, so `cancel` is honoured at the two points that ARE cheap:
-        // before starting (skip work the cache no longer wants) and before
-        // publishing the result (a decode that finished after going stale must not
-        // be reported as success — `Scancache` drops a cancelled `Err` with no
-        // failure record and no retry backoff).
-        let loader: scancache::Loader<DecodedFrame> =
-            Arc::new(move |frame: i32, cancel: &scancache::Cancel| {
-                if cancel.is_cancelled() {
-                    return Err("cancelled".to_owned());
-                }
-                let file = seq_for_loader.read().ok().and_then(|s| s.get_file(i64::from(frame)));
-                let result = match file {
-                    Some(path) => DecodedFrame::open(std::path::Path::new(&path), backing_budget)
-                        .map_err(|e| e.status()),
-                    None => Err(format!("frame {frame}: not present in the sequence")),
-                };
-                if cancel.is_cancelled() {
-                    return Err("cancelled".to_owned());
-                }
-                result
-            });
+        // mid-decode; the loader honours `cancel` where it is cheap, and remembers
+        // frames that failed so a broken file is decoded once, not once per retry.
+        let fails = Arc::new(crate::frame_loader::Fails::default());
+        let loader = crate::frame_loader::loader(
+            seq_for_loader,
+            Arc::clone(&fails),
+            Arc::new(move |path: &Path| DecodedFrame::open(path, backing_budget).map_err(|e| e.status())),
+        );
         let size_of: scancache::SizeOf<DecodedFrame> = Arc::new(|f: &DecodedFrame| f.byte_size());
         // A finished decode wakes the event loop directly (no UI polling).
         let wake = Arc::clone(&self.wake);
@@ -1115,6 +1108,7 @@ impl AppState {
             watch: SeqWatch::new(stamps),
             playback,
             cache,
+            fails,
             frame_budget,
             meter: Default::default(),
             display: None,
@@ -1368,8 +1362,12 @@ impl AppState {
                 // Only reached before the FIRST frame has ever decoded (after that
                 // the previous frame is kept on screen). Non-selectable so it never
                 // shows a text cursor over the viewport.
+                let text = match s.fails.msg(cur) {
+                    Some(why) => format!("frame {cur} failed: {why}"),
+                    None => format!("loading frame {cur}…"),
+                };
                 ui.centered_and_justified(|ui| {
-                    ui.add(egui::Label::new(format!("loading frame {cur}…")).selectable(false));
+                    ui.add(egui::Label::new(text).selectable(false));
                 });
             }
             // Apply the on-screen scrubber's seek (after the cache borrow ends).
@@ -2195,7 +2193,7 @@ impl AppState {
             if count > 1 {
                 let indices = s.playback.indices().to_vec();
                 let seek = {
-                    let cache = &s.cache;
+                    let (cache, fails) = (&s.cache, &s.fails);
                     egui_timeline::Timeline::new()
                         .height(20.0)
                         .show(
@@ -2208,6 +2206,8 @@ impl AppState {
                                     Some(CACHE_LOADED)
                                 } else if cache.is_in_flight(f) {
                                     Some(CACHE_INFLIGHT)
+                                } else if fails.msg(f).is_some() {
+                                    Some(CACHE_FAILED)
                                 } else {
                                     None
                                 }
@@ -2944,10 +2944,11 @@ fn build_ui(
                     // the cursor would still stall playback.
                     ui.add(egui::ProgressBar::new(frac).desired_width(260.0).text(txt))
                         .on_hover_text(format!(
-                            "{} frames playable from here\n{} per frame on average\n{} decoding\nRAM held / the cache's live budget",
+                            "{} frames playable from here\n{} per frame on average\n{} decoding\n{} failed\nRAM held / the cache's live budget",
                             st.playable,
                             humanize_bytes(st.avg_frame_bytes as u64),
-                            st.decoding
+                            st.decoding,
+                            st.dead
                         ));
                 }
                 _ => {

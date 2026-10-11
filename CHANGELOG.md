@@ -8,6 +8,13 @@ All notable changes to **exr-rs** are documented here. The format follows
 
 ### 2026-10-10
 
+- **Any colour tag opens.** `exr-import` resolves a still's colour-space tag through `vfx-io`'s
+  table instead of a short list of its own: `g24_rec709_display` (the PNG sequence that failed with
+  "unsupported colour space"), `lin_ap1_scene`, `srgb_p3d65_display`, `pq_rec2020_display` and the
+  rest of the Color Interop IDs decode with their curve and are rotated into Rec.709.
+- **A broken sequence frame fails once.** A frame that does not decode is no longer decoded again on
+  every cache retry: it is logged once at `warn` with its path, marked red on the timeline, named in
+  the viewport instead of "loading", and tried again only when its file changes.
 - **Other image formats.** The viewer and `exr-rs convert` read every still format `vfx-io`
   decodes except HEIC/HEIF and AVIF: PNG, JPEG, TIFF, DPX, Cineon, Radiance HDR, BMP, TGA, SGI,
   ICO, GIF, WebP, PNM/PFM, IFF, RLA, Softimage PIC. New crate `exr-import` loads them as
