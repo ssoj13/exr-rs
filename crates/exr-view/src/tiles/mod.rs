@@ -33,3 +33,5 @@ pub mod view;
 mod direct_tests;
 #[cfg(test)]
 pub(crate) mod gpu_tests;
+#[cfg(test)]
+mod scrub_bench;

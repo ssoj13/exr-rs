@@ -198,6 +198,7 @@ impl DirectGpu {
         place: Placement,
         allowance: u64,
     ) -> Result<bool, String> {
+        let _lap = (self.desc.as_ref() != Some(desc)).then(|| crate::timing::Lap::start("direct prepare"));
         self.retired.reap();
         let limit = device.limits().max_texture_dimension_2d.min(MAX_DIM);
         let input =
@@ -206,7 +207,10 @@ impl DirectGpu {
             return Err("direct source length differs from its checked layout".into());
         }
         if self.profile_desc.as_ref() != Some(desc) {
+            let mut lap = crate::timing::Lap::start("direct profile");
+            lap.bytes(input.cpu_size as u64);
             self.profile = super::precision::profile(rgba);
+            drop(lap);
             self.profile_desc = Some(desc.clone());
             #[cfg(test)]
             {
@@ -238,6 +242,7 @@ impl DirectGpu {
         let recalculate = changed || self.level != level || !output_fits;
 
         // Create replacements while the old reduced image is still intact.
+        let alloc = (!input_fits || !output_fits).then(|| crate::timing::Lap::start("direct alloc"));
         let oom = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
         let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let mut next_original = if input_fits {
@@ -284,6 +289,7 @@ impl DirectGpu {
         {
             return Err(format!("direct texture allocation: {error}"));
         }
+        drop(alloc);
         let original = next_original
             .as_ref()
             .or(self.original.as_ref())
@@ -293,6 +299,8 @@ impl DirectGpu {
             .or(self.reduced.as_ref())
             .expect("checked direct output");
         if changed {
+            let mut lap = crate::timing::Lap::start("direct upload");
+            lap.bytes(input.cpu_size as u64);
             queue.write_texture(
                 original.tex.as_image_copy(),
                 bytemuck::cast_slice(rgba),
@@ -307,12 +315,14 @@ impl DirectGpu {
                     depth_or_array_layers: 1,
                 },
             );
+            drop(lap);
             #[cfg(test)]
             {
                 self.uploads += 1;
             }
         }
         if recalculate {
+            let _lap = crate::timing::Lap::start("direct reduce");
             let source = original.tex.create_view(&Default::default());
             let destination = reduced.page.tex.create_view(&Default::default());
             let group = device.create_bind_group(&wgpu::BindGroupDescriptor {

@@ -2269,6 +2269,8 @@ struct Viewer {
     minimised: bool,
     /// The compositor reports the window as fully occluded — same reasoning.
     occluded: bool,
+    /// When the last sequence frame swap was presented (`scrub-timing:` interval).
+    last_switch: Option<Instant>,
 }
 
 impl Viewer {
@@ -2342,6 +2344,7 @@ impl Viewer {
             next_frame: Instant::now(),
             minimised: false,
             occluded: false,
+            last_switch: None,
         };
         viewer.apply_output();
         Ok(viewer)
@@ -2522,6 +2525,9 @@ impl Viewer {
         }
         let raw_input = self.egui_state.take_egui_input(&self.window);
         let ctx = self.egui_state.egui_ctx().clone();
+        // A UI frame that swaps in a new sequence frame logs its stage split.
+        let shown_before = self.app_state.seq.as_ref().and_then(|s| s.displayed_frame);
+        let t_start = Instant::now();
 
         // Split disjoint borrows so the egui closure can use the GPU bits while
         // egui_state is borrowed separately for input handling.
@@ -2554,6 +2560,7 @@ impl Viewer {
             }
 
         });
+        let t_ui = Instant::now();
 
         // Every frame, even one that is skipped below: a frame that showed no backdrop must not
         // present the last one.
@@ -2593,6 +2600,7 @@ impl Viewer {
             }
         }
 
+        let t_paint = Instant::now();
         // Acquire the next surface frame (wgpu 30 `CurrentSurfaceTexture` enum).
         // Every skip path still frees what egui asked to free — a skipped `free`
         // leaks the texture for the rest of the session.
@@ -2619,6 +2627,7 @@ impl Viewer {
                 return Ok(());
             }
         };
+        let t_acquire = Instant::now();
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -2685,7 +2694,24 @@ impl Viewer {
                 .into_iter()
                 .chain(std::iter::once(encoder.finish())),
         );
+        let t_submit = Instant::now();
         self.gpu.queue.present(frame); // wgpu 30: Queue::present
+        let shown_after = self.app_state.seq.as_ref().and_then(|s| s.displayed_frame);
+        if shown_after != shown_before {
+            let ms = |a: Instant, b: Instant| (b - a).as_secs_f64() * 1e3;
+            let end = Instant::now();
+            let interval = self.last_switch.replace(end).map_or(0.0, |last| ms(last, end));
+            log::debug!(
+                "scrub-timing: render {:?} interval {interval:.2} ms total {:.2} ms (ui {:.2}, paint {:.2}, acquire {:.2}, submit {:.2}, present {:.2})",
+                shown_after,
+                ms(t_start, end),
+                ms(t_start, t_ui),
+                ms(t_ui, t_paint),
+                ms(t_paint, t_acquire),
+                ms(t_acquire, t_submit),
+                ms(t_submit, end)
+            );
+        }
         Ok(())
     }
 }

@@ -35,6 +35,7 @@ mod present;
 mod scopes;
 mod theme;
 mod tiles;
+mod timing;
 mod transfer;
 mod viewport;
 

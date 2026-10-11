@@ -1110,6 +1110,8 @@ impl ImageBackend {
         if want_fresh {
             return Ok(());
         }
+        let mut lap = crate::timing::Lap::start("materialize");
+        lap.bytes(u64::from(self.width) * u64::from(self.height) * 16);
         let group = self.frame.resolve(&self.view);
         let group = group.as_deref();
         let mut rows = readout_rows(&self.frame.channels, group);
@@ -1331,27 +1333,36 @@ impl ImageBackend {
             self.height,
             place.zoom
         );
+        // Times the whole present of a new frame / layer (the stale materialize marks it).
+        let _lap = (self.materialized.as_ref() != Some(&self.view))
+            .then(|| crate::timing::Lap::start("present"));
         #[cfg(feature = "ofx")]
         let worker = stage.as_ref().is_some_and(|stage| stage.uses_worker());
         #[cfg(not(feature = "ofx"))]
         let worker = false;
         if !worker { self.prepare_source_cpu(target).map_err(|e| e.to_string())?; }
+        let sync = _lap.as_ref().map(|_| crate::timing::Lap::start("present sync_source"));
         self.sync_source(
             device.limits().max_texture_dimension_2d,
             &mut target.tiles,
             stage,
         );
+        drop(sync);
         let gpu = renderer
             .callback_resources
             .get_mut::<TileGpu>()
             .ok_or("the tile renderer is not initialised")?;
+        let colour_lap = _lap.as_ref().map(|_| crate::timing::Lap::start("present set_colour"));
         gpu.pipe.set_colour(device, queue, colour)?;
+        drop(colour_lap);
+        let reap = _lap.as_ref().map(|_| crate::timing::Lap::start("present poll+reap"));
         let _ = device.poll(wgpu::PollType::Poll);
         gpu.atlas.reap();
         target.retired_scopes.reap();
         if let Some(direct) = &mut gpu.direct {
             direct.reap();
         }
+        drop(reap);
         let max_dim = device.limits().max_texture_dimension_2d;
         let reserve = target
             .scope_reserve(max_dim)
@@ -1541,7 +1552,10 @@ impl ImageBackend {
             let (_, pixels) = target.tiles.scope_level(SCOPE_MAX_PIXELS, max_dim)?;
             log::debug!("scope source: level {level} ({lw}x{lh})");
             let scope = target.scope.as_mut()?;
+            let mut lap = crate::timing::Lap::start("scope upload");
+            lap.bytes(u64::from(lw) * u64::from(lh) * u64::from(LINEAR_TEXEL_SIZE));
             upload_linear(queue, &scope.tex, &pixels, lw, lh);
+            drop(lap);
             scope.key = Some(key);
         }
         let scope = target.scope.as_ref()?;
