@@ -5,8 +5,13 @@
 //! ```text
 //! OfxEffects::new()  Runtime<u32> (host "exr-view": overlays, custom interacts, pages; the built-in
 //!                    effects, then OFX_PLUGIN_PATH and the OS plug-in dirs) + UiEvents as observer
-//! Effects tab        catalog menu (Filter / General / Generator plug-ins, grouped) -> one Effect,
-//!                    its EffectUi panel (parameters, parameter interacts), enable, errors
+//! Effects tab        ofx-host-egui's EffectStack of one row: the "+" catalog menu (Filter / General /
+//!                    Generator plug-ins, grouped) -> one Effect; enable, remove, the site picker
+//!                    (ofx-runtime's SiteMenu: Default / Auto / CPU, every GPU site refused with its
+//!                    reason - this host opens no GPU site), the status "CPU images, WGPU compute"
+//!                    (the delivery site and what the plug-in reported computing with, read from the
+//!                    effect after each completed render) and, in the body, its EffectUi panel
+//!                    (parameters, parameter interacts) and errors
 //! viewport           ImageStage::process: the materialized linear RGBA (top row first) as the
 //!                    Source (copied once into a host frame, negative row stride = OFX bottom-left
 //!                    origin), the Output a lent Vec<f32> -> uploaded instead of the decoded pixels;
@@ -21,9 +26,15 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use ofx_host_egui::{CanonicalView, EffectUi, MessageKind, UiEvents, plugin_menu};
-use ofx_runtime::ofx_host::{HostContext, HostInfo};
-use ofx_runtime::{Effect, EffectSetup, PluginKey, PluginSummary, Runtime, ScanSpec};
+use ofx_host_egui::{
+    Backend, CanonicalView, EffectStack, EffectUi, MessageKind, StackAction, StackRow, StackStatus,
+    UiEvents, backend_options, plugin_menu,
+};
+use ofx_runtime::ofx_host::{HostContext, HostInfo, RenderSite};
+use ofx_runtime::{
+    Effect, EffectSetup, PluginKey, PluginSummary, Runtime, RuntimeError, ScanSpec, SiteMenu,
+    Target,
+};
 use crate::image::{DecodedFrame, ImageStage, Selection};
 use crate::tiles::effect::EffectSource;
 use crate::tiles::effect_frames::Inputs;
@@ -75,6 +86,8 @@ pub struct OfxEffects {
     events: Arc<UiEvents>,
     chosen: Option<PluginKey>,
     enabled: bool,
+    /// Whether the effect's row is folded (its parameters hidden).
+    collapsed: bool,
     /// The time the effect renders at (the sequence frame; 0 for a single image).
     time: f64,
     /// Advanced whenever the effect's output may change (an edit, a plug-in write, a redraw).
@@ -139,6 +152,7 @@ impl OfxEffects {
             events,
             chosen: None,
             enabled: true,
+            collapsed: false,
             time: 0.0,
             revision: 0,
             inputs: None,
@@ -207,38 +221,36 @@ impl OfxEffects {
         }
     }
 
-    /// The Effects tab: pick a plug-in, enable it, its parameters.
+    /// Where the effect's last COMPLETED render ran and what computed it, in ofx-runtime's words
+    /// ([`ofx_runtime::RenderedOn`]: "CPU images, WGPU compute"). The viewer renders on the CPU site only (its
+    /// host opens no GPU site), so the delivery is always the CPU's; the compute backend is what the plug-in
+    /// reported - the host settles the report when each render ends, so this is never an earlier render's.
+    /// `None` before the first render; `Err` when the report is not in the vocabulary (shown, not guessed).
+    fn rendered(&self) -> Option<Result<String, String>> {
+        match self.effect.as_ref()?.rendered_on(RenderSite::Cpu) {
+            Ok(on) => Some(Ok(on.to_string())),
+            Err(RuntimeError::NoInstance) => None,
+            Err(error) => Some(Err(error.to_string())),
+        }
+    }
+
+    /// The effect takes picker entry `option` of `menu` (an index into [`SiteMenu::options`]; `choice` `None`:
+    /// follow the runtime's default). A refused entry is never taken - the stack disables it with its reason.
+    fn pick_site(&mut self, menu: &SiteMenu, option: usize) {
+        let (Some(effect), Some(entry)) = (&self.effect, menu.options.get(option)) else {
+            return;
+        };
+        if entry.refusal.is_some() {
+            return;
+        }
+        effect.set_site_choice(entry.choice);
+        self.revision += 1;
+    }
+
+    /// The Effects tab: an [`EffectStack`] of the one effect (header: enable, name, site picker and where it last
+    /// rendered, remove; "+" picks a plug-in), the status line, then its parameters.
     pub fn panel(&mut self, ui: &mut egui::Ui) {
         let mut chosen = None;
-        let current = self
-            .chosen
-            .as_ref()
-            .and_then(|key| self.runtime.catalog().get(key))
-            .map_or("None", |plugin| plugin.short_label.as_str());
-        ui.horizontal(|ui| {
-            ui.menu_button(format!("Effect: {current}"), |ui| {
-                if ui.button("None").clicked() {
-                    chosen = Some(None);
-                    ui.close();
-                }
-                let usable: Vec<&PluginSummary> = self
-                    .runtime
-                    .catalog()
-                    .plugins()
-                    .iter()
-                    .filter(|plugin| CONTEXTS.iter().any(|context| plugin.supports(*context)))
-                    .collect();
-                if let Some(key) = plugin_menu(ui, &usable, self.chosen.as_ref()) {
-                    chosen = Some(Some(key));
-                }
-            });
-            if ui.checkbox(&mut self.enabled, "enabled").changed() {
-                self.revision += 1;
-            }
-        });
-        if let Some(key) = chosen {
-            self.choose(key);
-        }
         // The blocked note, the error and the plug-in's messages live in the log docked at the bottom of the tab
         // (drawn first: egui panels claim their edge before the controls), so a failure never shifts the controls.
         let error = self
@@ -256,27 +268,102 @@ impl OfxEffects {
         ui.separator();
         let revision = self.runtime.inbox().revision();
         let time = self.time;
-        match (&mut self.ui, &self.effect) {
-            (Some(effect_ui), Some(effect)) => {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if effect_ui.panel(ui, effect, revision, time).changed() {
-                        self.revision += 1;
+        let name = self
+            .chosen
+            .as_ref()
+            .and_then(|key| self.runtime.catalog().get(key))
+            .map_or_else(String::new, |plugin| plugin.short_label.clone());
+        // The picker is the runtime's one site menu; the status reads the effect, not a copy kept here.
+        let menu = self.effect.as_ref().map(|effect| effect.site_menu());
+        let options = menu.as_ref().map(backend_options);
+        let on = self.rendered();
+        let shown = match (&on, &error) {
+            (Some(Ok(text)), None) => Some(text.as_str()),
+            _ => None,
+        };
+        let rows: Vec<StackRow<'_>> = match (&menu, &options) {
+            (Some(menu), Some(options)) => vec![StackRow {
+                key: u64::from(EFFECT),
+                label: &name,
+                enabled: self.enabled,
+                collapsed: self.collapsed,
+                backend: Some(Backend {
+                    options,
+                    selected: menu.selected,
+                    rendered: shown,
+                    tip: Some(
+                        "Image delivery site. The plug-in's Compute Backend parameter chooses its compute engine.",
+                    ),
+                }),
+                status: match &on {
+                    Some(Ok(text)) if error.is_none() => Some(StackStatus::Ok(text)),
+                    Some(Err(text)) => Some(StackStatus::Error(text)),
+                    _ => None,
+                },
+            }],
+            _ => Vec::new(),
+        };
+        let mut add = |ui: &mut egui::Ui| {
+            let usable: Vec<&PluginSummary> = self
+                .runtime
+                .catalog()
+                .plugins()
+                .iter()
+                .filter(|plugin| CONTEXTS.iter().any(|context| plugin.supports(*context)))
+                .collect();
+            if let Some(key) = plugin_menu(ui, &usable, self.chosen.as_ref()) {
+                chosen = Some(Some(key));
+            }
+        };
+        let mut changed = false;
+        let actions = egui::ScrollArea::vertical()
+            .show(ui, |ui| {
+                EffectStack::new(&rows)
+                    .title("Effect")
+                    .add_menu(&mut add)
+                    .show(ui, |ui, _| match (&mut self.ui, &self.effect) {
+                        (Some(effect_ui), Some(effect)) => {
+                            changed = effect_ui.panel(ui, effect, revision, time).changed();
+                        }
+                        (None, Some(_)) => {
+                            ui.label("The parameters show once the effect rendered the image.");
+                        }
+                        _ => {}
+                    })
+            })
+            .inner;
+        if self.effect.is_none() {
+            let problems = self.runtime.catalog().problems();
+            if !problems.is_empty() {
+                ui.collapsing(format!("{} scan problem(s)", problems.len()), |ui| {
+                    for problem in problems {
+                        ui.label(problem);
                     }
                 });
             }
-            (None, Some(_)) => {
-                ui.label("The parameters show once the effect rendered the image.");
-            }
-            _ => {
-                let problems = self.runtime.catalog().problems();
-                if !problems.is_empty() {
-                    ui.collapsing(format!("{} scan problem(s)", problems.len()), |ui| {
-                        for problem in problems {
-                            ui.label(problem);
-                        }
-                    });
+        }
+        if changed {
+            self.revision += 1;
+        }
+        for action in actions {
+            match action {
+                StackAction::Enable(_, enabled) => {
+                    self.enabled = enabled;
+                    self.revision += 1;
                 }
+                StackAction::Collapse(_, collapsed) => self.collapsed = collapsed,
+                StackAction::Remove(_) => chosen = Some(None),
+                StackAction::Backend { option, .. } => {
+                    if let Some(menu) = &menu {
+                        self.pick_site(menu, option);
+                    }
+                }
+                // One effect: nothing to reorder (the stack offers no move for a single row).
+                StackAction::Move { .. } => {}
             }
+        }
+        if let Some(key) = chosen {
+            self.choose(key);
         }
     }
 
@@ -339,6 +426,10 @@ impl OfxEffects {
     fn snapshot(&self, primary: Arc<DecodedFrame>) -> Result<OfxEffectsSnapshot, String> {
         if let Some(error) = &self.input_error { return Err(error.clone()); }
         let effect = self.effect.clone().ok_or("no effect")?;
+        // An explicit site this host cannot honour is an error to show, never a render somewhere else.
+        if let Target::Unavailable(why) = effect.target() {
+            return Err(why);
+        }
         let inputs = self.inputs.clone().unwrap_or_else(|| Arc::new(Inputs::Static {
             frame: primary, index: 0,
         }));
@@ -488,5 +579,139 @@ mod tests {
         fx.choose(None);
         assert!(!fx.active());
         assert_eq!(fx.process(&pixels, 2, 2), pixels.as_slice());
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The site picker and the render status (ofx-rs plan0 5.11): the runtime's SiteMenu through
+    // ofx-host-egui's EffectStack, the status read from the effect after each completed render.
+    // -----------------------------------------------------------------------------------------
+
+    use egui::accesskit::Role;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::{NodeT as _, Queryable as _};
+    use ofx_runtime::SiteChoice;
+
+    /// The Effects tab of `fx`, drawn headless.
+    fn tab(fx: OfxEffects) -> Harness<'static, OfxEffects> {
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(700.0, 500.0))
+            .build_ui_state(|ui, fx: &mut OfxEffects| fx.panel(ui), fx);
+        harness.run();
+        harness
+    }
+
+    fn with_basic() -> OfxEffects {
+        let mut fx = OfxEffects::with_scan(OfxEffects::test_scan());
+        fx.choose(Some(PluginKey::new("net.ofxrs.basic_gain", 1)));
+        assert!(fx.effect.is_some(), "{:?}", fx.error);
+        fx
+    }
+
+    /// One tile of a 2x2 image through the effect: a completed render on a worker thread.
+    fn render_once(fx: &OfxEffects) {
+        let mut frame = crate::image::tests_support::frame_with(&["R", "G", "B", "A"]);
+        frame.width = 2;
+        frame.height = 2;
+        frame.data_window = imath_rs::Box2i::from_min_max(imath_rs::V2i::new(0, 0), imath_rs::V2i::new(1, 1));
+        frame.display_window = frame.data_window;
+        for (_, channel) in frame.channels.iter_mut() {
+            *channel = exr_core::api::ChannelData::Float(vec![0.5; 4]);
+        }
+        let source = fx
+            .worker(Arc::new(frame), Selection::default(), RegionBudget::new(4096))
+            .expect("the worker")
+            .expect("an active effect");
+        let grid = source.grid();
+        let id = crate::tiles::grid::TileId { level: 0, tx: 0, ty: 0 };
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        let produced = pool.install(|| {
+            source.produce(&grid, source.unit(id), &crate::tiles::source::ProductionContext::default())
+        });
+        assert!(
+            matches!(produced, crate::tiles::source::Production::Processed(_)),
+            "the tile was rendered"
+        );
+    }
+
+    /// The picker is the runtime's menu: Default first, every site listed, the GPU ones disabled (this host
+    /// opens no GPU site) and a click on one changes nothing; CPU is taken and re-renders. RED: a hand-made
+    /// option list, or a refused entry that sets the choice.
+    #[test]
+    fn the_site_picker_is_the_runtime_menu_and_takes_only_what_is_open() {
+        let mut harness = tab(with_basic());
+        let picker = |h: &Harness<'static, OfxEffects>| {
+            h.get_all_by_role(Role::ComboBox).next().expect("site picker").value()
+        };
+        assert_eq!(picker(&harness).as_deref(), Some("Default (Auto)"));
+        let revision = harness.state().revision;
+        harness.get_all_by_role(Role::ComboBox).next().unwrap().click();
+        harness.run();
+        for refused in ["Vulkan", "CUDA", "OpenCL Buffer", "OpenCL Image", "OpenGL"] {
+            assert!(
+                harness.get_by_label(refused).accesskit_node().is_disabled(),
+                "{refused} cannot be taken: no GPU site is open"
+            );
+        }
+        harness.get_by_label("CUDA").click();
+        harness.run();
+        let effect = harness.state().effect.clone().expect("effect");
+        assert_eq!(effect.site_override(), None);
+        assert_eq!(harness.state().revision, revision, "a refused entry re-renders nothing");
+        // The click on a disabled entry may close the popup: open it again if so.
+        if harness.query_by_label("CPU").is_none() {
+            harness.get_all_by_role(Role::ComboBox).next().unwrap().click();
+            harness.run();
+        }
+        harness.get_by_label("CPU").click();
+        harness.run();
+        assert_eq!(effect.site_override(), Some(SiteChoice::Cpu));
+        assert!(harness.state().revision > revision, "the pick re-renders");
+        assert_eq!(picker(&harness).as_deref(), Some("CPU"));
+    }
+
+    /// A saved site name this build does not know stays the selected entry, refused, and the effect is an
+    /// explicit error naming it - never rendered on the default. RED: unknown text mapped to Default.
+    #[test]
+    fn an_unknown_saved_site_is_shown_refused_and_not_rendered() {
+        let fx = with_basic();
+        fx.effect.as_ref().expect("effect").set_saved_site(Some("metal-2"));
+        let error = fx
+            .worker(
+                Arc::new(crate::image::tests_support::frame_with(&["R", "G", "B", "A"])),
+                Selection::default(),
+                RegionBudget::new(4096),
+            )
+            .err()
+            .expect("an unavailable site is an error");
+        assert!(error.contains("metal-2"), "{error}");
+        let harness = tab(fx);
+        let picker = harness.get_all_by_role(Role::ComboBox).next().expect("site picker");
+        assert_eq!(picker.value().as_deref(), Some("metal-2 (unknown)"));
+    }
+
+    /// The status names the delivery site and the compute the plug-in reported, from the effect, after a
+    /// completed render; before any render and for a new effect there is nothing - no stale value.
+    #[test]
+    fn the_status_names_the_delivery_and_the_compute_and_never_a_stale_one() {
+        let fx = with_basic();
+        assert_eq!(fx.rendered(), None, "no render yet: nothing to say");
+        render_once(&fx);
+        let on = fx.rendered().expect("a render completed").expect("a valid report");
+        assert!(
+            on == "CPU images, CPU compute" || on == "CPU images, WGPU compute",
+            "{on}"
+        );
+        let mut harness = tab(fx);
+        assert!(
+            harness.get_all_by_label_contains(&on).count() >= 1,
+            "the tab shows {on}"
+        );
+        // Another effect has rendered nothing: the old report must not be shown for it.
+        harness
+            .state_mut()
+            .choose(Some(PluginKey::new("net.ofxrs.basic_gain", 1)));
+        harness.run();
+        assert_eq!(harness.state().rendered(), None);
+        assert_eq!(harness.query_all_by_label_contains("images").count(), 0);
     }
 }

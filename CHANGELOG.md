@@ -6,6 +6,10 @@ All notable changes to **exr-rs** are documented here. The format follows
 
 ## [Unreleased]
 
+- **exr-view**: the Effects tab is ofx-host-egui's `EffectStack`; the effect's render-site picker is ofx-runtime's
+  `SiteMenu` (GPU sites listed and refused with the reason: the viewer renders on the CPU site) and the status shows
+  the delivery site with the compute backend the plug-in reported ("CPU images, WGPU compute") after each render.
+
 ## [0.1.0] — 2026-10-10
 
 Initial public release.

@@ -135,6 +135,8 @@ vfx-ocio = { git = "ssh://git@github.com/ssoj13/oiio-rs.git", branch = "main", f
 naga = { version = "30", features = ["wgsl-in"] }
 # Locates real images for the loading tests (openexr-images).
 exr-test-data = { workspace = true }
+# Headless egui driving for the Effects tab tests (`ofx.rs`): the site picker and the status line.
+egui_kittest = { version = "0.36", default-features = false }
 
 [features]
 default = ["ofx"]
