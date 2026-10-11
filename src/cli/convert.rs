@@ -161,6 +161,7 @@ mod tests {
         assert!(h.channel("A").is_none());
         std::fs::remove_dir_all(&tmp).unwrap();
     }
+
     #[test]
     fn an_unknown_codec_is_rejected_with_the_list() {
         let err = codec("bogus").unwrap_err().to_string();

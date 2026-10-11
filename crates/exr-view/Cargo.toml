@@ -153,4 +153,3 @@ test-data = []
 [lib]
 name = "exr_view"
 path = "src/exr_view.rs"
-
