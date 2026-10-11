@@ -873,8 +873,18 @@ fn half_planes_upload_matches_the_f32_path() {
     let (d, q) = device();
     let (w, h) = (67u32, 43u32);
     let n = (w * h) as usize;
+    // Leading specials (NaN payloads, +/-Inf, subnormals, -0) so an upload that
+    // canonicalizes or flushes them fails, not only one that reorders slots.
+    const SPECIALS: [u16; 8] = [0x7e00, 0x7c01, 0xfe55, 0x7c00, 0xfc00, 0x0001, 0x83ff, 0x8000];
     let plane = |mul: u16, seed: u16| {
-        ChannelData::Half((0..n as u16).map(|i| Half::from_bits((i.wrapping_mul(mul) % 0x7800) ^ seed)).collect())
+        ChannelData::Half(
+            (0..n as u16)
+                .map(|i| match SPECIALS.get(usize::from(i)) {
+                    Some(&bits) => Half::from_bits(bits),
+                    None => Half::from_bits((i.wrapping_mul(mul) % 0x7800) ^ seed),
+                })
+                .collect(),
+        )
     };
     let mut frame = frame_of(w, h, vec![("B".into(), plane(37, 0)), ("G".into(), plane(101, 0x8000)), ("R".into(), plane(13, 0))]);
     frame.id = 9;
