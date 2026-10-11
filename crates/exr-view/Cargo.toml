@@ -31,6 +31,8 @@ exr-core = { path = "../exr-core" }
 # the one place width/height/row/byte limits are validated before `create_texture`.
 exr-gpu = { path = "../exr-gpu" }
 imath-rs = { path = "../imath-rs" }
+# Non-EXR stills (PNG, DPX, HDR, ...) as linear associated-alpha frames; the one format registry.
+exr-import = { path = "../exr-import" }
 # Tile production off the UI thread (`tiles::view`); the workspace pool exr-core uses too.
 rayon.workspace = true
 cryptomatte = { path = "../cryptomatte" }
@@ -133,6 +135,7 @@ vfx-ocio = { git = "ssh://git@github.com/ssoj13/oiio-rs.git", branch = "main", f
 # invalid shader fails `cargo test` instead of rendering a blank panel at run
 # time (the naga-24 `let`-array bug did exactly that). Same naga as wgpu 30 links.
 naga = { version = "30", features = ["wgsl-in"] }
+tempfile = "3"
 # Locates real images for the loading tests (openexr-images).
 exr-test-data = { workspace = true }
 # Headless egui driving for the Effects tab tests (`ofx.rs`): the site picker and the status line.
@@ -150,3 +153,4 @@ test-data = []
 [lib]
 name = "exr_view"
 path = "src/exr_view.rs"
+

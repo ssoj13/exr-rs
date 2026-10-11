@@ -394,7 +394,7 @@ fn open_blocking(path: PathBuf, detect_sequence: bool, backing: u64) -> OpenOutc
             None => {
                 return OpenOutcome::Failed {
                     path,
-                    reason: "no EXR frame files in this directory".to_owned(),
+                    reason: "no image frame files in this directory".to_owned(),
                 };
             }
         }
@@ -1683,7 +1683,7 @@ impl AppState {
             .ok()?
             .flatten()
             .map(|e| e.path())
-            .filter(|p| p.is_file() && has_exr_extension(p))
+            .filter(|p| p.is_file() && exr_import::is_image(p))
             .collect();
         files.sort();
         neighbour(&files, &cur, step, &own)
@@ -3285,12 +3285,7 @@ fn modified(path: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
-/// Extensions the directory seed picker accepts. The viewer reads EXR only, so
-/// seeding detection from `notes.001.txt` or `thumb.0001.jpg` just produced a
-/// confusing "load failed" for a file that was never openable.
-const SEED_EXTENSIONS: [&str; 2] = ["exr", "sxr"];
-
-/// Find a representative sequence frame inside `dir`: the first EXR whose stem
+/// Find a representative sequence frame inside `dir`: the first image whose stem
 /// contains a digit run. Used when `view <dir>` is given a directory rather than
 /// a specific frame — we seed `scanseq::Scanner::from_file` from this, which then
 /// does the real grouping/detection.
@@ -3306,16 +3301,10 @@ fn first_frame_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
     frames.into_iter().next()
 }
 
-/// A plausible sequence-frame seed: an EXR whose stem carries a digit run.
+/// A plausible sequence-frame seed: an image whose stem carries a digit run (a
+/// `notes.001.txt` was never openable; the formats are `exr_import::families`).
 fn is_seed_candidate(path: &std::path::Path) -> bool {
-    has_exr_extension(path) && has_frame_digits(path)
-}
-
-/// Case-insensitive match against [`SEED_EXTENSIONS`] (also the Open dialog's filter).
-pub(crate) fn has_exr_extension(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| SEED_EXTENSIONS.iter().any(|w| e.eq_ignore_ascii_case(w)))
+    exr_import::is_image(path) && has_frame_digits(path)
 }
 
 /// True when the file's stem contains an ASCII-digit run — i.e. it is a
@@ -3789,6 +3778,30 @@ mod seq_watch_tests {
             }
             assert_eq!(app.seq.is_some(), open_seq, "open_seq = {open_seq}");
         }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A `name.####.png` set is detected and opens as a sequence like an EXR one, and its
+    /// frames decode through `exr-import`.
+    #[test]
+    fn a_png_sequence_opens_as_a_sequence() {
+        let dir = std::env::temp_dir().join(format!("exr-view-pngseq-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = |f: i32| dir.join(format!("shot.{f:04}.png"));
+        for f in 1..=3 {
+            crate::image::tests::write_png(&name(f), [f as u8 * 40, 0, 0, 255]);
+        }
+        let wake: scancache::Wake = Arc::new(|| {});
+        let mut app = AppState::new(None, Config { open_seq: true, ..Config::default() }, false, wake);
+        app.open_chosen(name(2));
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while app.seq.is_none() && app.image.is_none() {
+            assert!(Instant::now() < deadline, "the open lands");
+            app.tick_open();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let seq = app.seq.as_ref().expect("a .png set opens as a sequence");
+        assert_eq!(seq.playback.indices(), &[1, 2, 3]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

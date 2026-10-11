@@ -468,6 +468,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "byteorder"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
+
+[[package]]
 name = "byteorder-lite"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -972,6 +978,20 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 name = "curves"
 version = "0.1.0"
 source = "git+ssh://git@github.com/ssoj13/curves-rs.git?branch=main#169ded7299f85d1f2b2472c5f579679993c9c222"
+
+[[package]]
+name = "dashmap"
+version = "6.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6361d5c062261c78a176addb82d4c821ae42bed6089de0e12603cd25de2059c"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
 
 [[package]]
 name = "data-url"
@@ -1615,7 +1635,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1712,6 +1732,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "exr-import"
+version = "0.1.0"
+dependencies = [
+ "exr-core 0.1.0",
+ "imath-rs 0.1.0",
+ "tempfile",
+ "thiserror 2.0.21",
+ "vfx-io",
+ "vfx-transfer",
+]
+
+[[package]]
 name = "exr-rs"
 version = "0.1.0"
 dependencies = [
@@ -1719,11 +1751,13 @@ dependencies = [
  "cryptomatte",
  "env_logger",
  "exr-core 0.1.0",
+ "exr-import",
  "exr-test-data",
  "exr-util",
  "exr-view",
  "imath-rs 0.1.0",
  "log",
+ "png",
 ]
 
 [[package]]
@@ -1773,6 +1807,7 @@ dependencies = [
  "env_logger",
  "exr-core 0.1.0",
  "exr-gpu",
+ "exr-import",
  "exr-test-data",
  "gpu-info-rs",
  "imath-rs 0.1.0",
@@ -1789,6 +1824,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sysinfo",
+ "tempfile",
  "vfx-ocio",
  "wgpu",
  "winit",
@@ -2155,6 +2191,12 @@ dependencies = [
  "read-fonts 0.41.0",
  "smallvec",
 ]
+
+[[package]]
+name = "hashbrown"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 
 [[package]]
 name = "hashbrown"
@@ -2550,6 +2592,30 @@ checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
 dependencies = [
  "getrandom 0.4.3",
  "libc",
+]
+
+[[package]]
+name = "jpeg-decoder"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "jpeg-encoder"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0370574b86f7eca156b9f298392b5e69a23f8c86f3f865add60bbc2e79467a6"
+
+[[package]]
+name = "jpg-rs"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/jpg-rs.git?branch=main#36691c10c71cfab4cada3a426ab1d8ed6433096a"
+dependencies = [
+ "codec-simd",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -4416,7 +4482,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4924,10 +4990,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5393,7 +5459,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vfx-compute"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#3e5b2c9fe7d71529412fac2e70f94f3010eaf837"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#66de97a226b99136cae0a291c6205cb9b9381a82"
 dependencies = [
  "bytemuck",
  "gpu-info-rs",
@@ -5411,7 +5477,7 @@ dependencies = [
 [[package]]
 name = "vfx-core"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#3e5b2c9fe7d71529412fac2e70f94f3010eaf837"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#66de97a226b99136cae0a291c6205cb9b9381a82"
 dependencies = [
  "half",
  "thiserror 2.0.21",
@@ -5420,7 +5486,7 @@ dependencies = [
 [[package]]
 name = "vfx-icc"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#3e5b2c9fe7d71529412fac2e70f94f3010eaf837"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#66de97a226b99136cae0a291c6205cb9b9381a82"
 dependencies = [
  "bytemuck",
  "lcms-rs",
@@ -5428,9 +5494,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "vfx-io"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#66de97a226b99136cae0a291c6205cb9b9381a82"
+dependencies = [
+ "byteorder",
+ "crc32fast",
+ "dashmap",
+ "fax",
+ "flate2",
+ "gif",
+ "half",
+ "image-webp",
+ "indexmap",
+ "jpeg-decoder",
+ "jpeg-encoder",
+ "jpg-rs",
+ "num-complex",
+ "png",
+ "quick-xml 0.42.0",
+ "rayon",
+ "rustfft",
+ "sha1",
+ "smallvec",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tiff",
+ "tracing",
+ "vfx-core",
+ "vfx-math",
+ "vfx-transfer",
+ "weezl",
+]
+
+[[package]]
 name = "vfx-lut"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#3e5b2c9fe7d71529412fac2e70f94f3010eaf837"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#66de97a226b99136cae0a291c6205cb9b9381a82"
 dependencies = [
  "quick-xml 0.42.0",
  "thiserror 2.0.21",
@@ -5441,7 +5541,7 @@ dependencies = [
 [[package]]
 name = "vfx-math"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#3e5b2c9fe7d71529412fac2e70f94f3010eaf837"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#66de97a226b99136cae0a291c6205cb9b9381a82"
 dependencies = [
  "glam",
  "vfx-core",
@@ -5451,7 +5551,7 @@ dependencies = [
 [[package]]
 name = "vfx-ocio"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#3e5b2c9fe7d71529412fac2e70f94f3010eaf837"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#66de97a226b99136cae0a291c6205cb9b9381a82"
 dependencies = [
  "bytemuck",
  "glam",
@@ -5476,7 +5576,7 @@ dependencies = [
 [[package]]
 name = "vfx-stmap"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#3e5b2c9fe7d71529412fac2e70f94f3010eaf837"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#66de97a226b99136cae0a291c6205cb9b9381a82"
 dependencies = [
  "thiserror 2.0.21",
  "vfx-core",
@@ -5485,7 +5585,7 @@ dependencies = [
 [[package]]
 name = "vfx-transfer"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#3e5b2c9fe7d71529412fac2e70f94f3010eaf837"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#66de97a226b99136cae0a291c6205cb9b9381a82"
 dependencies = [
  "vfx-core",
 ]
@@ -5960,7 +6060,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

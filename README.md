@@ -161,6 +161,7 @@ flowchart TB
 | [`exr-gpu`](crates/exr-gpu) | Decoded layers into `wgpu` textures or storage buffers, with checked sizing and readback. |
 | [`exr-util`](crates/exr-util) | OpenEXRUtil: in-memory flat and deep images, whole-file image I/O and `CheckFile`, behind the whole-image CLI tools. |
 | [`exr-image`](crates/exr-image) | EXR decoding for the `image` crate through exr-core (`exr_image::register()`). |
+| [`exr-import`](crates/exr-import) | PNG, JPEG, TIFF, DPX, HDR, ... as scene-linear EXR-ready images (viewer, `convert`). |
 | [`exr-view`](crates/exr-view) | The GPU viewer library (winit, egui, wgpu) behind `exr-rs view`. |
 | [`openexr-py`](crates/openexr-py) | The `OpenEXR` Python module on PyO3 + numpy (built by maturin, outside the cargo workspace). |
 | `exr-rs` (root) | The one binary: the command-line tools and the viewer. |
@@ -303,7 +304,11 @@ flowchart LR
   resident on the GPU and be reduced there, within device limits, memory budgets and the
   supported source formats; exceptional f32 data falls back to CPU f64 tiles. Other images retain the bounded 512-pixel pyramid;
   files larger than RAM are read band by band, and matching file mip levels are reused.
-- **Sequences.** `name.####.exr` detection, playback with a playhead-ranked frame cache, scrubbing,
+- **Other formats.** Besides EXR the viewer and `exr-rs convert` read PNG, JPEG, TIFF, DPX, Cineon, Radiance HDR,
+  BMP, TGA, SGI, ICO, GIF, WebP, PNM/PFM, IFF, RLA and Softimage PIC through `vfx-io`, as scene-linear
+  associated-alpha frames (the colour rule is in the [viewer chapter](docs/book/src/user-guide/viewer.md)).
+  EXR keeps its own readers.
+- **Sequences.** `name.####.ext` detection (EXR and the formats above), playback with a playhead-ranked frame cache, scrubbing,
   reverse play, and reload when frames change on disk. The current frame stays visible until
   its replacement is ready to draw, so playback never flashes blank.
 - **Colour.** Built-in exposure, gamma, channel isolation and tone operators (Reinhard, AgX), or

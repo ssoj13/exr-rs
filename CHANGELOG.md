@@ -6,6 +6,15 @@ All notable changes to **exr-rs** are documented here. The format follows
 
 ## [Unreleased]
 
+### 2026-10-10
+
+- **Other image formats.** The viewer and `exr-rs convert` read every still format `vfx-io`
+  decodes except HEIC/HEIF and AVIF: PNG, JPEG, TIFF, DPX, Cineon, Radiance HDR, BMP, TGA, SGI,
+  ICO, GIF, WebP, PNM/PFM, IFF, RLA, Softimage PIC. New crate `exr-import` loads them as
+  scene-linear, associated-alpha frames (OIIO colour rule: reader tag, else sRGB for integers and
+  linear for floats; straight alpha premultiplied in linear light); EXR keeps the exr-core paths.
+  Sequences of these formats play; `exr-rs info` summarises them. The Open dialog filters come
+  from the one format registry.
 - **exr-view**: the Effects tab is ofx-host-egui's `EffectStack`; the effect's render-site picker is ofx-runtime's
   `SiteMenu` (GPU sites listed and refused with the reason: the viewer renders on the CPU site) and the status shows
   the delivery site with the compute backend the plug-in reported ("CPU images, WGPU compute") after each render.

@@ -1,0 +1,31 @@
+[package]
+authors.workspace = true
+name = "exr-import"
+description = "Reads every non-EXR still format vfx-io decodes into an exr-core image: scene-linear, associated alpha"
+keywords = ["exr", "image", "dpx", "png", "vfx"]
+categories = ["multimedia::images"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/exr_import.rs"
+
+[dependencies]
+exr-core = { path = "../exr-core" }
+imath-rs = { path = "../imath-rs" }
+thiserror = "2"
+# Non-EXR decoders only: EXR stays on exr-core (tiles, levels, deep, parity), so `exr`/`htj2k`
+# (a second exr-core in the binary), `ocio` (exr-view has vfx-ocio), `heif`/`avif` (owner: not
+# now) and the opt-in jp2/jph/psd/dds/ktx/video are off. Everything else vfx-io reads is on.
+vfx-io = { git = "ssh://git@github.com/ssoj13/oiio-rs.git", branch = "main", default-features = false, features = [
+    "png", "jpeg", "tiff", "dpx", "hdr", "bmp", "cineon", "targa", "sgi", "ico", "gif",
+    "softimage", "pnm", "iff", "rla", "webp", "rayon",
+] }
+# The curves: sRGB, Rec.709 and pure-gamma decodes come from here, never re-derived.
+vfx-transfer = { git = "ssh://git@github.com/ssoj13/oiio-rs.git", branch = "main" }
+
+[dev-dependencies]
+tempfile = "3"

@@ -122,6 +122,24 @@ a capture of the UI. Its neutral display-light EXR uses a 203-nit reference whit
 See [CLI examples](cli.md). Use `convert` or the
 [library API](library.md) for source-image read/write workflows.
 
+## Other image formats
+
+Besides EXR the viewer opens PNG, JPEG, TIFF, DPX, Cineon, Radiance HDR, BMP, TGA, SGI, ICO, GIF,
+WebP, PNM/PFM, IFF, RLA and Softimage PIC (HEIC/HEIF and AVIF are not built in), as sequences
+too (`shot.####.png`). EXR keeps its own readers; every other format is decoded by `vfx-io`
+(`exr-import`) into the same frame, so exposure, OCIO, scopes, Pixel Info, effects and Save view
+work unchanged. The first frame of multi-image files (GIF, ICO, TIFF pages) is shown, and the
+file is always held in RAM (no out-of-core pyramid).
+
+Colour follows OpenImageIO: the format reader's colour-space tag wins (PNG honours its `sRGB`/`gAMA`
+chunks, Radiance HDR is linear, DPX maps its transfer code, PNM is Rec.709 as in OIIO), and an
+untagged file is sRGB when it holds 8/16-bit integers and linear when it holds floats. Cineon and
+DPX log (`KodakLog`) use the Kodak printing-density curve (white 685, black 95, step 0.002,
+gamma 0.6). A tag with no curve here (`CMYK`, `lin_ap1_scene`, ...) is an error, not a guess. The
+Metadata panel starts with the source format, colour space, depth and alpha handling. Straight
+alpha (PNG, TGA, WebP, unassociated TIFF) is premultiplied in linear light; other formats are
+taken as associated, as OIIO does.
+
 ## OpenFX and current limits
 
 The Effects dock hosts the built-in effects and installed OpenFX plug-ins (from

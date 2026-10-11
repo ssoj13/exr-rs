@@ -7,7 +7,7 @@ help; bare `view` starts the [viewer](viewer.md).
 | Command | Alias | Purpose |
 |---|---|---|
 | `info` | `i`, `header` | Print every header attribute for every part |
-| `convert` | `x` | Re-encode a flat single-part image |
+| `convert` | `x` | Re-encode a flat single-part image, or read a PNG/DPX/HDR/... still into EXR |
 | `cryptomatte` | `c` | Inspect, extract, encode or inject Cryptomatte |
 | `view` | `v` | Start the viewer, optionally with an image or sequence |
 | `check` | `k` | Check file structure and pixel decoding |
@@ -33,9 +33,13 @@ also work as hidden aliases. A `-v` or `-vv` raises logging to debug or trace;
 exr-rs info beauty.exr
 exr-rs check beauty.exr
 exr-rs convert beauty.exr beauty-zip.exr --compress zip
+exr-rs convert plate.0001.dpx plate.0001.exr
 ```
 
-`info` reads headers for scanline, tiled, deep and multipart files. `convert`
+`info` reads headers for scanline, tiled, deep and multipart files (a non-EXR still gets a
+short format/size/channels summary). `convert` also reads every non-EXR still the viewer opens
+(PNG, JPEG, TIFF, DPX, HDR, TGA, ...; the [colour rule](viewer.md#other-image-formats)) and writes
+it as a scanline EXR of scene-linear, associated-alpha channels. `convert`
 re-encodes a flat single-part image and keeps its storage shape: scanline or tiled
 (tile size, level mode, rounding), every MIP/RIP level, and subsampled channels at
 their native sampling. Without `--compress`, it keeps the input codec. Deep and

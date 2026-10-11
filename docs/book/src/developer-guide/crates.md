@@ -12,6 +12,7 @@ Workspace members (plus the root `exr-rs` CLI package):
 | `exr-view` | `exr-core` + winit / egui 0.36 / egui_dock 0.21 / wgpu 30 | the GPU viewer behind `exr-rs view`: resident and tiled display, OCIO, HDR output, scopes, layer selection, Cryptomatte overlay, sequence playback, OpenFX effects. |
 | `exr-util` | OpenEXRUtil | in-memory flat and deep images, whole-file image I/O and `CheckFile`, used by the whole-image CLI tools. |
 | `exr-image` | `exr-core` + the `image` crate | EXR decoding for `image` through exr-core (`register()` installs the hooks). |
+| `exr-import` | `exr-core`, `vfx-io` | Non-EXR stills (PNG, DPX, HDR, ...) as scene-linear associated-alpha `exr_core::api::Image`; the format registry of the Open dialog; used by the viewer and `convert`. |
 | `exr-test-data` | test infrastructure | resolves opt-in private fixtures via `EXR_TEST_DATA`. |
 
 `xtask` is also a workspace member. `cargo xtask <command>` with `setup`,

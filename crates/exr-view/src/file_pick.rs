@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use egui_file_dialog::{DialogState, FileDialog, Filter, OpeningMode, SaveExtension};
 
 /// Name of the image filter.
-const FILTER: &str = "OpenEXR (*.exr, *.sxr)";
+const FILTER: &str = "Images (every format the viewer opens)";
 /// Name of the OCIO config filter.
 const OCIO: &str = "OCIO config (*.ocio, *.ocioz)";
 /// Name of the PNG save extension.
@@ -46,14 +46,14 @@ pub struct FilePick {
 }
 
 impl FilePick {
-    /// A closed picker listing EXR files; `seq` is the saved "Auto-detect sequences" option.
+    /// A closed picker listing the openable images; `seq` is the saved "Auto-detect sequences" option.
     pub fn new(seq: bool) -> Self {
         let dialog = FileDialog::new()
             .title("Open")
             .as_modal(true)
             .canonicalize_paths(false)
             .load_via_thread(true)
-            .add_file_filter(FILTER, Filter::new(|p: &Path| crate::app::has_exr_extension(p)))
+            .add_file_filter(FILTER, Filter::new(|p: &Path| exr_import::is_image(p)))
             .add_file_filter(OCIO, Filter::new(|p: &Path| {
                 p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("ocio") || e.eq_ignore_ascii_case("ocioz"))
             }))

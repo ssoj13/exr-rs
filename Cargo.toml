@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/imath-rs", "crates/deflate-rs", "crates/exr-core", "crates/exr-image", "crates/exr-util", "crates/cryptomatte", "crates/exr-gpu", "crates/exr-view", "crates/exr-test-data", "xtask"]
+members = ["crates/imath-rs", "crates/deflate-rs", "crates/exr-core", "crates/exr-image", "crates/exr-import", "crates/exr-util", "crates/cryptomatte", "crates/exr-gpu", "crates/exr-view", "crates/exr-test-data", "xtask"]
 # `openexr-py` is a PyO3 cdylib built ONLY by maturin (`bootstrap.py b p`), NOT by
 # cargo: its `extension-module` feature does not link libpython, which would break
 # `cargo test --workspace` (a test binary needs libpython). It still path-depends on
@@ -52,6 +52,8 @@ exr-core = { path = "crates/exr-core" }
 # Cryptomatte inspect / extract / encode subcommand.
 cryptomatte = { path = "crates/cryptomatte" }
 imath-rs = { path = "crates/imath-rs" }
+# Non-EXR stills for `convert` / `info` (the viewer loads them through the same crate).
+exr-import = { path = "crates/exr-import" }
 # OpenEXRUtil port: `check` (ImfCheckFile) and the whole-image tools.
 exr-util = { path = "crates/exr-util" }
 # Logging facade + backend: the CLI is a BINARY, so it initialises env_logger
@@ -69,6 +71,8 @@ exr-view = { path = "crates/exr-view", optional = true }
 [dev-dependencies]
 # The private test image set, for the tool parity tests (`tests/parity_tool_*.rs`).
 exr-test-data = { workspace = true }
+# Writes the PNG fixtures of the convert/info tests, independent of the importer.
+png = "0.18"
 
 [features]
 # `viewer` wires the `exr-rs view <file>` (alias `v`) GPU viewer (egui + wgpu), `ofx` its OpenFX

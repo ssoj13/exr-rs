@@ -9,7 +9,8 @@
 //! (`src/iconvert/iconvert.cpp`), where reading level 0 alone would silently drop
 //! the rest. The facade rejects deep and multipart inputs with a clear
 //! [`exr_core::ExrError`]; we surface that as a non-zero exit rather than
-//! half-converting.
+//! half-converting. A non-EXR input (`exr-import`: PNG, JPEG, TIFF, DPX, HDR, ...) is decoded to
+//! scene-linear, associated-alpha channels and written as a plain scanline EXR.
 
 use std::path::PathBuf;
 
@@ -17,19 +18,20 @@ use clap::builder::{PossibleValuesParser, TypedValueParser};
 use exr_core::Image;
 use exr_core::attr::Compression;
 
-use super::{CliResult, examples};
+use super::{CliError, CliResult, examples};
 
 pub const EXAMPLES: &str = examples!(
     "exr-rs convert in.exr out.exr              # keep the source compression",
     "exr-rs convert in.exr out.exr -c zip       # lossless, zlib",
     "exr-rs convert in.exr out.exr -c dwaa      # lossy, small",
     "exr-rs convert in.exr out.exr -c htj2k256  # HTJ2K (OpenEXR 3.4)",
+    "exr-rs convert plate.dpx plate.exr         # any other still: scene-linear, associated alpha",
 );
 
 /// `convert` arguments.
 #[derive(clap::Args)]
 pub struct Args {
-    /// Input EXR (single-part, not deep).
+    /// Input: an EXR (single-part, not deep), or a PNG/JPEG/TIFF/DPX/HDR/... still (read as scene-linear).
     input: PathBuf,
     /// Output EXR (same storage as the input: tiles, levels and sampling are kept).
     output: PathBuf,
@@ -49,7 +51,13 @@ pub fn codec_parser() -> impl TypedValueParser<Value = Compression> {
 /// Run the `convert` subcommand. Deep / multipart inputs come back from the facade as a clear
 /// `ExrError` pointing at the low-level API: a non-zero exit, never a half conversion.
 pub fn run(args: Args) -> CliResult {
-    let image = Image::read_all(&args.input)?;
+    // Any other still comes in as scene-linear floats with associated alpha (`exr-import`, the
+    // viewer's loader), then leaves as a scanline EXR.
+    let image = if exr_import::is_foreign(&args.input) {
+        exr_import::load(&args.input).map_err(|e| CliError::Other(e.to_string()))?.image
+    } else {
+        Image::read_all(&args.input)?
+    };
     let compression = args.compress.unwrap_or(image.compression);
     image.write(&args.output, compression)?;
     outln!(
@@ -124,6 +132,35 @@ mod tests {
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 
+    /// A PNG and a Radiance HDR (both written here by hand / by the `png` crate, not by the
+    /// importer) come out as scene-linear EXRs that exr-core reads back: sRGB 128 is 0.2158605
+    /// under half alpha 128/255 in linear light, and the HDR's 1.0 stays 1.0.
+    #[test]
+    fn convert_reads_a_png_and_an_hdr_into_exr() {
+        let tmp = std::env::temp_dir().join(format!("exr-rs-convert-foreign-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let png = tmp.join("a.png");
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(&png).unwrap()), 1, 1);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(&[128, 128, 128, 128]).unwrap();
+        let hdr = tmp.join("a.hdr");
+        let mut bytes = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 1\n".to_vec();
+        bytes.extend_from_slice(&[128, 128, 128, 129]); // 0.5 * 2^(129 - 128) = 1.0
+        std::fs::write(&hdr, bytes).unwrap();
+
+        let sample = |img: &Image, ch: &str| img.channel(ch).and_then(|c| c.sample_f32(0)).unwrap();
+        let (out_png, out_hdr) = (tmp.join("a.exr"), tmp.join("b.exr"));
+        run(Args { input: png, output: out_png.clone(), compress: None }).unwrap();
+        run(Args { input: hdr, output: out_hdr.clone(), compress: None }).unwrap();
+        let (p, h) = (Image::read_all(&out_png).unwrap(), Image::read_all(&out_hdr).unwrap());
+        let a = 128.0 / 255.0;
+        assert!((sample(&p, "R") - 0.215_860_5 * a).abs() < 2e-4, "{}", sample(&p, "R"));
+        assert!((sample(&p, "A") - a).abs() < 2e-4);
+        assert_eq!((sample(&h, "R"), sample(&h, "G"), sample(&h, "B")), (1.0, 1.0, 1.0));
+        assert!(h.channel("A").is_none());
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
     #[test]
     fn an_unknown_codec_is_rejected_with_the_list() {
         let err = codec("bogus").unwrap_err().to_string();

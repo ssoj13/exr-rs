@@ -17,6 +17,7 @@ use super::{CliError, CliResult, examples};
 pub const EXAMPLES: &str = examples!(
     "exr-rs info shot.exr              # file kind, then every attribute of every part",
     "exr-rs info a.exr b.exr c.exr     # several files, one after another",
+    "exr-rs info plate.dpx              # another format: a short summary (format, size, channels)",
     "exr-rs header shot.exr            # the same (alias; also `exrheader`)",
 );
 
@@ -35,8 +36,23 @@ pub fn run(args: Args) -> CliResult {
         if i > 0 {
             outln!();
         }
+        if exr_import::is_foreign(std::path::Path::new(path)) {
+            foreign(path)?;
+            continue;
+        }
         let mut stream = StdIfStream::open(path)?;
         dump(path, &mut stream)?;
+    }
+    Ok(())
+}
+
+/// A non-EXR still: format, size and channel count from its header, no pixels decoded. It has no
+/// OpenEXR header to dump, so this is a summary; `convert` brings it into EXR.
+fn foreign(path: &str) -> CliResult {
+    let rows = exr_import::probe(std::path::Path::new(path)).map_err(|e| CliError::Other(e.to_string()))?;
+    outln!("file: {path}");
+    for (k, v) in rows {
+        outln!("  {k}: {v}");
     }
     Ok(())
 }
@@ -143,4 +159,29 @@ fn print_header(header: &Header) {
 
 fn yes_no(b: bool) -> &'static str {
     if b { "yes" } else { "no" }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A non-EXR still gets a summary from its header; a file the decoder refuses is an error,
+    /// not a silent empty dump.
+    #[test]
+    fn a_foreign_still_is_summarised_and_garbage_is_an_error() {
+        let tmp = std::env::temp_dir().join(format!("exr-rs-info-foreign-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let png = tmp.join("a.png");
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(&png).unwrap()), 3, 2);
+        enc.set_color(png::ColorType::Rgb);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(&[0; 18]).unwrap();
+        foreign(png.to_str().unwrap()).unwrap();
+        let rows = exr_import::probe(&png).unwrap();
+        assert!(rows.contains(&("size".to_owned(), "3x2".to_owned())) && rows.contains(&("channels".to_owned(), "3".to_owned())), "{rows:?}");
+        let bad = tmp.join("b.png");
+        std::fs::write(&bad, b"nope").unwrap();
+        assert!(foreign(bad.to_str().unwrap()).is_err());
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
 }

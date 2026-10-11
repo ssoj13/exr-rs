@@ -218,6 +218,9 @@ impl DecodedFrame {
     /// decoded per tile band (`tiles::file::FileSource`). An unreadable header
     /// uses the same decode path as [`Self::load`], whose typed error the UI shows.
     pub fn open(path: &Path, budget: u64) -> Result<DecodedFrame, LoadError> {
+        if exr_import::is_foreign(path) {
+            return Self::import(path);
+        }
         match peek_header(path) {
             Some(header) if needs_file_backing(&header, budget) => Self::open_backed(path, &header),
             header => Self::decode(path, header.as_ref()),
@@ -259,7 +262,39 @@ impl DecodedFrame {
 
     /// Decode the whole file (every channel resident).
     pub fn load(path: &Path) -> Result<DecodedFrame, LoadError> {
+        if exr_import::is_foreign(path) {
+            return Self::import(path);
+        }
         Self::decode(path, peek_header(path).as_ref())
+    }
+
+    /// A non-EXR still (`exr-import`: PNG, DPX, HDR, ...), always resident. It arrives as
+    /// scene-linear associated-alpha channels, so everything downstream (exposure, OCIO, scopes,
+    /// readout, effects, Save view, sequences) sees a frame like any EXR's. The source colour
+    /// space, depth and alpha handling head the Metadata panel.
+    fn import(path: &Path) -> Result<DecodedFrame, LoadError> {
+        log::info!("load start {} (exr-import)", path.display());
+        let loaded = exr_import::load(path).map_err(|e| LoadError::Read(e.to_string()))?;
+        let image = loaded.image;
+        let (data_window, display_window) = (image.data_window, image.display_window);
+        let (width, height) = (image.width().max(0) as u32, image.height().max(0) as u32);
+        let channels: Vec<(String, ChannelData)> = image.into_channels().map_err(LoadError::from_exr)?.collect();
+        let layers = group_layers(channels.iter().map(|(n, c)| (n.as_str(), c.pixel_type())));
+        log::info!("load ok {}: {width}x{height} ({} layers, imported)", path.display(), layers.len());
+        Ok(DecodedFrame {
+            path: path.to_path_buf(),
+            width,
+            height,
+            data_window,
+            display_window,
+            channel_names: channels.iter().map(|(n, _)| n.clone()).collect(),
+            channels,
+            layers,
+            metadata: loaded.meta.into_iter().map(|(key, value)| MetaEntry { key, value }).collect(),
+            id: FRAME_ID.fetch_add(1, Ordering::Relaxed),
+            file_types: None,
+            pixel_aspect: 1.0,
+        })
     }
 
     /// A subsampled file: every channel read at its own sampling
@@ -1996,8 +2031,38 @@ pub(crate) mod tests_support {
 pub(crate) mod consumer_tests;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// A 1x1 8-bit RGBA PNG written by the `png` crate, independent of the importer.
+    pub(crate) fn write_png(path: &Path, px: [u8; 4]) {
+        let file = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
+        let mut enc = png::Encoder::new(file, 1, 1);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(&px).unwrap();
+    }
+
+    /// A PNG becomes a resident linear frame through `exr-import` (the only door for non-EXR
+    /// files): sRGB 128 decodes to 0.2158605, straight alpha 128 premultiplies in linear light,
+    /// and the Metadata panel says where it came from.
+    #[test]
+    fn a_png_enters_through_exr_import() {
+        let dir = std::env::temp_dir().join(format!("exr-view-png-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.png");
+        write_png(&path, [128, 128, 128, 128]);
+        let frame = DecodedFrame::open(&path, 0).unwrap();
+        let sample = |n: &str| frame.channels.iter().find(|(c, _)| c == n).and_then(|(_, d)| d.sample_f32(0)).unwrap();
+        let alpha = 128.0 / 255.0;
+        assert!((sample("R") - 0.215_860_5 * alpha).abs() < 2e-4, "{}", sample("R"));
+        assert!((sample("A") - alpha).abs() < 2e-4);
+        assert_eq!((frame.width, frame.height, frame.file_types.is_none()), (1, 1, true));
+        let meta = |k: &str| frame.metadata.iter().find(|m| m.key == k).map(|m| m.value.as_str());
+        assert_eq!(meta("Source format"), Some("Png"), "came through exr-import");
+        assert_eq!(meta("Source alpha"), Some("straight, premultiplied in linear light"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn populated_source_reuses_cpu_allocation_and_keeps_export_snapshot() {
