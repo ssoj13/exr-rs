@@ -32,8 +32,8 @@
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use exr_core::ExrError;
 use exr_core::api::ChannelData;
@@ -43,6 +43,7 @@ use exr_gpu::UploadLayout;
 use imath_rs::Box2i;
 
 use crate::tiles::file::{FileSource, RowCache};
+use crate::tiles::precision::Span;
 use crate::tiles::render::{Look, TileCallback, TileGpu};
 use crate::tiles::source::{FrameSource, TileSource};
 use crate::tiles::view::{Placement, SourceDesc, TileState};
@@ -173,6 +174,11 @@ pub struct DecodedFrame {
     /// large to hold, so `channels` is empty and tiles/readout decode from the
     /// file on demand. The types of `channel_names`, in the same order.
     pub file_types: Option<Vec<PixelType>>,
+    /// Each channel's [`Span`] of display values (`channels` order), filled
+    /// once — by [`Self::open`] / [`Self::load`] on the loading thread — so the
+    /// resident display reads a layer's precision profile instead of rescanning
+    /// the materialized pixels on the UI thread at every sequence step.
+    pub(crate) spans: OnceLock<Vec<Option<Span>>>,
 }
 
 /// What the viewer shows of a frame: one layer, or one channel alone in grey.
@@ -219,12 +225,18 @@ impl DecodedFrame {
     /// uses the same decode path as [`Self::load`], whose typed error the UI shows.
     pub fn open(path: &Path, budget: u64) -> Result<DecodedFrame, LoadError> {
         if exr_import::is_foreign(path) {
-            return Self::import(path);
+            return Self::import(path).map(Self::warmed);
         }
         match peek_header(path) {
             Some(header) if needs_file_backing(&header, budget) => Self::open_backed(path, &header),
-            header => Self::decode(path, header.as_ref()),
+            header => Self::decode(path, header.as_ref()).map(Self::warmed),
         }
+    }
+
+    /// `frame` with its channel spans computed here, on the loading thread.
+    fn warmed(frame: Self) -> Self {
+        frame.spans();
+        frame
     }
 
     /// A file-backed frame from an already-read header.
@@ -256,6 +268,7 @@ impl DecodedFrame {
             metadata,
             id: FRAME_ID.fetch_add(1, Ordering::Relaxed),
             file_types: Some(types),
+            spans: OnceLock::new(),
             pixel_aspect: validated_aspect(header.pixel_aspect_ratio().map_err(LoadError::from_exr)?)?,
         })
     }
@@ -263,9 +276,9 @@ impl DecodedFrame {
     /// Decode the whole file (every channel resident).
     pub fn load(path: &Path) -> Result<DecodedFrame, LoadError> {
         if exr_import::is_foreign(path) {
-            return Self::import(path);
+            return Self::import(path).map(Self::warmed);
         }
-        Self::decode(path, peek_header(path).as_ref())
+        Self::decode(path, peek_header(path).as_ref()).map(Self::warmed)
     }
 
     /// A non-EXR still (`exr-import`: PNG, DPX, HDR, ...), always resident. It arrives as
@@ -293,6 +306,7 @@ impl DecodedFrame {
             metadata: loaded.meta.into_iter().map(|(key, value)| MetaEntry { key, value }).collect(),
             id: FRAME_ID.fetch_add(1, Ordering::Relaxed),
             file_types: None,
+            spans: OnceLock::new(),
             pixel_aspect: 1.0,
         })
     }
@@ -352,6 +366,7 @@ impl DecodedFrame {
             metadata: metadata_of(header),
             id: FRAME_ID.fetch_add(1, Ordering::Relaxed),
             file_types: None,
+            spans: OnceLock::new(),
             pixel_aspect: validated_aspect(header.pixel_aspect_ratio().map_err(LoadError::from_exr)?)?,
         })
     }
@@ -438,6 +453,7 @@ impl DecodedFrame {
             metadata,
             id,
             file_types: None,
+            spans: OnceLock::new(),
             pixel_aspect,
         })
     }
@@ -451,6 +467,28 @@ impl DecodedFrame {
             .iter()
             .map(|(_, c)| c.len() * exr_core::misc::pixel_type_size(c.pixel_type()).unwrap_or(0))
             .sum()
+    }
+
+    /// Each channel's span of display values over the data window (computed
+    /// on first use; the loaders call it so that is not the UI thread).
+    pub(crate) fn spans(&self) -> &[Option<Span>] {
+        self.spans.get_or_init(|| {
+            let _lap = crate::timing::Lap::start("frame spans (loader)");
+            let n = self.width as usize * self.height as usize;
+            self.channels.iter().map(|(_, c)| channel_span(c, n)).collect()
+        })
+    }
+
+    /// The resident display's precision profile of `view` as materialized
+    /// (no overlay, no stage): what `tiles::precision::profile` of the
+    /// materialized buffer gives, assembled from the channel spans.
+    pub(crate) fn profile(&self, view: &Selection) -> Option<[i32; 4]> {
+        let mapping = Mapping::of(&names_of(&self.channels), self.resolve(view).as_deref());
+        let spans = self.spans();
+        crate::tiles::precision::finish(mapping.slots.map(|slot| match slot {
+            SlotSrc::Chan(i) => spans.get(i).copied().flatten(),
+            SlotSrc::Const(v) => Span::of([v]),
+        }))
     }
 
     /// File name for titles/status.
@@ -1390,12 +1428,17 @@ impl ImageBackend {
             let direct = gpu
                 .direct
                 .get_or_insert_with(|| crate::tiles::direct::DirectGpu::new(device));
+            // The shown pixels are the materialized layer itself (no stage
+            // output, no overlay): its profile comes from the channel spans.
+            let known = (desc.stage == 0 && self.coverage_overlay.is_none())
+                .then(|| self.frame.profile(&self.view));
             match direct.prepare(
                 device,
                 queue,
                 &gpu.pipe.page_bgl,
                 &desc,
                 &rgba,
+                known,
                 (self.width, self.height),
                 place,
                 allowance,
@@ -1685,6 +1728,21 @@ fn sample(ch: &ChannelData, i: usize) -> Result<f32, ExrError> {
         ChannelData::Uint(_) => v / u32::MAX as f32,
         ChannelData::Half(_) | ChannelData::Float(_) => v,
     })
+}
+
+/// The display value of a `Uint` sample, as [`sample`] gives it.
+fn uint_display(u: u32) -> f32 {
+    exr_core::convert::uint_to_float(u) / u32::MAX as f32
+}
+
+/// The [`Span`] of the first `n` display values of `ch` (what a materialized
+/// buffer holds in a slot fed by `ch`).
+fn channel_span(ch: &ChannelData, n: usize) -> Option<Span> {
+    match ch {
+        ChannelData::Half(v) => Span::of_halves(v.iter().take(n).map(|h| h.bits())),
+        ChannelData::Float(v) => Span::of(v.iter().take(n).copied()),
+        ChannelData::Uint(v) => Span::of(v.iter().take(n).map(|&u| uint_display(u))),
+    }
 }
 
 /// Where one RGBA slot of a materialized buffer comes from: a channel (an index
@@ -2024,20 +2082,27 @@ pub(crate) mod tests_support {
             .enumerate()
             .map(|(i, n)| ((*n).to_owned(), ChannelData::Float(vec![i as f32])))
             .collect();
+        frame_of(1, 1, channels)
+    }
+
+    /// A resident `w x h` frame of `channels` (each `w * h` samples), grouped
+    /// into layers the way a loaded file is.
+    pub(crate) fn frame_of(w: u32, h: u32, channels: Vec<(String, ChannelData)>) -> DecodedFrame {
         let layers = group_layers(channels.iter().map(|(n, c)| (n.as_str(), c.pixel_type())));
-        let win = Box2i::from_min_max(imath_rs::V2i::new(0, 0), imath_rs::V2i::new(0, 0));
+        let win = Box2i::from_min_max(imath_rs::V2i::new(0, 0), imath_rs::V2i::new(w as i32 - 1, h as i32 - 1));
         DecodedFrame {
             path: PathBuf::new(),
-            width: 1,
-            height: 1,
+            width: w,
+            height: h,
             data_window: win,
             display_window: win,
-            channel_names: names.iter().map(|n| (*n).to_owned()).collect(),
+            channel_names: channels.iter().map(|(n, _)| n.clone()).collect(),
             channels,
             layers,
             metadata: vec![],
             id: 0,
             file_types: None,
+            spans: OnceLock::new(),
             pixel_aspect: 1.0,
         }
     }
@@ -2050,6 +2115,65 @@ pub(crate) mod consumer_tests;
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// The profile assembled from the channel spans equals a rescan of the
+    /// materialized buffer, for every channel type, every mapping kind
+    /// (RGBA, constant alpha, luminance, solo channel, a layer, missing
+    /// colour) and values inside and outside the checked domain.
+    #[test]
+    fn stored_profile_equals_the_rescanned_one() {
+        use crate::tiles::precision::profile;
+        let half = |bits: &[u16]| ChannelData::Half(bits.iter().map(|&b| imath_rs::Half::from_bits(b)).collect());
+        let float = |v: &[f32]| ChannelData::Float(v.to_vec());
+        let uint = |v: &[u32]| ChannelData::Uint(v.to_vec());
+        // 2x2 frames; each value set is one channel's four samples.
+        let halves: [&[u16]; 4] = [
+            &[0x3c00, 0x0001, 0x7bff, 0x8000],
+            &[0x3555, 0x0000, 0xc400, 0x0400],
+            &[0x3c00, 0x7c00, 0x3800, 0x0000],
+            &[0x7e00, 0x3c00, 0x3c00, 0x3c00],
+        ];
+        let floats: [&[f32]; 5] = [
+            &[0.5, 0.25, -2.0, 0.0],
+            &[1e6, 0.5, 0.5, 0.5],
+            &[1e-10, 1e4, 0.0, 1.0],
+            &[f32::from_bits(1), 1.0, 1.0, 1.0],
+            &[f32::NAN, f32::INFINITY, 1.0, 0.0],
+        ];
+        let uints: [&[u32]; 3] = [&[0, 1, u32::MAX, 12345], &[0, 0, 0, 0], &[7, 7, 1 << 20, 3]];
+        let mut kinds: Vec<ChannelData> = Vec::new();
+        kinds.extend(halves.iter().map(|b| half(b)));
+        kinds.extend(floats.iter().map(|v| float(v)));
+        kinds.extend(uints.iter().map(|v| uint(v)));
+        let views = [
+            Selection::default(),
+            Selection::channel("", "G"),
+            Selection::layer("depth"),
+            Selection::channel("depth", "depth.Z"),
+        ];
+        let (mut some, mut none) = (0, 0);
+        for (k, (a, b)) in kinds.iter().zip(kinds.iter().cycle().skip(3)).enumerate() {
+            let c = &kinds[(k * 5 + 1) % kinds.len()];
+            let sets: [Vec<(String, ChannelData)>; 4] = [
+                vec![("A".into(), c.clone()), ("B".into(), a.clone()), ("G".into(), b.clone()), ("R".into(), c.clone())],
+                vec![("B".into(), a.clone()), ("G".into(), b.clone()), ("R".into(), c.clone())],
+                vec![("R".into(), a.clone()), ("depth.Z".into(), b.clone())],
+                vec![("Y".into(), a.clone()), ("A".into(), b.clone())],
+            ];
+            for channels in sets {
+                let frame = Arc::new(tests_support::frame_of(2, 2, channels));
+                for view in &views {
+                    let mut img = ImageBackend::from_frame(Arc::clone(&frame));
+                    img.set_view(view);
+                    img.prepare_cpu().unwrap();
+                    let want = profile(&img.pixels);
+                    assert_eq!(frame.profile(view), want, "case {k}, view {view:?}");
+                    if want.is_some() { some += 1 } else { none += 1 }
+                }
+            }
+        }
+        assert!(some > 20 && none > 20, "both kernels exercised: {some} exact, {none} wide");
+    }
 
     /// A 1x1 8-bit RGBA PNG written by the `png` crate, independent of the importer.
     pub(crate) fn write_png(path: &Path, px: [u8; 4]) {
@@ -2220,6 +2344,7 @@ pub(crate) mod tests {
                 metadata: vec![],
                 id: 0,
                 file_types: None,
+                spans: OnceLock::new(),
             pixel_aspect: 1.0,
             },
             w,
@@ -2253,6 +2378,7 @@ pub(crate) mod tests {
             metadata: vec![],
             id: 0,
             file_types: None,
+            spans: OnceLock::new(),
             pixel_aspect: 1.0,
         });
         let mut img = ImageBackend::from_frame(frame);
@@ -2321,6 +2447,7 @@ pub(crate) mod tests {
                 metadata: vec![],
                 id: 0,
                 file_types: None,
+                spans: OnceLock::new(),
             pixel_aspect: 1.0,
             };
             let group = frame.resolve_layer(layer);
@@ -2357,6 +2484,7 @@ pub(crate) mod tests {
             metadata: vec![],
             id: 0,
             file_types: None,
+            spans: OnceLock::new(),
             pixel_aspect: 1.0,
         });
         let mut img = ImageBackend::from_frame(frame);
@@ -2424,6 +2552,7 @@ pub(crate) mod tests {
             metadata: vec![],
             id: 0,
             file_types: None,
+            spans: OnceLock::new(),
             pixel_aspect: 1.0,
         }));
         assert_eq!(img.pixel_at(2, 0), None);
@@ -2447,6 +2576,7 @@ pub(crate) mod tests {
             metadata: vec![],
             id: 0,
             file_types: None,
+            spans: OnceLock::new(),
             pixel_aspect: 1.0,
         };
         let b = |x0, y0, x1, y1| {
@@ -2488,6 +2618,7 @@ pub(crate) mod tests {
                 metadata: vec![],
                 id,
                 file_types: None,
+                spans: OnceLock::new(),
             pixel_aspect: 1.0,
             })
         };
@@ -2534,6 +2665,7 @@ pub(crate) mod tests {
             metadata: vec![],
             id: f.id,
             file_types: f.file_types.clone(),
+            spans: OnceLock::new(),
             pixel_aspect: f.pixel_aspect,
         }
     }

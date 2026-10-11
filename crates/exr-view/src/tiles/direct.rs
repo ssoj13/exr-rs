@@ -116,8 +116,12 @@ pub struct DirectGpu {
     pub desc: Option<SourceDesc>,
     profile_desc: Option<SourceDesc>,
     profile: Option<[i32; 4]>,
+    /// Profiles resolved (one per new source).
     #[cfg(test)]
     pub profiles: usize,
+    /// Of those, CPU rescans of the pixels (no profile known from the frame).
+    #[cfg(test)]
+    pub scans: usize,
     extent: (u32, u32),
     level: u32,
     place: Option<Placement>,
@@ -138,6 +142,8 @@ impl DirectGpu {
             profile: None,
             #[cfg(test)]
             profiles: 0,
+            #[cfg(test)]
+            scans: 0,
             extent: (0, 0),
             level: 0,
             place: None,
@@ -184,6 +190,8 @@ impl DirectGpu {
     }
 
     /// Prepare a drawable generation without dropping the old reduced image.
+    /// `known` is the source's precision profile when the caller has it (a
+    /// resident frame's channel spans); `None` rescans `rgba` once per source.
     /// `allowance` excludes canvas, scopes and the still-held tile atlas.
     /// The peak includes old allocations until their replacements are ready.
     #[allow(clippy::too_many_arguments)]
@@ -194,6 +202,7 @@ impl DirectGpu {
         page_bgl: &wgpu::BindGroupLayout,
         desc: &SourceDesc,
         rgba: &[f32],
+        known: Option<Option<[i32; 4]>>,
         extent: (u32, u32),
         place: Placement,
         allowance: u64,
@@ -207,10 +216,18 @@ impl DirectGpu {
             return Err("direct source length differs from its checked layout".into());
         }
         if self.profile_desc.as_ref() != Some(desc) {
-            let mut lap = crate::timing::Lap::start("direct profile");
-            lap.bytes(input.cpu_size as u64);
-            self.profile = super::precision::profile(rgba);
-            drop(lap);
+            self.profile = match known {
+                Some(profile) => profile,
+                None => {
+                    let mut lap = crate::timing::Lap::start("direct profile");
+                    lap.bytes(input.cpu_size as u64);
+                    #[cfg(test)]
+                    {
+                        self.scans += 1;
+                    }
+                    super::precision::profile(rgba)
+                }
+            };
             self.profile_desc = Some(desc.clone());
             #[cfg(test)]
             {

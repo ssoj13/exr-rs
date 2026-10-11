@@ -46,6 +46,7 @@ fn precision_half_domain_cancellation_and_rounding_edges() {
                     &pipe.page_bgl,
                     &desc,
                     &rgba,
+                    None,
                     (2048, 1),
                     place(512, 1, zoom),
                     64 << 20
@@ -228,7 +229,7 @@ fn wide_kernel_matches_the_f64_reference_on_render_like_floats() {
         assert_eq!(k, case as u32 + 1);
         let desc = SourceDesc { frame: case as u64 + 1, view: Default::default(), pixels_gen: 0, stage: 0 };
         let (lw, lh) = grid.level_size(k);
-        assert!(direct.prepare(&d, &q, &pipe.page_bgl, &desc, &rgba, (w, h), place(lw, lh, zoom), 256 << 20).unwrap());
+        assert!(direct.prepare(&d, &q, &pipe.page_bgl, &desc, &rgba, None, (w, h), place(lw, lh, zoom), 256 << 20).unwrap());
         let reference = level_from_rgba(&rgba, &grid, k).unwrap();
         let bytes = read_texture(&d, &q, &direct.pages()[0].tex, lw, lh, 8);
         let mut mismatches = 0;
@@ -711,6 +712,11 @@ fn resident_present_bypasses_workers_and_reuses_upload() {
     let gpu = renderer.callback_resources.get::<TileGpu>().unwrap();
     assert_eq!(gpu.atlas.bytes().0, 0);
     assert_eq!(gpu.direct.as_ref().unwrap().uploads, 1);
+    assert_eq!(
+        (gpu.direct.as_ref().unwrap().profiles, gpu.direct.as_ref().unwrap().scans),
+        (1, 0),
+        "a resident frame's profile comes from its channel spans, not a pixel rescan"
+    );
     img.present(
         &d,
         &q,
@@ -851,6 +857,7 @@ fn direct_reduction_matches_clipped_f64_half_reference() {
                     &gpu.pipe.page_bgl,
                     &desc,
                     &rgba,
+                    None,
                     (w, h),
                     place(w, h, zoom),
                     128 << 20

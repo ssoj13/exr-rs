@@ -71,6 +71,9 @@ fn resident_frame_switch_cost() {
         .iter()
         .map(|p| Arc::new(DecodedFrame::open(p, u64::MAX).expect("decodable frame")))
         .collect();
+    // Load-side work (on the frame cache's workers in the viewer).
+    let mut load: Vec<f64> = crate::timing::take().into_iter().map(|(_, ms, _)| ms).collect();
+    println!("load-side frame spans: median {:.2} ms over {} frames", median(&mut load), load.len());
     let first = &frames[0];
     let types: Vec<_> = first
         .channels
