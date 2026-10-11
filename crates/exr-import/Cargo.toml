@@ -26,6 +26,8 @@ vfx-io = { git = "ssh://git@github.com/ssoj13/oiio-rs.git", branch = "main", def
 ] }
 # The curves: sRGB, Rec.709 and pure-gamma decodes come from here, never re-derived.
 vfx-transfer = { git = "ssh://git@github.com/ssoj13/oiio-rs.git", branch = "main" }
+# Primaries and the RGB -> RGB matrix (with chromatic adaptation) for non-Rec.709 sources.
+vfx-primaries = { git = "ssh://git@github.com/ssoj13/oiio-rs.git", branch = "main" }
 
 [dev-dependencies]
 tempfile = "3"

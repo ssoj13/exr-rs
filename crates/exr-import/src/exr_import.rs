@@ -15,7 +15,11 @@
 //! * `KodakLog` (Cineon, DPX log) is a bare name in OIIO: the conversion belongs to the OCIO
 //!   config. Here it is the standard Kodak printing-density curve (white 685, black 95, density
 //!   step 0.002, gamma 0.6 of 1023 codes), see [`Tf::Cineon`].
-//! * A tag naming anything else (`CMYK`, `lin_ap1_scene`, ...) is a typed error, not a guess.
+//! * Any other tag goes through vfx-io's colour-space table (Color Interop Forum IDs and OIIO's
+//!   aliases, e.g. `g24_rec709_display`, `lin_ap1_scene`, `pq_rec2020_display`): the ID names a
+//!   transfer curve and primaries; primaries other than Rec.709 are rotated into linear Rec.709
+//!   (Bradford when the white points differ), negatives kept.
+//! * A tag the table does not know, or that is not RGB (`CMYK`, XYZ), is a typed error.
 //!
 //! # Alpha
 //!
@@ -133,6 +137,10 @@ pub enum Tf {
     /// Kodak Cineon printing-density log. `lin = (10^((code - 685) * 0.002 / 0.6) - k) / (1 - k)`
     /// with `k = 10^((95 - 685) * 0.002 / 0.6)`, `code = v * 1023`: 685 maps to 1, 95 to 0.
     Cineon,
+    /// SMPTE ST 2084, 100 cd/m2 = 1.0.
+    Pq,
+    /// BT.2100 HLG inverse OETF (scene light, no display OOTF).
+    Hlg,
 }
 
 impl Tf {
@@ -143,6 +151,8 @@ impl Tf {
             Tf::Srgb => vfx_transfer::srgb::eotf(v),
             Tf::Rec709 => vfx_transfer::rec709::eotf(v),
             Tf::Gamma(g) => vfx_transfer::gamma::gamma_eotf(v, g),
+            Tf::Pq => vfx_transfer::pq::eotf_normalized(v),
+            Tf::Hlg => vfx_transfer::hlg::eotf(v),
             Tf::Cineon => {
                 let k = 10f32.powf((95.0 - 685.0) * 0.002 / 0.6);
                 (10f32.powf((v * 1023.0 - 685.0) * 0.002 / 0.6) - k) / (1.0 - k)
@@ -151,27 +161,105 @@ impl Tf {
     }
 }
 
-/// The curve of `img` and the colour-space name shown for it (`unset` rule included).
-pub fn space_of(img: &ImageData) -> Result<(Tf, String), ImportError> {
+/// A source colour space reduced to what the loader applies: a decode curve and, for primaries
+/// other than Rec.709, the matrix into linear Rec.709.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Space {
+    pub tf: Tf,
+    /// Row-major linear-RGB matrix into Rec.709 primaries; `None` when the source already is.
+    pub to709: Option<[[f32; 3]; 3]>,
+    /// The tag as shown in the Metadata panel.
+    pub name: String,
+}
+
+/// Transfer token of a Color Interop Forum ID (`<transfer>_<primaries>_<scene|display>`).
+///
+/// A `*_display` ID is linearised by inverting the display encoding (its EOTF), like OIIO's
+/// colorconvert to `lin_rec709_scene` does for the encoding itself. The ACES output transform
+/// (tone map, gamut compression) a studio config puts between display and scene is NOT inverted:
+/// a still tagged this way is a plain encoded picture, not an ACES rendering.
+fn tf_of(tok: &str) -> Option<Tf> {
+    Some(match tok {
+        "lin" => Tf::Linear,
+        "srgb" | "srgbe" => Tf::Srgb,
+        "g18" => Tf::Gamma(1.8),
+        "g22" => Tf::Gamma(2.2),
+        "g24" => Tf::Gamma(2.4),
+        "g26" => Tf::Gamma(2.6),
+        "pq" => Tf::Pq,
+        "hlg" => Tf::Hlg,
+        _ => return None,
+    })
+}
+
+/// Primaries token of a Color Interop Forum ID. XYZ and `data`/`unknown` have no RGB primaries.
+fn primaries_of(tok: &str) -> Option<&'static vfx_primaries::Primaries> {
+    use vfx_primaries as p;
+    Some(match tok {
+        "rec709" => &p::REC709,
+        "p3d65" => &p::DISPLAY_P3,
+        "rec2020" => &p::REC2020,
+        "ap0" => &p::ACES_AP0,
+        "ap1" => &p::ACES_AP1,
+        "adobergb" => &p::ADOBE_RGB,
+        _ => return None,
+    })
+}
+
+/// Curve and primaries of a tag, resolved through vfx-io's colour-space table (the one owner of
+/// OIIO's names and aliases); `None` when the table does not know the name or it is not RGB.
+fn resolve(name: &str, gamma: Option<f32>) -> Option<(Tf, &'static vfx_primaries::Primaries)> {
+    let is = |canon: &str| colorspace::equivalent(name, canon);
+    let rec709 = &vfx_primaries::REC709;
+    // The names OIIO's readers set that carry no interop ID, or a gamma only `oiio:Gamma` knows.
+    if is(colorspace::SRGB_REC709_SCENE) {
+        return Some((Tf::Srgb, rec709));
+    } else if is(colorspace::LIN_REC709_SCENE) {
+        return Some((Tf::Linear, rec709));
+    } else if is(colorspace::REC709) {
+        return Some((Tf::Rec709, rec709));
+    } else if is(colorspace::KODAK_LOG) {
+        return Some((Tf::Cineon, rec709));
+    } else if let Some(g) = colorspace::rec709_gamma_of(name, gamma) {
+        return Some((Tf::Gamma(g), rec709));
+    }
+    // Everything else by its interop ID, which spells both halves out.
+    let id = colorspace::interop_id(name)?;
+    let mut parts = id.split('_');
+    Some((tf_of(parts.next()?)?, primaries_of(parts.next()?)?))
+}
+
+/// The [`Space`] of `img` (`unset` rule included).
+pub fn space_of(img: &ImageData) -> Result<Space, ImportError> {
     let integer = matches!(img.data, PixelData::U8(_) | PixelData::U16(_));
     let Some(name) = img.metadata.colorspace() else {
-        return Ok(if integer { (Tf::Srgb, "sRGB (untagged integer)".into()) } else { (Tf::Linear, "linear (untagged float)".into()) });
+        let (tf, name) = if integer { (Tf::Srgb, "sRGB (untagged integer)") } else { (Tf::Linear, "linear (untagged float)") };
+        return Ok(Space { tf, to709: None, name: name.into() });
     };
-    let is = |canon: &str| colorspace::equivalent(name, canon);
-    let tf = if is(colorspace::SRGB_REC709_SCENE) {
-        Tf::Srgb
-    } else if is(colorspace::LIN_REC709_SCENE) {
-        Tf::Linear
-    } else if is(colorspace::REC709) {
-        Tf::Rec709
-    } else if is(colorspace::KODAK_LOG) {
-        Tf::Cineon
-    } else if let Some(g) = colorspace::rec709_gamma_of(name, img.metadata.gamma()) {
-        Tf::Gamma(g)
-    } else {
-        return Err(ImportError::ColorSpace(name.to_owned()));
-    };
-    Ok((tf, name.to_owned()))
+    let (tf, prim) = resolve(name, img.metadata.gamma()).ok_or_else(|| ImportError::ColorSpace(name.to_owned()))?;
+    // Bradford-adapted when the white points differ (AP0/AP1 are D60); out-of-gamut results stay
+    // negative, the scene-linear canvas keeps them.
+    let to709 = (*prim != vfx_primaries::REC709).then(|| vfx_primaries::rgb_to_rgb_matrix(prim, &vfx_primaries::REC709).m);
+    Ok(Space { tf, to709, name: name.to_owned() })
+}
+
+/// Rotate the linear `R G B` planes by `m` (associated alpha commutes with a linear map).
+fn rotate(planes: &mut [Vec<f32>], names: &[String], m: &[[f32; 3]; 3]) {
+    let at = |n: &str| names.iter().position(|s| s == n);
+    let (Some(r), Some(g), Some(b)) = (at("R"), at("G"), at("B")) else { return };
+    // Three disjoint mutable planes out of the slice, in R G B order.
+    let mut rgb: [Option<&mut Vec<f32>>; 3] = [None, None, None];
+    for (i, plane) in planes.iter_mut().enumerate() {
+        if let Some(k) = [r, g, b].iter().position(|&c| c == i) {
+            rgb[k] = Some(plane);
+        }
+    }
+    let [Some(pr), Some(pg), Some(pb)] = rgb else { return };
+    for ((r, g), b) in pr.iter_mut().zip(pg.iter_mut()).zip(pb.iter_mut()) {
+        let v = [*r, *g, *b];
+        let out = m.map(|row| row[0] * v[0] + row[1] * v[1] + row[2] * v[2]);
+        (*r, *g, *b) = (out[0], out[1], out[2]);
+    }
 }
 
 /// Decode table for 8/16-bit sources: one curve evaluation per code, not per sample.
@@ -244,7 +332,7 @@ fn decode(path: &Path) -> Result<ImageData, ImportError> {
 /// Load a foreign still: first frame/page of multi-image files (GIF, ICO, TIFF, WebP).
 pub fn load(path: &Path) -> Result<Loaded, ImportError> {
     let img = decode(path)?;
-    let (tf, space) = space_of(&img)?;
+    let Space { tf, to709, name: space } = space_of(&img)?;
     let spec = img.to_spec();
     let names = spec.channel_names.clone();
     let alpha = usize::try_from(spec.alpha_channel).ok();
@@ -252,7 +340,10 @@ pub fn load(path: &Path) -> Result<Loaded, ImportError> {
     if names.len() != img.channels as usize || w == 0 || h == 0 {
         return Err(ImportError::Pixels(format!("{}: {}x{} with {} channel name(s) for {} channel(s)", path.display(), w, h, names.len(), img.channels)));
     }
-    let planes = planes(&img, tf, &names, alpha);
+    let mut planes = planes(&img, tf, &names, alpha);
+    if let Some(m) = &to709 {
+        rotate(&mut planes, &names, m);
+    }
     // 8-bit sources keep half the memory: half's 11 bits beat a linear 8-bit step except in the
     // deepest shadows, where the step itself is far below visibility.
     let half = matches!(img.data, PixelData::U8(_));

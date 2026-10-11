@@ -1635,7 +1635,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1740,6 +1740,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "vfx-io",
+ "vfx-primaries",
  "vfx-transfer",
 ]
 
@@ -4482,7 +4483,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4990,10 +4991,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5574,6 +5575,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vfx-primaries"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#66de97a226b99136cae0a291c6205cb9b9381a82"
+dependencies = [
+ "vfx-core",
+ "vfx-math",
+]
+
+[[package]]
 name = "vfx-stmap"
 version = "0.1.0"
 source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#66de97a226b99136cae0a291c6205cb9b9381a82"
@@ -6060,7 +6070,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -55,7 +55,7 @@ fn associated_alpha_is_unpremultiplied_before_the_curve() {
     // 4 channels, no straight tag: colour 64 under alpha 128 is the encoded 128 premultiplied.
     let mut img = ImageData::from_u8(1, 1, 4, vec![64, 64, 64, 128]);
     img.metadata.set_colorspace_attribute(colorspace::SRGB_REC709_SCENE);
-    let (tf, _) = space_of(&img).unwrap();
+    let tf = space_of(&img).unwrap().tf;
     let spec = img.to_spec();
     let p = planes(&img, tf, &spec.channel_names, usize::try_from(spec.alpha_channel).ok());
     let a = 128.0 / 255.0;
@@ -93,15 +93,15 @@ fn cineon_log_maps_white_and_black() {
 #[test]
 fn untagged_rule_and_unknown_tag() {
     let u8img = ImageData::from_u8(1, 1, 3, vec![0; 3]);
-    assert_eq!(space_of(&u8img).unwrap().0, Tf::Srgb);
+    assert_eq!(space_of(&u8img).unwrap().tf, Tf::Srgb);
     let f = ImageData::from_f32(1, 1, 3, vec![0.0; 3]);
-    assert_eq!(space_of(&f).unwrap().0, Tf::Linear);
+    assert_eq!(space_of(&f).unwrap().tf, Tf::Linear);
     let mut odd = ImageData::from_f32(1, 1, 3, vec![0.0; 3]);
     odd.metadata.set_colorspace_attribute("CMYK");
     assert!(matches!(space_of(&odd), Err(ImportError::ColorSpace(n)) if n == "CMYK"));
     let mut g = ImageData::from_f32(1, 1, 3, vec![0.0; 3]);
     g.metadata.set_colorspace_rec709_gamma(2.4);
-    assert_eq!(space_of(&g).unwrap().0, Tf::Gamma(2.4));
+    assert_eq!(space_of(&g).unwrap().tf, Tf::Gamma(2.4));
 }
 
 #[test]
@@ -125,4 +125,58 @@ fn exr_is_not_ours_and_garbage_is_typed() {
     let bad = dir.path().join("b.png");
     std::fs::write(&bad, b"not a png").unwrap();
     assert!(matches!(load(&bad), Err(ImportError::Decode { .. })));
+}
+
+fn tagged(name: &str) -> ImageData {
+    let mut img = ImageData::from_f32(1, 1, 3, vec![0.0; 3]);
+    img.metadata.set_colorspace_attribute(name);
+    img
+}
+
+#[test]
+fn display_gamma_tag_is_the_inverse_display_eotf() {
+    // `g24_rec709_display` is the tag of the 519-frame PNG sequence that used to fail to open.
+    let s = space_of(&tagged("g24_rec709_display")).unwrap();
+    assert_eq!((s.tf, s.to709), (Tf::Gamma(2.4), None));
+    assert!((s.tf.lin(0.5) - 0.5f32.powf(2.4)).abs() < 1e-6);
+    // The interop-ID table spells the other transfers out the same way.
+    assert_eq!(space_of(&tagged("g22_rec709_display")).unwrap().tf, Tf::Gamma(2.2));
+    assert_eq!(space_of(&tagged("srgb_rec709_display")).unwrap().tf, Tf::Srgb);
+    let pq = space_of(&tagged("pq_rec2020_display")).unwrap();
+    assert_eq!(pq.tf, Tf::Pq);
+    assert!((pq.tf.lin(0.508_078) - 1.0).abs() < 0.01, "ST 2084: 100 nits is signal 0.508");
+}
+
+#[test]
+fn wide_primaries_rotate_into_rec709() {
+    let m = space_of(&tagged("lin_p3d65_scene")).unwrap().to709.expect("P3 is not Rec.709");
+    // Published linear Display-P3 -> Rec.709 (D65 both): the columns are the P3 primaries.
+    let want = [[1.224_940_1, -0.224_940_4, 0.0], [-0.042_056_9, 1.042_057_1, 0.0], [-0.019_637_6, -0.078_636_1, 1.098_273_5]];
+    for (r, w) in m.iter().zip(want) {
+        for (a, b) in r.iter().zip(w) {
+            assert!((a - b).abs() < 2e-4, "{m:?}");
+        }
+    }
+    // Pure P3 red lands out of gamut: the negative stays.
+    let mut planes = vec![vec![1.0], vec![0.0], vec![0.0]];
+    rotate(&mut planes, &["R".into(), "G".into(), "B".into()], &m);
+    assert!((planes[0][0] - 1.224_940_1).abs() < 2e-4 && planes[1][0] < -0.04 && planes[2][0] < -0.01, "{planes:?}");
+}
+
+#[test]
+fn d60_primaries_keep_neutrals_neutral() {
+    // ACEScg white is D60; without the adaptation to D65 it would come out tinted.
+    for tag in ["lin_ap1_scene", "lin_ap0_scene"] {
+        let m = space_of(&tagged(tag)).unwrap().to709.unwrap_or_else(|| panic!("{tag}"));
+        for row in m {
+            assert!((row.iter().sum::<f32>() - 1.0).abs() < 2e-3, "{tag}: {m:?}");
+        }
+    }
+}
+
+#[test]
+fn tags_the_table_cannot_make_rgb_stay_typed_errors() {
+    for tag in ["CMYK", "lin_ciexyzd65_scene", "data", "no_such_space"] {
+        assert!(matches!(space_of(&tagged(tag)), Err(ImportError::ColorSpace(n)) if n == tag), "{tag}");
+    }
 }
