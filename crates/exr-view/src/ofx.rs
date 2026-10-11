@@ -277,10 +277,6 @@ impl OfxEffects {
         let menu = self.effect.as_ref().map(|effect| effect.site_menu());
         let options = menu.as_ref().map(backend_options);
         let on = self.rendered();
-        let shown = match (&on, &error) {
-            (Some(Ok(text)), None) => Some(text.as_str()),
-            _ => None,
-        };
         let rows: Vec<StackRow<'_>> = match (&menu, &options) {
             (Some(menu), Some(options)) => vec![StackRow {
                 key: u64::from(EFFECT),
@@ -290,7 +286,6 @@ impl OfxEffects {
                 backend: Some(Backend {
                     options,
                     selected: menu.selected,
-                    rendered: shown,
                     tip: Some(
                         "Image delivery site. The plug-in's Compute Backend parameter chooses its compute engine.",
                     ),
