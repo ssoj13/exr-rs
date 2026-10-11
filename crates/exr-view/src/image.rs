@@ -1730,6 +1730,14 @@ fn sample(ch: &ChannelData, i: usize) -> Result<f32, ExrError> {
     })
 }
 
+/// Every half bit pattern's f32 value (`Half::to_f32`, so bit-identical), for
+/// the materialize loop: one table load per sample instead of a call into the
+/// bit-shift converter.
+fn half_lut() -> &'static [f32] {
+    static LUT: OnceLock<Box<[f32]>> = OnceLock::new();
+    LUT.get_or_init(|| (0..=u16::MAX).map(|b| imath_rs::Half::from_bits(b).to_f32()).collect())
+}
+
 /// The display value of a `Uint` sample, as [`sample`] gives it.
 fn uint_display(u: u32) -> f32 {
     exr_core::convert::uint_to_float(u) / u32::MAX as f32
@@ -1856,12 +1864,17 @@ impl Mapping {
 
     /// Fill `out` with `width * height` RGBA pixels from `channels` (each
     /// `width * height` samples). `out` is resized in place, keeping its
-    /// capacity (see [`ImageBackend::set_frame`]).
+    /// capacity (see [`ImageBackend::set_frame`]); every sample is overwritten,
+    /// so a buffer that already has the size is not cleared first (a 4K frame's
+    /// memset was a measurable part of each sequence step).
+    ///
+    /// Each slot is filled by one pass typed by its source (no per-sample
+    /// dispatch); the values are those of [`BoundMapping::sample`].
     ///
     /// # Errors
     /// [`ExrError::Logic`] for a channel index outside `channels` or a channel
     /// shorter than the pixel count (a corrupt frame is
-    /// reported, not painted as 0.0/1.0).
+    /// reported, not painted as 0.0/1.0). `out` then has its full length.
     pub(crate) fn fill(
         &self,
         out: &mut Vec<f32>,
@@ -1869,10 +1882,37 @@ impl Mapping {
         width: u32,
         height: u32,
     ) -> Result<(), ExrError> {
-        let n = reset(out, width, height)?;
+        let n = resize(out, width, height)?;
         let bound = self.bind(channels)?;
-        for i in 0..n {
-            out[i * 4..i * 4 + 4].copy_from_slice(&bound.sample(i)?);
+        // The first index the per-sample path would fail at, with its message.
+        if let Some(short) = bound.src.iter().flatten().map(|c| c.len()).filter(|&len| len < n).min() {
+            return Err(ExrError::Logic(format!(
+                "sample index {short} out of range for a {short}-sample channel"
+            )));
+        }
+        let lut = half_lut();
+        // Blocks small enough that all four slot passes hit the cache. Every
+        // source holds at least `n` samples (checked above), so `v[at..]` is
+        // in bounds.
+        const BLOCK: usize = 4096;
+        for (b, pixels) in out.as_chunks_mut::<4>().0.chunks_mut(BLOCK).enumerate() {
+            let at = b * BLOCK;
+            for (slot, (src, &konst)) in bound.src.iter().zip(&bound.konst).enumerate() {
+                match src {
+                    None => pixels.iter_mut().for_each(|px| px[slot] = konst),
+                    Some(ChannelData::Half(v)) => pixels
+                        .iter_mut()
+                        .zip(&v[at..])
+                        .for_each(|(px, h)| px[slot] = lut[usize::from(h.bits())]),
+                    Some(ChannelData::Float(v)) => {
+                        pixels.iter_mut().zip(&v[at..]).for_each(|(px, &f)| px[slot] = f)
+                    }
+                    Some(ChannelData::Uint(v)) => pixels
+                        .iter_mut()
+                        .zip(&v[at..])
+                        .for_each(|(px, &u)| px[slot] = uint_display(u)),
+                }
+            }
         }
         Ok(())
     }
@@ -1928,14 +1968,18 @@ fn materialize_into(
     Mapping::of(&names_of(&frame.channels), group).fill(out, &frame.channels, width, height)
 }
 
-/// Resize `out` to `width * height * 4` zeroed samples, reusing its allocation
-/// whenever the capacity already suffices. Returns the pixel count.
-fn reset(out: &mut Vec<f32>, width: u32, height: u32) -> Result<usize, ExrError> {
-    let n = crate::tiles::region::pixel_count(width,height).map_err(ExrError::Arg)?;
-    let samples=n.checked_mul(4).ok_or_else(||ExrError::Arg("RGBA sample count overflow".into()))?;
-    out.clear();
-    out.try_reserve_exact(samples).map_err(|e|ExrError::Arg(e.to_string()))?;
-    out.resize(samples,0.0);
+/// Size `out` to `width * height * 4` samples for a full overwrite, reusing
+/// its allocation: only samples beyond its current length are zeroed (fresh
+/// memory is touched either way). Returns the pixel count.
+fn resize(out: &mut Vec<f32>, width: u32, height: u32) -> Result<usize, ExrError> {
+    let n = crate::tiles::region::pixel_count(width, height).map_err(ExrError::Arg)?;
+    let samples = n.checked_mul(4).ok_or_else(|| ExrError::Arg("RGBA sample count overflow".into()))?;
+    if out.len() > samples {
+        out.truncate(samples);
+    } else {
+        out.try_reserve_exact(samples - out.len()).map_err(|e| ExrError::Arg(e.to_string()))?;
+        out.resize(samples, 0.0);
+    }
     Ok(n)
 }
 
@@ -2173,6 +2217,70 @@ pub(crate) mod tests {
             }
         }
         assert!(some > 20 && none > 20, "both kernels exercised: {some} exact, {none} wide");
+    }
+
+    /// The per-sample materialize the typed fill replaced: the bit-exact reference.
+    fn fill_reference(m: &Mapping, channels: &[(String, ChannelData)], n: usize) -> Result<Vec<f32>, ExrError> {
+        let bound = m.bind(channels)?;
+        let mut out = vec![0.0; n * 4];
+        for i in 0..n {
+            out[i * 4..i * 4 + 4].copy_from_slice(&bound.sample(i)?);
+        }
+        Ok(out)
+    }
+
+    /// The typed fill writes the same bits as the per-sample path for every
+    /// channel type and mapping kind (RGBA, constant alpha, luminance, solo,
+    /// a layer, missing colour, no layer), over a stale buffer of the same,
+    /// a smaller and a larger size, and fails the same way on a short channel.
+    #[test]
+    fn typed_fill_is_bit_identical_to_the_per_sample_path() {
+        let (w, h) = (5u32, 3u32);
+        let n = (w * h) as usize;
+        let half = ChannelData::Half((0..n).map(|i| imath_rs::Half::from_bits((i as u16).wrapping_mul(0x1357) ^ 0x3c00)).collect());
+        let float = ChannelData::Float((0..n).map(|i| f32::from_bits((i as u32).wrapping_mul(0x9e37_79b9))).collect());
+        let uint = ChannelData::Uint((0..n).map(|i| (i as u32).wrapping_mul(0x8765_4321)).collect());
+        let kinds = [half, float, uint];
+        let mut cases = 0;
+        for a in &kinds {
+            for b in &kinds {
+                let sets: [Vec<(String, ChannelData)>; 5] = [
+                    vec![("A".into(), b.clone()), ("B".into(), a.clone()), ("G".into(), b.clone()), ("R".into(), a.clone())],
+                    vec![("B".into(), a.clone()), ("R".into(), b.clone())],
+                    vec![("Y".into(), a.clone()), ("A".into(), b.clone())],
+                    vec![("depth.Z".into(), a.clone()), ("N.X".into(), b.clone()), ("N.Y".into(), a.clone())],
+                    vec![("only".into(), b.clone())],
+                ];
+                for channels in sets {
+                    let names = names_of(&channels);
+                    let frame = tests_support::frame_of(w, h, channels.clone());
+                    let mut groups: Vec<Option<&LayerGroup>> = frame.layers.iter().map(Some).collect();
+                    groups.push(None);
+                    for group in groups {
+                        let m = Mapping::of(&names, group);
+                        let want = fill_reference(&m, &channels, n).unwrap();
+                        for stale in [n * 4, 7, n * 4 + 9] {
+                            let mut out = vec![f32::NAN; stale];
+                            m.fill(&mut out, &channels, w, h).unwrap();
+                            let bits = |v: &[f32]| v.iter().map(|f| f.to_bits()).collect::<Vec<_>>();
+                            assert_eq!(bits(&out), bits(&want), "{m:?} over {stale} stale samples");
+                            cases += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(cases > 100, "{cases} cases");
+        // A short channel: the same error as the per-sample path, full length kept.
+        let short = vec![
+            ("G".into(), ChannelData::Float(vec![1.0; n])),
+            ("R".into(), ChannelData::Half(vec![imath_rs::Half::from_bits(0x3c00); n - 4])),
+        ];
+        let m = Mapping::of(&names_of(&short), tests_support::frame_of(w, h, short.clone()).layers.first());
+        let want = fill_reference(&m, &short, n).unwrap_err().to_string();
+        let mut out = Vec::new();
+        assert_eq!(m.fill(&mut out, &short, w, h).unwrap_err().to_string(), want);
+        assert_eq!(out.len(), n * 4);
     }
 
     /// A 1x1 8-bit RGBA PNG written by the `png` crate, independent of the importer.
