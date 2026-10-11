@@ -867,7 +867,10 @@ pub struct ImageBackend {
 /// re-uploads whenever [`Self::key`] changes.
 pub trait ImageStage {
     /// What [`Self::process`] would make now of the same input (the effect, its parameters, the
-    /// time): part of the upload key, so a change re-processes and re-uploads.
+    /// time): part of the upload key, so a change re-processes and re-uploads. `0` means the
+    /// stage is idle and passes the pixels through: the viewer then shows the materialized pixels
+    /// themselves and never calls [`Self::process`] (an idle effect host would otherwise cost a
+    /// full-frame copy on every sequence step).
     fn key(&self) -> u64;
 
     /// The pixels to show for `pixels` (`w * h * 4` linear RGBA, top row first): the stage's own
@@ -1296,8 +1299,8 @@ impl ImageBackend {
         }
         self.file_source = None;
         let rgba = match stage {
-            Some(s) => Arc::new(s.process(&self.pixels, w, h).to_vec()),
-            None => Arc::clone(&self.pixels),
+            Some(s) if desc.stage != 0 => Arc::new(s.process(&self.pixels, w, h).to_vec()),
+            _ => Arc::clone(&self.pixels),
         };
         tiles.set_source(desc, Arc::new(FrameSource { rgba, w, h }));
     }

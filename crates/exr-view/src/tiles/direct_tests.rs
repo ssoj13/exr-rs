@@ -269,6 +269,22 @@ impl crate::image::ImageStage for Stage {
         &self.output
     }
 }
+/// An idle stage (key 0) is not run: the shown pixels are the materialized
+/// ones, not a processed copy (the viewer always passes its effect host).
+#[test]
+fn idle_stage_shares_the_materialized_pixels() {
+    let mut target = DisplayTarget::new(8 << 20, usize::MAX);
+    let mut image = ImageBackend::from_frame(Arc::new(frame_with(&["R", "G", "B"])));
+    let mut stage = Stage { key: 0, calls: 0, output: Vec::new() };
+    let (_, _, _, export) = image.export_level(&mut target, 8192, Some(&mut stage)).unwrap();
+    assert_eq!(&export[..], &[0.0, 1.0, 2.0, 1.0], "the unprocessed pixels");
+    assert_eq!(stage.calls, 0, "an idle stage is never asked to process");
+    stage.key = 1;
+    let (_, _, _, export) = image.export_level(&mut target, 8192, Some(&mut stage)).unwrap();
+    assert_eq!(&export[..], &[0.0, 0.5, 1.0, 1.0]);
+    assert_eq!(stage.calls, 1);
+}
+
 #[test]
 #[ignore = "needs a GPU adapter"]
 fn export_scope_view_layer_coverage_and_effect_share_one_source() {
