@@ -5,7 +5,7 @@
 **OpenEXR, rewritten in Rust — byte for byte.**
 
 A pure-Rust, FFI-free, 1:1 port of the OpenEXR C++ stack (OpenEXR, Imath, libdeflate,
-OpenJPH), verified against the real C++ library, plus a GPU layer, a GPU viewer and a
+OpenJPH), verified against the real C++ library, plus a GPU layer, a GPU viewer that hosts OpenFX plug-ins and a
 drop-in `OpenEXR` Python module.
 
 ![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)
@@ -319,7 +319,15 @@ flowchart LR
   Settings.
 - **Inspection.** Every channel and layer, per-pixel values of all channels, the complete header,
   histogram, waveform and vectorscope, and a Cryptomatte pick and matte overlay.
-- **More.** OpenFX effects, dockable layouts that are saved, a command registry shared by keys and
+- **OpenFX host.** The viewer is an OpenFX host: it finds installed `.ofx` plug-ins the way Nuke,
+  Resolve or Houdini do (`OFX_PLUGIN_PATH`, then the system OFX folder, e.g.
+  `C:\Program Files\Common Files\OFX\Plugins`) and applies them to the shown image, with their
+  parameter panels, presets and overlays. An experimental bundle of effects written in Rust
+  (Basic grade, Gaussian Blur, Lens Flare, Defocus, Fractal 2D / 3D and more) comes from
+  [ofx-rs](https://github.com/ssoj13/ofx-rs): download the release archive for your platform
+  (`ofx-effects-<version>-windows-x64.zip`, `-linux-x64.zip` or `-macos-arm64.zip`) and unpack
+  `ofx-effects.ofx.bundle` into the OFX folder (see its `INSTALL.md`).
+- **More.** Dockable layouts that are saved, a command registry shared by keys and
   menus, and saving the view as PNG (`--screenshot` from the CLI).
 
 ---

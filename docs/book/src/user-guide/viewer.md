@@ -151,8 +151,11 @@ File > Open remembers the last folder and the last format filter across openings
 ## OpenFX and current limits
 
 The Effects dock hosts the installed OpenFX plug-ins (the standard search: `OFX_PLUGIN_PATH`, then the OS
-plug-in directory; ofx-rs's effects are its `ofx-effects.ofx.bundle`; the empty dock names the searched
-places), with parameters, overlays and
+plug-in directory; ofx-rs's effects are its `ofx-effects.ofx.bundle`, from the `ofx-effects-<version>-<platform>.zip` of <https://github.com/ssoj13/ofx-rs/releases/latest>:
+unzip it into the plug-in directory or a folder on `OFX_PLUGIN_PATH`; the empty dock names the searched
+places and links the release), with
+path parameters' browse buttons (they open the viewer's one file dialog, which also remembers the folder per use), presets saved per plug-in in
+`~/.ofx-rs/presets/<plug-in ID>/` (`OFX_RS_PRESETS_DIR` moves that folder), parameters, overlays and
 plug-in scan diagnostics. Effects read source pixels lazily through checked f32
 region providers within a bounded CPU memory budget; their output feeds the scopes,
 viewport readout, Metadata, Pixel Info and Save view. If preparing a non-tiled effect

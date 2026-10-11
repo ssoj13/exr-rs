@@ -64,7 +64,10 @@ cargo build --locked --release --no-default-features --features viewer
 
 Default builds enable the viewer and OpenFX. Effects are installed OpenFX plug-ins: the viewer scans the standard OpenFX search (`OFX_PLUGIN_PATH`,
 then the OS plug-in directory) and ships none. ofx-rs's effects are one such bundle,
-`ofx-effects.ofx.bundle`, installed from ofx-rs (`python bootstrap.py u -o <plug-in dir> -f`). Diagnose git dependency failures against
+`ofx-effects.ofx.bundle`; download the `ofx-effects-<version>-<platform>.zip` of your platform from the latest
+ofx-rs release (<https://github.com/ssoj13/ofx-rs/releases/latest>; its `INSTALL.md` has the details) and unzip the bundle into the OFX plug-in directory
+(Windows `C:\Program Files\Common Files\OFX\Plugins`, macOS `/Library/OFX/Plugins`, Linux `/usr/OFX/Plugins`),
+or into any folder listed in `OFX_PLUGIN_PATH`. Diagnose git dependency failures against
 the checked-in lockfile. Native reference libraries are needed for parity, not for
 the Rust image-format runtime.
 

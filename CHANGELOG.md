@@ -18,7 +18,19 @@ All notable changes to **exr-rs** are documented here. The format follows
   are the standard OpenFX bundle `ofx-effects.ofx.bundle`, found by the usual search (`OFX_PLUGIN_PATH`, then
   the OS plug-in directory). Linking `ofx-effects` pulled ofx-fractal -> render-env -> exr-core from the exr-rs
   git repo, so the build carried two copies of exr-core, deflate-rs, imath-rs and exr-image. Plug-in IDs are
-  unchanged, so saved effects stay valid. The empty Effects tab names the searched places.
+  unchanged, so saved effects stay valid. The empty Effects tab names the searched places and links the
+  ofx-rs release (`https://github.com/ssoj13/ofx-rs/releases/latest`), where the bundle comes from.
+- **exr-view**: ofx-rs bumped to 597457b (and every other ssoj13 git dependency to its head). The OpenFX
+  panel's browse buttons now open the viewer's in-app file dialog (`egui-file-dialog`) and write the picked
+  path into the parameter; presets live in `~/.ofx-rs/presets/<plug-in ID>/` (`OFX_RS_PRESETS_DIR`).
+- **One file dialog.** File > Open, Save view, the OCIO config browser and the OpenFX browse buttons use the
+  same in-app dialog, each with its own filters (the OCIO dialog lists only `.ocio` / `.ocioz`; an OpenFX
+  dialog the parameter's own filters, else every file) and each remembering the folder of its last
+  confirmed pick under its own key. The Colour panel's separate `ocio_dir` memory is folded into the same
+  map; older configs migrate (`ocio_dir`, `open_dir`, `save_dir`, `open_filter`).
+- **exr-view**: plug-ins see a stable image identity (`kOfxImagePropUniqueIdentifier`) for an unchanged
+  input, so their caches hit across renders; it changes with the file (path, modification time, size at
+  load), layer or channel, mip level and data window.
 
 ### 2026-10-10
 
