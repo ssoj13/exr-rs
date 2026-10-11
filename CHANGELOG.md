@@ -6,6 +6,15 @@ All notable changes to **exr-rs** are documented here. The format follows
 
 ## [Unreleased]
 
+### 2026-10-11
+
+- **Scrubbing loaded frames is fast.** Switching between resident 3840x2160 half frames costs about
+  25 ms instead of about 150 ms: an all-half layer goes to the display from its planes as
+  `Rgba16Float` (no f32 materialize, half the upload), the precision profile comes from load-time
+  channel spans instead of a rescan, the idle stage shows the materialized pixels without a copy,
+  other layers materialize through a typed, cache-blocked fill, and open scopes read the display's
+  texture instead of uploading the frame a second time.
+
 ### 2026-10-10
 
 - **exr-view**: the Colour dock tab is gone; the OCIO controls live in Settings > Colour only (one home,
