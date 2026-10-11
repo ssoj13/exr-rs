@@ -180,6 +180,21 @@ pub struct DecodedFrame {
     /// resident display reads a layer's precision profile instead of rescanning
     /// the materialized pixels on the UI thread at every sequence step.
     pub(crate) spans: OnceLock<Vec<Option<Span>>>,
+    /// What names this frame's pixels between loads: the file's path, modification time and size as
+    /// they were BEFORE the decode read it (a rewrite during the read can only make the next load
+    /// differ, never alias). `None` = unversionable (no file, or no metadata): effects then see the
+    /// frame as new content every render. Equal versions hold equal pixels - see
+    /// `tiles::effect_frames::RenderInputs::frame`, which stamps the plug-in input images with it.
+    pub(crate) version: Option<u64>,
+}
+
+/// [`DecodedFrame::version`] of `path` as it is on disk now.
+fn source_version(path: &Path) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let meta = std::fs::metadata(path).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (path, meta.modified().ok()?, meta.len()).hash(&mut hasher);
+    Some(hasher.finish())
 }
 
 /// What the viewer shows of a frame: one layer, or one channel alone in grey.
@@ -225,13 +240,16 @@ impl DecodedFrame {
     /// decoded per tile band (`tiles::file::FileSource`). An unreadable header
     /// uses the same decode path as [`Self::load`], whose typed error the UI shows.
     pub fn open(path: &Path, budget: u64) -> Result<DecodedFrame, LoadError> {
-        if exr_import::is_foreign(path) {
-            return Self::import(path).map(Self::warmed);
-        }
-        match peek_header(path) {
-            Some(header) if needs_file_backing(&header, budget) => Self::open_backed(path, &header),
-            header => Self::decode(path, header.as_ref()).map(Self::warmed),
-        }
+        let version = source_version(path);
+        let frame = if exr_import::is_foreign(path) {
+            Self::import(path).map(Self::warmed)
+        } else {
+            match peek_header(path) {
+                Some(header) if needs_file_backing(&header, budget) => Self::open_backed(path, &header),
+                header => Self::decode(path, header.as_ref()).map(Self::warmed),
+            }
+        };
+        frame.map(|f| Self { version, ..f })
     }
 
     /// `frame` with its channel spans computed here, on the loading thread.
@@ -270,16 +288,20 @@ impl DecodedFrame {
             id: FRAME_ID.fetch_add(1, Ordering::Relaxed),
             file_types: Some(types),
             spans: OnceLock::new(),
+            version: None,
             pixel_aspect: validated_aspect(header.pixel_aspect_ratio().map_err(LoadError::from_exr)?)?,
         })
     }
 
     /// Decode the whole file (every channel resident).
     pub fn load(path: &Path) -> Result<DecodedFrame, LoadError> {
-        if exr_import::is_foreign(path) {
-            return Self::import(path).map(Self::warmed);
-        }
-        Self::decode(path, peek_header(path).as_ref()).map(Self::warmed)
+        let version = source_version(path);
+        let frame = if exr_import::is_foreign(path) {
+            Self::import(path).map(Self::warmed)
+        } else {
+            Self::decode(path, peek_header(path).as_ref()).map(Self::warmed)
+        };
+        frame.map(|f| Self { version, ..f })
     }
 
     /// A non-EXR still (`exr-import`: PNG, DPX, HDR, ...), always resident. It arrives as
@@ -308,6 +330,7 @@ impl DecodedFrame {
             id: FRAME_ID.fetch_add(1, Ordering::Relaxed),
             file_types: None,
             spans: OnceLock::new(),
+            version: None,
             pixel_aspect: 1.0,
         })
     }
@@ -368,6 +391,7 @@ impl DecodedFrame {
             id: FRAME_ID.fetch_add(1, Ordering::Relaxed),
             file_types: None,
             spans: OnceLock::new(),
+            version: None,
             pixel_aspect: validated_aspect(header.pixel_aspect_ratio().map_err(LoadError::from_exr)?)?,
         })
     }
@@ -455,6 +479,7 @@ impl DecodedFrame {
             id,
             file_types: None,
             spans: OnceLock::new(),
+            version: None,
             pixel_aspect,
         })
     }
@@ -2309,6 +2334,7 @@ pub(crate) mod tests_support {
             id: 0,
             file_types: None,
             spans: OnceLock::new(),
+            version: None,
             pixel_aspect: 1.0,
         }
     }
@@ -2699,6 +2725,7 @@ pub(crate) mod tests {
                 id: 0,
                 file_types: None,
                 spans: OnceLock::new(),
+            version: None,
             pixel_aspect: 1.0,
             },
             w,
@@ -2733,6 +2760,7 @@ pub(crate) mod tests {
             id: 0,
             file_types: None,
             spans: OnceLock::new(),
+            version: None,
             pixel_aspect: 1.0,
         });
         let mut img = ImageBackend::from_frame(frame);
@@ -2802,6 +2830,7 @@ pub(crate) mod tests {
                 id: 0,
                 file_types: None,
                 spans: OnceLock::new(),
+            version: None,
             pixel_aspect: 1.0,
             };
             let group = frame.resolve_layer(layer);
@@ -2839,6 +2868,7 @@ pub(crate) mod tests {
             id: 0,
             file_types: None,
             spans: OnceLock::new(),
+            version: None,
             pixel_aspect: 1.0,
         });
         let mut img = ImageBackend::from_frame(frame);
@@ -2907,6 +2937,7 @@ pub(crate) mod tests {
             id: 0,
             file_types: None,
             spans: OnceLock::new(),
+            version: None,
             pixel_aspect: 1.0,
         }));
         assert_eq!(img.pixel_at(2, 0), None);
@@ -2931,6 +2962,7 @@ pub(crate) mod tests {
             id: 0,
             file_types: None,
             spans: OnceLock::new(),
+            version: None,
             pixel_aspect: 1.0,
         };
         let b = |x0, y0, x1, y1| {
@@ -2973,6 +3005,7 @@ pub(crate) mod tests {
                 id,
                 file_types: None,
                 spans: OnceLock::new(),
+            version: None,
             pixel_aspect: 1.0,
             })
         };
@@ -3020,6 +3053,7 @@ pub(crate) mod tests {
             id: f.id,
             file_types: f.file_types.clone(),
             spans: OnceLock::new(),
+            version: None,
             pixel_aspect: f.pixel_aspect,
         }
     }

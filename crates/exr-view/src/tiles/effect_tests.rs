@@ -285,6 +285,8 @@ use crate::image::{Selection, tests_support::frame_with};
 
 #[path = "effect_temporal_tests.rs"]
 mod temporal;
+#[path = "effect_identity_tests.rs"]
+mod identity;
 
 static SERIAL: Mutex<()> = Mutex::new(());
 static NORMAL: AtomicUsize = AtomicUsize::new(0);
@@ -349,6 +351,7 @@ pub(crate) fn register_linked() {
     ofx::linked::register::<EscapedPreparation<64>>().unwrap();
     ofx::linked::register::<IdentityPreparation>().unwrap();
     temporal::register_linked();
+    identity::register_linked();
 }
 fn runtime() -> Arc<Runtime<u32>> {
     Runtime::new(crate::ofx::OfxEffects::host_info(), crate::ofx::OfxEffects::test_scan())

@@ -108,6 +108,15 @@ impl RenderInputs<'_> {
         owners.push(owner);
         Ok(())
     }
+    /// The plug-in image identity of `frame` at sampling `level` (`kOfxImagePropUniqueIdentifier`): equal
+    /// for an unchanged file, layer/channel, mip level and data window however often the input is rebuilt,
+    /// so a plug-in's caches keyed on it hit. Everything that changes the delivered pixels is in it; an
+    /// unversionable frame (`DecodedFrame::version` is `None`) stays unstamped = new content every time.
+    fn stamp(&self, frame: &DecodedFrame, level: u32) -> Option<u64> {
+        let dw = frame.data_window;
+        let version = (frame.version?, self.view, level, (dw.min.x, dw.min.y, dw.max.x, dw.max.y));
+        Some(CpuFrame::content_stamp_of(&version))
+    }
     fn aspect(&self, frame: &DecodedFrame) -> Result<PixelAspect, RegionError> {
         let par = PixelAspect::new(f64::from(frame.pixel_aspect))?;
         if par != self.anchor.aspect() {
@@ -177,6 +186,7 @@ impl FrameInput<u32> for RenderInputs<'_> {
         let picture=match CpuFrame::from_storage(layout,full,Arc::new(RegionPixels(region)),par.value(),Premultiplication::Premultiplied) {
             Ok(picture)=>picture,Err(_)=>return self.fail("input image metadata is invalid".into()),
         };
+        let picture=match self.stamp(frame,level) {Some(stamp)=>picture.with_content_stamp(stamp),None=>picture};
         #[cfg(test)]
         if let Some(trace) = self.trace {
             trace.delivered.lock().unwrap().push(ProviderObservation {
