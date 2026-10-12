@@ -1043,7 +1043,7 @@ mod tests {
     fn shifted_file_region_uses_three_enclosing_bins_through_dyn_provider() {
         use crate::tiles::grid::PixRect;
         use crate::tiles::region::{RegionPolicy, SamplingPhase};
-        let path = scratch("roi-shifted-lattice.exr");
+        let (_dir, path) = scratch("roi-shifted-lattice.exr");
         Image::new(Box2i {
             min: V2i { x: -3, y: 7 },
             max: V2i { x: 0, y: 7 },
@@ -1103,7 +1103,7 @@ mod tests {
         use crate::tiles::grid::PixRect;
         use crate::tiles::region::{RegionPolicy, SamplingPhase};
         let bits = [0x80000000u32, 0x7fc12345, 0x3f800347, 0x7f800000];
-        let path = scratch("roi-float-bits.exr");
+        let (_dir, path) = scratch("roi-float-bits.exr");
         Image::new(Box2i {
             min: V2i { x: -3, y: -7 },
             max: V2i { x: -3, y: -4 },
@@ -1150,7 +1150,7 @@ mod tests {
     fn region_cancel_after_decode_releases_output_and_active_admission() {
         use crate::tiles::grid::PixRect;
         use crate::tiles::region::{RegionError, RegionPolicy, SamplingPhase};
-        let path = scratch("roi-cancel.exr");
+        let (_dir, path) = scratch("roi-cancel.exr");
         Image::new(Box2i {
             min: V2i { x: 5, y: -9 },
             max: V2i { x: 8, y: -4 },
@@ -1223,7 +1223,7 @@ mod tests {
             &EncodeOptions::new("CryptoObject"),
         )
         .unwrap();
-        let path = scratch("roi-crypto.exr");
+        let (_dir, path) = scratch("roi-crypto.exr");
         encoded.write(&path, Some(Compression::Zip)).unwrap();
         let frame = DecodedFrame::load(&path).unwrap();
         let names = frame
@@ -1292,7 +1292,7 @@ mod tests {
     fn f32_regions_match_resident_mixed_planes_at_negative_origin() {
         use crate::tiles::grid::PixRect;
         use crate::tiles::region::{RegionBudget, RegionPlan, RegionPolicy, SamplingPhase};
-        let path = scratch("roi-mixed.exr");
+        let (_dir, path) = scratch("roi-mixed.exr");
         let dw = Box2i {
             min: V2i { x: -9, y: 13 },
             max: V2i { x: -3, y: 17 },
@@ -1417,7 +1417,7 @@ mod tests {
     fn f32_region_native_policy_preserves_stored_filter_and_budget_refuses_before_decode() {
         use crate::tiles::grid::PixRect;
         use crate::tiles::region::{RegionBudget, RegionPlan, RegionPolicy, SamplingPhase};
-        let path = scratch("roi-native.exr");
+        let (_dir, path) = scratch("roi-native.exr");
         write_mip(&path, 1301, 5, LevelRoundingMode::RoundUp);
         let (source, rgba, grid) = mip_fixture(&path, 300);
         let rect = PixRect {
@@ -1489,7 +1489,7 @@ mod tests {
     fn file_native_preflight_rejects_absent_and_incompatible_levels_without_buffers_or_decode() {
         use crate::tiles::grid::PixRect;
         use crate::tiles::region::{RegionError, SamplingPhase};
-        let path = scratch("roi-native-absent.exr");
+        let (_dir, path) = scratch("roi-native-absent.exr");
         Image::new(Box2i {
             min: V2i { x: 0, y: 0 },
             max: V2i { x: 2, y: 2 },
@@ -1525,12 +1525,12 @@ mod tests {
         assert_eq!(&original.rgba()[..4], &[1.0001, 1.0001, 1.0001, 1.0]);
         drop(original);
         budget.clear_workspace();
-        let path = scratch("roi-native-incompatible.exr");
+        let (_dir, path) = scratch("roi-native-incompatible.exr");
         write_mip(&path, 7, 5, LevelRoundingMode::RoundDown);
         let (mip, _, _) = mip_fixture(&path, 300);
         // A missing backing file proves rejection precedes even reader creation.
         let absent = FileSource {
-            path: scratch("never-written-native.exr"),
+            path: scratch("never-written-native.exr").1,
             ..scanline
         };
         let denied = RegionBudget::new(0);
@@ -1555,7 +1555,7 @@ mod tests {
 
     #[test]
     fn cancelling_after_an_actual_file_band_skips_the_remaining_decodes() {
-        let path = scratch("cancel-after-band.exr");
+        let (_dir, path) = scratch("cancel-after-band.exr");
         let window = Box2i {
             min: V2i { x: -9, y: 13 },
             max: V2i { x: -6, y: 18 },
@@ -1673,10 +1673,11 @@ mod tests {
         pub(super) static L0_ROWS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     }
 
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("exr-view-file-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join(name)
+    /// `name` in a fresh temp folder; the folder goes when the guard drops.
+    fn scratch(name: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::Builder::new().prefix("exr-view-file-").tempdir().unwrap();
+        let path = dir.path().join(name);
+        (dir, path)
     }
 
     /// 1100 x 600 at (3, -2): R G B A (half), depth.Z, N.x N.y N.z (float).
@@ -1816,7 +1817,7 @@ mod tests {
     #[test]
     fn file_tiles_equal_resident_tiles_scanline() {
         for comp in [Compression::Zip, Compression::NoCompression] {
-            let path = scratch(&format!("scan-{comp:?}.exr"));
+            let (_dir, path) = scratch(&format!("scan-{comp:?}.exr"));
             write_scanline(&path, comp);
             for layer in ["", "depth", "N"] {
                 check(&path, layer);
@@ -1826,7 +1827,7 @@ mod tests {
 
     #[test]
     fn file_tiles_equal_resident_tiles_tiled() {
-        let path = scratch("tiled.exr");
+        let (_dir, path) = scratch("tiled.exr");
         write_tiled(&path);
         check(&path, "");
     }
@@ -2057,7 +2058,7 @@ mod tests {
     /// level-0 row is decoded for them (no overview pass at all).
     #[test]
     fn matching_file_levels_are_served_from_the_file() {
-        let path = scratch("mip-up.exr");
+        let (_dir, path) = scratch("mip-up.exr");
         write_mip(&path, 1301, 1101, LevelRoundingMode::RoundUp);
         let (src, rgba, grid) = mip_fixture(&path, 300);
         assert_eq!(grid.levels(), 3);
@@ -2097,7 +2098,7 @@ mod tests {
     /// ROUND_DOWN with odd sizes: no level matches, so all keep the reduction.
     #[test]
     fn mismatched_file_levels_keep_the_reduction() {
-        let path = scratch("mip-down.exr");
+        let (_dir, path) = scratch("mip-down.exr");
         write_mip(&path, 1301, 1101, LevelRoundingMode::RoundDown);
         let (src, rgba, grid) = mip_fixture(&path, 300);
         assert_eq!(src.own, [false, false, false]);
@@ -2110,7 +2111,7 @@ mod tests {
     /// level 2 is reduced, and the overview pass covers level 2 alone.
     #[test]
     fn mixed_levels_overview_only_covers_the_reduced_ones() {
-        let path = scratch("mip-mixed.exr");
+        let (_dir, path) = scratch("mip-mixed.exr");
         write_mip(&path, 1302, 1100, LevelRoundingMode::RoundDown);
         let (src, rgba, grid) = mip_fixture(&path, 300);
         assert_eq!(grid.levels(), 3);
@@ -2131,7 +2132,7 @@ mod tests {
     /// builds level 3 alone, level 2 stays the file's.
     #[test]
     fn overview_pass_skips_own_levels_inside_its_range() {
-        let path = scratch("mip-wide.exr");
+        let (_dir, path) = scratch("mip-wide.exr");
         write_mip(&path, 2604, 104, LevelRoundingMode::RoundDown);
         let (src, rgba, grid) = mip_fixture(&path, 700);
         assert_eq!(grid.levels(), 4);
@@ -2167,7 +2168,7 @@ mod tests {
             &EncodeOptions::new("CryptoObject"),
         )
         .unwrap();
-        let path = scratch("crypto.exr");
+        let (_dir, path) = scratch("crypto.exr");
         enc.write(&path, Some(Compression::Zip)).unwrap();
 
         let frame = DecodedFrame::load(&path).unwrap();

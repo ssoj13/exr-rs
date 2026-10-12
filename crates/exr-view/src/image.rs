@@ -3082,15 +3082,14 @@ pub(crate) mod tests {
 
     /// A test image written to disk: 700 x 530 at (2, -3), R G B A half plus a
     /// float `depth.Z`.
-    fn write_test_exr(name: &str) -> PathBuf {
+    fn write_test_exr(name: &str) -> (tempfile::TempDir, PathBuf) {
         use exr_core::Compression;
         let (w, h) = (700usize, 530usize);
         let dw = Box2i { min: imath_rs::V2i { x: 2, y: -3 }, max: imath_rs::V2i { x: 2 + w as i32 - 1, y: -3 + h as i32 - 1 } };
         let plane = |f: &dyn Fn(usize, usize) -> f32| (0..w * h).map(|i| f(i % w, i / w)).collect::<Vec<f32>>();
         let half = |v: Vec<f32>| ChannelData::Half(v.into_iter().map(imath_rs::Half::from).collect());
-        let dir = std::env::temp_dir().join(format!("exr-view-backed-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(name);
+        let dir = tempfile::Builder::new().prefix("exr-view-backed-").tempdir().unwrap();
+        let path = dir.path().join(name);
         exr_core::api::Image::new(dw)
             .with_channel("R", half(plane(&|x, _| x as f32 / 700.0)))
             .with_channel("G", half(plane(&|_, y| y as f32 / 530.0)))
@@ -3099,7 +3098,7 @@ pub(crate) mod tests {
             .with_channel("depth.Z", ChannelData::Float(plane(&|x, y| (x * 2 + y) as f32)))
             .write(&path, Compression::Zip)
             .unwrap();
-        path
+        (dir, path)
     }
 
     /// The every-channel probe gives each channel's stored value (a `Uint` as its
@@ -3118,7 +3117,7 @@ pub(crate) mod tests {
         );
         assert_eq!(img.probe_at(1, 0), None);
 
-        let path = write_test_exr("probe.exr");
+        let (_dir, path) = write_test_exr("probe.exr");
         let whole = ImageBackend::from_frame(Arc::new(DecodedFrame::open(&path, u64::MAX).unwrap()));
         let backed = ImageBackend::from_frame(Arc::new(DecodedFrame::open(&path, 1).unwrap()));
         for (x, y) in [(0, 0), (123, 45), (699, 529)] {
@@ -3182,7 +3181,7 @@ pub(crate) mod tests {
     /// shared `exrheader` text - not a hand-picked few (it once showed 5).
     #[test]
     fn metadata_lists_every_header_attribute() {
-        let path = write_test_exr("meta.exr");
+        let (_dir, path) = write_test_exr("meta.exr");
         let header = peek_header(&path).unwrap();
         let names: Vec<String> = header.iter().map(|(n, _)| n.to_string()).collect();
         for frame in [DecodedFrame::open(&path, u64::MAX).unwrap(), DecodedFrame::open(&path, 1).unwrap()] {
@@ -3220,7 +3219,7 @@ pub(crate) mod tests {
     /// decoded whole, for the main layer and a named one.
     #[test]
     fn file_backed_frame_matches_the_resident_one() {
-        let path = write_test_exr("backed.exr");
+        let (_dir, path) = write_test_exr("backed.exr");
         let whole = DecodedFrame::open(&path, u64::MAX).unwrap();
         assert!(whole.file_types.is_none() && !whole.channels.is_empty(), "fits: decoded whole");
         let backed = DecodedFrame::open(&path, 1).unwrap();
@@ -3292,9 +3291,8 @@ pub(crate) mod tests {
             &EncodeOptions::new("CryptoObject"),
         )
         .unwrap();
-        let dir = std::env::temp_dir().join(format!("exr-view-backed-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("crypto_overlay.exr");
+        let dir = tempfile::Builder::new().prefix("exr-view-backed-").tempdir().unwrap();
+        let path = dir.path().join("crypto_overlay.exr");
         enc.write(&path, Some(exr_core::Compression::Zip)).unwrap();
 
         let resident = DecodedFrame::open(&path, u64::MAX).unwrap();

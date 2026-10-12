@@ -742,11 +742,9 @@ mod tests {
 
     // ---- HDR export --------------------------------------------------------------
 
-    /// A unique temp dir per test.
-    fn tmp(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("exr-view-hdr-{name}-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    /// A unique temp dir per test, removed when the guard drops.
+    fn tmp(name: &str) -> tempfile::TempDir {
+        tempfile::Builder::new().prefix(&format!("exr-view-hdr-{name}-")).tempdir().unwrap()
     }
 
     /// `px` as a `w x h` grab.
@@ -779,7 +777,8 @@ mod tests {
     /// Rec.709 -> 2020 matrix derived from the primaries (`transfer::SRGB_TO_REC2020`).
     #[test]
     fn pq_png_holds_the_known_values_and_tags() {
-        let dir = tmp("pq");
+        let guard = tmp("pq");
+        let dir = guard.path().to_path_buf();
         let path = dir.join("pq.png");
         let px = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 1.0, 1.0, 0.0, 0.0, 1.0];
         write_hdr_png(&path, &raw(2, 2, px), &Look { white: 203.0, ..Look::default() }, HdrPng::Pq).unwrap();
@@ -817,7 +816,8 @@ mod tests {
     /// B-only 0.25 pixel 45.45146 nits.
     #[test]
     fn clli_is_the_clamped_max_channel() {
-        let dir = tmp("clli");
+        let guard = tmp("clli");
+        let dir = guard.path().to_path_buf();
         let path = dir.join("c.png");
         let nan = f32::NAN;
         let px = vec![
@@ -890,7 +890,8 @@ mod tests {
     /// anchor: SDR white (203 nits) on the 1000-nit reference display is 75 % signal.
     #[test]
     fn hlg_png_holds_the_reference_white_and_tags() {
-        let dir = tmp("hlg");
+        let guard = tmp("hlg");
+        let dir = guard.path().to_path_buf();
         let path = dir.join("hlg.png");
         let px = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0];
         write_hdr_png(&path, &raw(2, 1, px), &Look { white: 203.0, ..Look::default() }, HdrPng::Hlg).unwrap();
@@ -920,7 +921,8 @@ mod tests {
         let (w, h) = (37u32, 23u32);
         let px: Vec<f32> = (0..w * h * 4).map(|i| noise(i, 6000) - 0.2).collect();
         let look = Look { exposure: 0.5, gamma: 1.1, white: 300.0, peak: 600.0, ..Look::default() };
-        let dir = tmp("hlg-present");
+        let guard = tmp("hlg-present");
+        let dir = guard.path().to_path_buf();
         let path = dir.join("h.png");
         write_hdr_png(&path, &raw(w, h, px.clone()), &look, HdrPng::Hlg).unwrap();
         let (_, samples) = png_samples(&path);
@@ -944,7 +946,8 @@ mod tests {
     #[test]
     fn exr_holds_the_display_light() {
         use exr_core::api::ChannelData;
-        let dir = tmp("exr");
+        let guard = tmp("exr");
+        let dir = guard.path().to_path_buf();
         let (w, h) = (4u32, 1u32);
         // Values exactly representable in half, so f32 round trips land on them.
         let vals = [0.25f32, 1.0, 4.0, -0.5, 8.0, 0.5, 2.0, 0.0, 16.0, -2.0, 0.125, 1.0];
@@ -979,7 +982,8 @@ mod tests {
             pixels.extend([y as f32 / 8.0 + x as f32 / 32.0,
                 1.0 + y as f32 / 16.0, -0.25 - x as f32 / 8.0, 0.3]);
         }}
-        let path = tmp("zip-row-orientation").join("rows.exr");
+        let guard = tmp("zip-row-orientation");
+        let path = guard.path().join("rows.exr");
         write_exr(&path, &raw(w, h, pixels.clone()), &Look::default()).unwrap();
         let image = exr_core::api::read(&path).unwrap();
         for (channel, name) in ["R", "G", "B"].iter().enumerate() {
@@ -1001,7 +1005,8 @@ mod tests {
         let (w, h) = (311u32, 241u32);
         let px: Vec<f32> = (0..w * h * 4).map(|i| noise(i, 3000)).collect();
         let look = Look { exposure: -0.5, gamma: 1.3, tonemap: transfer::tonemap::REINHARD, ..Look::default() };
-        let path = tmp("exr2").join("l.exr");
+        let guard = tmp("exr2");
+        let path = guard.path().join("l.exr");
         write_exr(&path, &raw(w, h, px.clone()), &look).unwrap();
         let img = exr_core::api::read(&path).unwrap();
         let chan = |n: &str| match img.channel(n).unwrap() {
@@ -1115,7 +1120,8 @@ mod tests {
         let snapshot = processed_fixture(&budget);
         let rows = crate::consumers::PixelRows::for_export(snapshot, 0).unwrap();
         let raw = Raw { w: 3, h: 35, level: 0, source: RawSource::Processed(Box::new(std::sync::Mutex::new(rows))) };
-        let path = tmp("processed-provenance").join("processed.exr");
+        let guard = tmp("processed-provenance");
+        let path = guard.path().join("processed.exr");
         write_exr(&path, &raw, &Look::default()).unwrap();
         let image = exr_core::api::read(&path).unwrap();
         let exr_core::api::ChannelData::Half(red) = image.channel("R").unwrap() else { panic!("half") };
@@ -1134,7 +1140,8 @@ mod tests {
     fn mutated_original_dimensions_fail_before_creating_output() {
         let mut source = raw(1, 1, vec![0.0, 0.0, 0.0, 1.0]);
         source.w = 2;
-        let path = tmp("corrupt-original-metadata").join("never.png");
+        let guard = tmp("corrupt-original-metadata");
+        let path = guard.path().join("never.png");
         let error = write_sdr_png(&path, &source, &Look::default()).unwrap_err();
         assert!(matches!(error.downcast_ref::<crate::tiles::region::RegionError>(),
             Some(crate::tiles::region::RegionError::Failed(_))));
@@ -1155,7 +1162,8 @@ mod tests {
                 source: RawSource::Processed(Box::new(std::sync::Mutex::new(rows))) };
             if change_level { source.level = 1; } else { source.w = 4; }
             let before = budget.used();
-            let path = tmp("corrupt-processed-metadata").join("never.exr");
+            let guard = tmp("corrupt-processed-metadata");
+            let path = guard.path().join("never.exr");
             let error = write_exr(&path, &source, &Look::default()).unwrap_err();
             assert!(matches!(error.downcast_ref::<RegionError>(), Some(RegionError::Failed(_))));
             assert!(!path.exists());
@@ -1173,7 +1181,8 @@ mod tests {
     #[test]
     fn hdr_save_refuses_other_extensions() {
         let r = raw(1, 1, vec![0.0, 0.0, 0.0, 1.0]);
-        let dir = tmp("bad");
+        let guard = tmp("bad");
+        let dir = guard.path().to_path_buf();
         for name in ["x.jpg", "x", "x.tif"] {
             let e = save_hdr(&dir.join(name), &r, &Look::default(), HdrPng::Pq).unwrap_err();
             assert!(e.to_string().contains(".exr"), "{e}");
@@ -1184,7 +1193,8 @@ mod tests {
     /// behind (the all-or-nothing `write_file`); a good one replaces it.
     #[test]
     fn png_writes_are_all_or_nothing() {
-        let dir = tmp("atomic");
+        let guard = tmp("atomic");
+        let dir = guard.path().to_path_buf();
         let path = dir.join("keep.png");
         std::fs::write(&path, b"old").unwrap();
         // Too few bytes for 2x2 RGB: the encoder fails after the header.

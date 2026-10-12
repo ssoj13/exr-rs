@@ -795,10 +795,9 @@ mod tests {
     }
 
     /// A minimal OCIO v2 config file in a fresh temp folder: (folder, file).
-    fn good_config(tag: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("exr-view-ocio-{tag}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("good.ocio");
+    fn good_config(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::Builder::new().prefix(&format!("exr-view-ocio-{tag}-")).tempdir().unwrap();
+        let file = dir.path().join("good.ocio");
         std::fs::write(
             &file,
             "ocio_profile_version: 2\n\nsearch_path: \"\"\nroles:\n  default: raw\n  scene_linear: raw\n\n\
@@ -819,7 +818,8 @@ mod tests {
         s.set_config("no/such/dir/config.ocio".to_owned());
         assert!(s.err.is_some() && s.active().is_none());
         assert_eq!(s.start_dir(), None, "nothing loaded yet, and a missing folder is not offered");
-        let (dir, file) = good_config("good");
+        let (guard, file) = good_config("good");
+        let dir = guard.path().to_path_buf();
         s.set_config(file.display().to_string());
         assert!(s.err.is_none(), "{:?}", s.err);
         assert_eq!(s.start_dir(), Some(dir.clone()));
