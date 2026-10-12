@@ -6,6 +6,15 @@ All notable changes to **exr-rs** are documented here. The format follows
 
 ## [Unreleased]
 
+### 2026-10-12
+
+- **Dependencies**: every ssoj13 git dependency at its head (ofx-rs a778569: OpenFX Auto computes
+  on the CPU when only a software GPU adapter exists; gpu-info-rs 136386b; render-rs 6901ac1).
+- **Tests leave no files behind**: the Cryptomatte and viewer tests write into self-removing
+  temporary folders (`tempfile`) instead of `%TEMP%` folders named after the process id, which
+  piled up and could hand a later run with the same id stale frames. exr-view no longer declares
+  `env_logger` (the `exr-rs` binary owns the log backend).
+
 ### 2026-10-11
 
 - **Scrubbing loaded frames is fast.** Switching between resident 3840x2160 half frames costs about

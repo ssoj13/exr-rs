@@ -164,7 +164,8 @@ mod tests {
     /// (scancache asks three times), and its error is recorded with the path.
     #[test]
     fn a_failed_frame_is_decoded_once() {
-        let dir = std::env::temp_dir().join(format!("exr-view-failonce-{}", std::process::id()));
+        let tmp = tempfile::Builder::new().prefix("exr-view-failonce-").tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         frames(&dir, 5, 3);
         let (cache, fails, loads) = cache(&dir, 5);
         cache.set_playhead(scancache::Playhead::at(1));
@@ -182,7 +183,8 @@ mod tests {
     /// Rewriting the file is the way back: the stamp differs, the frame decodes again.
     #[test]
     fn a_rewritten_frame_is_tried_again() {
-        let dir = std::env::temp_dir().join(format!("exr-view-failretry-{}", std::process::id()));
+        let tmp = tempfile::Builder::new().prefix("exr-view-failretry-").tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         frames(&dir, 2, 2);
         let (cache, fails, loads) = cache(&dir, 2);
         cache.set_playhead(scancache::Playhead::at(1));

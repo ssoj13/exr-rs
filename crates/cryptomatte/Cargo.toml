@@ -35,3 +35,5 @@ test-data = []
 cryptomatte = { path = ".", features = ["test-instrumentation"] }
 # Locates Psyop's sample images and the pixel goldens.
 exr-test-data = { workspace = true }
+# Scratch directories that remove themselves (the cryptomatte tests).
+tempfile = "3"

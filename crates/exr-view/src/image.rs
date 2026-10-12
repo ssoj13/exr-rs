@@ -2569,8 +2569,8 @@ pub(crate) mod tests {
     /// and the Metadata panel says where it came from.
     #[test]
     fn a_png_enters_through_exr_import() {
-        let dir = std::env::temp_dir().join(format!("exr-view-png-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new().prefix("exr-view-png-").tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let path = dir.join("a.png");
         write_png(&path, [128, 128, 128, 128]);
         let frame = DecodedFrame::open(&path, 0).unwrap();

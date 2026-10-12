@@ -5,7 +5,6 @@
 //! The HALF path must not be quadratic.
 
 use std::fs;
-use std::path::PathBuf;
 
 use cryptomatte::{
     from_named_mattes, CryptomatteFile, EncodeOptions, Error, HeaderAttrs, ManifestPlacement,
@@ -19,12 +18,9 @@ const W: usize = 8;
 const H: usize = 5;
 const N: usize = W * H;
 
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir()
-        .join("exr-rs-cryptomatte-tests")
-        .join(format!("{name}-{}", std::process::id()));
-    fs::create_dir_all(&dir).expect("scratch dir");
-    dir
+/// A scratch directory removed when the guard drops, also when the test fails.
+fn scratch(name: &str) -> tempfile::TempDir {
+    tempfile::Builder::new().prefix(&format!("exr-rs-crypto-{name}-")).tempdir().expect("scratch dir")
 }
 
 fn string_attr(v: &str) -> Box<dyn exr_core::Attribute> {
@@ -75,7 +71,8 @@ fn write_source(path: &std::path::Path) {
 
 #[test]
 fn inject_preserves_channels_attrs_and_windows() {
-    let dir = scratch("inject-preserve");
+    let tmp = scratch("inject-preserve");
+    let dir = tmp.path();
     let src = dir.join("src.exr");
     let dst = dir.join("dst.exr");
     write_source(&src);
@@ -128,7 +125,8 @@ fn inject_preserves_channels_attrs_and_windows() {
 /// 1.2.0 p.3), on both the encode and the inject path.
 #[test]
 fn writes_spec_conversion_value() {
-    let dir = scratch("conversion");
+    let tmp = scratch("conversion");
+    let dir = tmp.path();
     let src = dir.join("src.exr");
     write_source(&src);
     let file = CryptomatteFile::open(&src).expect("open");
@@ -158,7 +156,8 @@ fn writes_spec_conversion_value() {
 /// hashes, which is how the reference decoder resolves them.
 #[test]
 fn extracts_by_name_without_manifest() {
-    let dir = scratch("no-manifest");
+    let tmp = scratch("no-manifest");
+    let dir = tmp.path();
     let path = dir.join("nomanifest.exr");
 
     let opts = EncodeOptions {

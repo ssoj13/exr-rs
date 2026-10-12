@@ -10,10 +10,9 @@ use cryptomatte::CryptomatteFile;
 use exr_core::{ChannelData, Compression, Image};
 use imath_rs::{Box2i, V2i};
 
-fn temp_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("exr-rs-{tag}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
+/// A scratch directory removed when the guard drops, also when the test fails.
+fn temp_dir(tag: &str) -> tempfile::TempDir {
+    tempfile::Builder::new().prefix(&format!("exr-rs-{tag}-")).tempdir().expect("create temp dir")
 }
 
 /// 4x3 data window at (5, -2) inside a 12x8 display window at (0, -4).
@@ -47,7 +46,8 @@ fn exr_rs(args: &[&str]) -> bool {
 
 #[test]
 fn encode_reads_r_and_keeps_windows_and_extract_out_keeps_them_too() {
-    let dir = temp_dir("cli-crypto");
+    let tmp = temp_dir("cli-crypto");
+    let dir = tmp.path();
     let cov = dir.join("cov.exr");
     let out = dir.join("crypto.exr");
     let matte = dir.join("matte.exr");
@@ -78,7 +78,8 @@ fn encode_reads_r_and_keeps_windows_and_extract_out_keeps_them_too() {
 
 #[test]
 fn encode_rejects_a_coverage_file_without_an_unambiguous_channel() {
-    let dir = temp_dir("cli-crypto-ambiguous");
+    let tmp = temp_dir("cli-crypto-ambiguous");
+    let dir = tmp.path();
     let cov = dir.join("gb.exr");
     let (data, _) = windows();
     Image::new(data)
@@ -165,8 +166,9 @@ fn cli_inject(src: &Path, out: &Path, extra: &[&str]) -> bool {
 
 #[test]
 fn inject_single_part_gives_the_mask_back_and_leaves_other_objects_alone() {
-    let dir = temp_dir("cli-inject-single");
-    let (src, r) = single_part_source(&dir);
+    let tmp = temp_dir("cli-inject-single");
+    let dir = tmp.path();
+    let (src, r) = single_part_source(dir);
     let mask = dir.join("cube.exr");
     let m = mask_at_first(&mask, 0.5);
     let out = dir.join("out.exr");
@@ -181,8 +183,9 @@ fn inject_single_part_gives_the_mask_back_and_leaves_other_objects_alone() {
 
 #[test]
 fn inject_multipart_keeps_the_other_parts_byte_for_byte() {
-    let dir = temp_dir("cli-inject-multi");
-    let (src, r) = multipart_source(&dir);
+    let tmp = temp_dir("cli-inject-multi");
+    let dir = tmp.path();
+    let (src, r) = multipart_source(dir);
     let mask = dir.join("cube.exr");
     let m = mask_at_first(&mask, 0.5);
     let out = dir.join("out.exr");
@@ -201,8 +204,9 @@ fn inject_multipart_keeps_the_other_parts_byte_for_byte() {
 
 #[test]
 fn inject_over_and_under_differ_where_the_object_is_already_there() {
-    let dir = temp_dir("cli-inject-op");
-    let (src, r) = single_part_source(&dir);
+    let tmp = temp_dir("cli-inject-op");
+    let dir = tmp.path();
+    let (src, r) = single_part_source(dir);
     let mask = dir.join("full.exr");
     let (data, _) = windows();
     Image::new(data)
@@ -225,8 +229,9 @@ fn inject_over_and_under_differ_where_the_object_is_already_there() {
 
 #[test]
 fn inject_errors_leave_no_output_and_the_input_alone() {
-    let dir = temp_dir("cli-inject-errors");
-    let (src, _) = single_part_source(&dir);
+    let tmp = temp_dir("cli-inject-errors");
+    let dir = tmp.path();
+    let (src, _) = single_part_source(dir);
     let before = std::fs::read(&src).expect("read");
     let mask = dir.join("m.exr");
     mask_at_first(&mask, 0.5);
@@ -252,7 +257,8 @@ fn inject_errors_leave_no_output_and_the_input_alone() {
 
 #[test]
 fn inject_picks_the_part_of_the_named_type() {
-    let dir = temp_dir("cli-inject-layer");
+    let tmp = temp_dir("cli-inject-layer");
+    let dir = tmp.path();
     let (data, display) = windows();
     let r: Vec<f32> = (0..12).map(|i| i as f32 / 11.0).collect();
     let crypto = |name: &str, obj: &str| {

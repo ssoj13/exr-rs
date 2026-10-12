@@ -701,8 +701,8 @@ mod tests {
     /// encode of its level 0; a file-backed one is saved at its overview level.
     #[test]
     fn headless_writes_the_shown_image() {
-        let dir = std::env::temp_dir().join(format!("exr-view-shot-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new().prefix("exr-view-shot-").tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let src = dir.join("shot.exr");
         let (w, h) = (300usize, 200usize);
         let plane = |f: &dyn Fn(usize, usize) -> f32| (0..w * h).map(|i| f(i % w, i / w)).collect::<Vec<f32>>();

@@ -73,6 +73,8 @@ exr-view = { path = "crates/exr-view", optional = true }
 exr-test-data = { workspace = true }
 # Writes the PNG fixtures of the convert/info tests, independent of the importer.
 png = "0.18"
+# Scratch directories that remove themselves (the cryptomatte tests).
+tempfile = "3"
 
 [features]
 # `viewer` wires the `exr-rs view <file>` (alias `v`) GPU viewer (egui + wgpu), `ofx` its OpenFX

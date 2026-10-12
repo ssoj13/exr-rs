@@ -3,7 +3,7 @@
 //! part's header; inject re-encodes one part and raw-copies every other.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use cryptomatte::{
     discover_path, from_named_mattes, CryptomatteFile, EncodeOptions, Error, HeaderAttrs,
@@ -37,12 +37,10 @@ struct PartSpec {
     deep: bool,
 }
 
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir()
-        .join("exr-rs-cryptomatte-tests")
-        .join(format!("{name}-{}", std::process::id()));
-    fs::create_dir_all(&dir).expect("scratch dir");
-    dir.join("multi.exr")
+/// A scratch directory removed when the guard drops, also when the test fails; the test
+/// file is `multi.exr` in it.
+fn scratch(name: &str) -> tempfile::TempDir {
+    tempfile::Builder::new().prefix(&format!("exr-rs-crypto-{name}-")).tempdir().expect("scratch dir")
 }
 
 /// Part `i` as a deep part: sample counts `pixel % 3`, sample value `pixel * 10 + s`.
@@ -203,7 +201,8 @@ fn assert_bunny_in_part_1(path: &Path) {
 
 #[test]
 fn type_in_its_own_part_is_found_and_extracted() {
-    let path = scratch("mp-own-part");
+    let tmp = scratch("mp-own-part");
+    let path = tmp.path().join("multi.exr");
     let (crypto, attrs) = bunny_payload();
     write_multipart(
         &path,
@@ -217,7 +216,8 @@ fn type_in_its_own_part_is_found_and_extracted() {
 
 #[test]
 fn metadata_in_another_part_follows_the_channels() {
-    let path = scratch("mp-split");
+    let tmp = scratch("mp-split");
+    let path = tmp.path().join("multi.exr");
     let (crypto, attrs) = bunny_payload();
     write_multipart(
         &path,
@@ -231,7 +231,8 @@ fn metadata_in_another_part_follows_the_channels() {
 
 #[test]
 fn metadata_repeated_in_every_part_is_listed_once() {
-    let path = scratch("mp-repeated");
+    let tmp = scratch("mp-repeated");
+    let path = tmp.path().join("multi.exr");
     let (crypto, attrs) = bunny_payload();
     let attrs2 = attrs.iter().map(|(k, a)| (k.clone(), a.clone_attr())).collect();
     write_multipart(
@@ -246,7 +247,8 @@ fn metadata_repeated_in_every_part_is_listed_once() {
 
 #[test]
 fn unknown_layers_error_on_a_multipart_file() {
-    let path = scratch("mp-unknown");
+    let tmp = scratch("mp-unknown");
+    let path = tmp.path().join("multi.exr");
     let (crypto, attrs) = bunny_payload();
     write_multipart(
         &path,
@@ -320,7 +322,8 @@ fn header_bytes(h: &Header) -> Vec<u8> {
 
 #[test]
 fn inject_rewrites_one_part_and_raw_copies_the_rest() {
-    let src = scratch("mp-inject-src");
+    let tmp = scratch("mp-inject-src");
+    let src = tmp.path().join("multi.exr");
     let out = src.with_file_name("out.exr");
     four_part_source(&src, 1);
     inject_cube(&src, &out, None).expect("inject");
@@ -356,7 +359,8 @@ fn inject_rewrites_one_part_and_raw_copies_the_rest() {
 
 #[test]
 fn inject_compression_override_applies_to_the_injected_part_only() {
-    let src = scratch("mp-inject-comp");
+    let tmp = scratch("mp-inject-comp");
+    let src = tmp.path().join("multi.exr");
     let out = src.with_file_name("out.exr");
     four_part_source(&src, 1);
     inject_cube(&src, &out, Some(Compression::Rle)).expect("inject");
@@ -370,7 +374,8 @@ fn inject_compression_override_applies_to_the_injected_part_only() {
 
 #[test]
 fn inject_drops_stale_metadata_from_other_parts() {
-    let src = scratch("mp-inject-stale");
+    let tmp = scratch("mp-inject-stale");
+    let src = tmp.path().join("multi.exr");
     let out = src.with_file_name("out.exr");
     four_part_source(&src, 0); // keys in the beauty part, channels in part 1
     inject_cube(&src, &out, None).expect("inject");
@@ -389,7 +394,8 @@ fn inject_drops_stale_metadata_from_other_parts() {
 
 #[test]
 fn inject_refuses_to_overwrite_its_multipart_source() {
-    let src = scratch("mp-inject-same");
+    let tmp = scratch("mp-inject-same");
+    let src = tmp.path().join("multi.exr");
     four_part_source(&src, 1);
     let before = fs::read(&src).expect("read");
     let err = inject_cube(&src, &src, None).unwrap_err();
@@ -399,7 +405,8 @@ fn inject_refuses_to_overwrite_its_multipart_source() {
 
 #[test]
 fn inject_into_a_one_part_multipart_file_needs_no_splice() {
-    let src = scratch("mp-inject-one");
+    let tmp = scratch("mp-inject-one");
+    let src = tmp.path().join("multi.exr");
     let out = src.with_file_name("out.exr");
     let (crypto, attrs) = bunny_payload();
     write_multipart(&src, &[PartSpec { name: "crypto", channels: crypto, attrs, tiled: false, deep: false }]);
@@ -439,7 +446,8 @@ fn headers_of(path: &Path) -> Vec<Header> {
 
 #[test]
 fn inject_raw_copies_deep_and_tiled_parts_byte_for_byte() {
-    let src = scratch("mp-inject-deep");
+    let tmp = scratch("mp-inject-deep");
+    let src = tmp.path().join("multi.exr");
     let out = src.with_file_name("out.exr");
     mixed_source(&src, 1, true);
     inject_cube(&src, &out, None).expect("inject");
@@ -464,7 +472,8 @@ fn inject_raw_copies_deep_and_tiled_parts_byte_for_byte() {
 
 #[test]
 fn inject_keeps_a_one_level_tiling_of_the_injected_part() {
-    let src = scratch("mp-inject-tiled");
+    let tmp = scratch("mp-inject-tiled");
+    let src = tmp.path().join("multi.exr");
     let out = src.with_file_name("out.exr");
     let (crypto, attrs) = bunny_payload();
     write_multipart(
@@ -507,7 +516,8 @@ fn write_mip_source(path: &Path) {
 
 #[test]
 fn inject_refuses_a_mip_tiled_part_instead_of_losing_its_levels() {
-    let src = scratch("mp-inject-mip");
+    let tmp = scratch("mp-inject-mip");
+    let src = tmp.path().join("multi.exr");
     write_mip_source(&src);
     // Reading and extracting is fine: level 0 is what a matte is made of.
     let file = CryptomatteFile::open(&src).expect("open");
@@ -520,7 +530,8 @@ fn inject_refuses_a_mip_tiled_part_instead_of_losing_its_levels() {
 
 #[test]
 fn single_part_inject_keeps_a_one_level_tiling() {
-    let src = scratch("sp-inject-tiled");
+    let tmp = scratch("sp-inject-tiled");
+    let src = tmp.path().join("multi.exr");
     let out = src.with_file_name("out.exr");
     let opts = EncodeOptions { ranked_layers: 1, ..EncodeOptions::new("CryptoObject") };
     let mut enc = from_named_mattes(Windows::origin(W, H).unwrap(), &[NamedMatte::new("bunny", &[1.0; N])], &opts)
@@ -559,7 +570,8 @@ fn spliced_file_passes_cpp_exrcheck() {
         );
     };
     for (deep, modes) in [(false, vec![vec![], vec!["-m"], vec!["-t"], vec!["-c"]]), (true, vec![vec!["-c"]])] {
-        let src = scratch(if deep { "mp-inject-cpp-deep" } else { "mp-inject-cpp" });
+        let tmp = scratch(if deep { "mp-inject-cpp-deep" } else { "mp-inject-cpp" });
+        let src = tmp.path().join("multi.exr");
         let out = src.with_file_name("out.exr");
         mixed_source(&src, 1, deep);
         inject_cube(&src, &out, None).expect("inject");
@@ -572,7 +584,8 @@ fn spliced_file_passes_cpp_exrcheck() {
 
 #[test]
 fn a_failing_splice_leaves_no_output_and_an_existing_one_untouched() {
-    let src = scratch("mp-inject-fail");
+    let tmp = scratch("mp-inject-fail");
+    let src = tmp.path().join("multi.exr");
     let dir = src.parent().expect("dir").to_path_buf();
     four_part_source(&src, 1);
     let file = CryptomatteFile::open(&src).expect("open");
@@ -638,7 +651,8 @@ fn inject_keeps_the_channel_spelling_the_file_uses() {
         (Spelling::Lower, "CryptoObject00.r"),
         (Spelling::Upper, "CryptoObject00.R"),
     ] {
-        let src = scratch(&format!("spell-{spelling:?}"));
+        let tmp = scratch(&format!("spell-{spelling:?}"));
+        let src = tmp.path().join("multi.exr");
         let out = src.with_file_name("out.exr");
         write_spelled_source(&src, spelling);
         inject_cube(&src, &out, None).expect("inject");

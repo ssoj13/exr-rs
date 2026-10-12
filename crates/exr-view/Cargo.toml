@@ -97,10 +97,9 @@ bytemuck = { version = "1", features = ["derive"] }
 anyhow = "1"
 
 # Logging: the `log` facade across the lib (info/debug/trace at load / GPU /
-# sequence / cache seams; warn/error replace the bare eprintln!s), with the
-# `env_logger` backend initialised once in the `exr-view` BINARY (main.rs).
+# sequence / cache seams; warn/error replace the bare eprintln!s). The backend is
+# the `exr-rs` binary's (`src/main.rs`); a library picks none.
 log = { workspace = true }
-env_logger = { workspace = true }
 
 # Dock layout (de)serialization for egui_dock's `serde` feature; also drives the
 # viewer config (window geom + controls + recents) in `persist.rs`.

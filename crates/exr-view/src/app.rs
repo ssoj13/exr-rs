@@ -3680,8 +3680,8 @@ mod watch_tests {
     /// not, and nothing is checked before the period ends.
     #[test]
     fn watch_sees_each_rewrite_once() {
-        let dir = std::env::temp_dir().join(format!("exr-view-watch-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new().prefix("exr-view-watch-").tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let path = dir.join("shot.exr");
         std::fs::write(&path, b"v1").unwrap();
         let mut w = Watch::new(path.clone());
@@ -3715,8 +3715,8 @@ mod seq_watch_tests {
 
     #[test]
     fn sequence_does_not_cancel_an_unpresented_playback_frame() {
-        let dir = std::env::temp_dir().join(format!("exr-view-handoff-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new().prefix("exr-view-handoff-").tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let path = |f| dir.join(format!("shot.{f:04}.exr"));
         for f in 1..=2 { frame(&path(f), f as f32); }
         let mut app = AppState::new(None, Config::default(), true, Arc::new(|| {}));
@@ -3754,8 +3754,8 @@ mod seq_watch_tests {
     /// frame from the cache; the decode loader resolves the new frame.
     #[test]
     fn rescan_follows_a_sequence_changing_on_disk() {
-        let dir = std::env::temp_dir().join(format!("exr-view-seqwatch-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new().prefix("exr-view-seqwatch-").tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let name = |f: i32| dir.join(format!("shot.{f:04}.exr"));
         for f in 1..=3 {
             frame(&name(f), f as f32);
@@ -3801,8 +3801,8 @@ mod seq_watch_tests {
     /// whatever `--auto` says: on = the whole sequence, off = the one frame.
     #[test]
     fn chosen_paths_follow_the_auto_sequence_option() {
-        let dir = std::env::temp_dir().join(format!("exr-view-openseq-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new().prefix("exr-view-openseq-").tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let name = |f: i32| dir.join(format!("shot.{f:04}.exr"));
         for f in 1..=3 {
             frame(&name(f), f as f32);
@@ -3827,8 +3827,8 @@ mod seq_watch_tests {
     /// frames decode through `exr-import`.
     #[test]
     fn a_png_sequence_opens_as_a_sequence() {
-        let dir = std::env::temp_dir().join(format!("exr-view-pngseq-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new().prefix("exr-view-pngseq-").tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let name = |f: i32| dir.join(format!("shot.{f:04}.png"));
         for f in 1..=3 {
             crate::image::tests::write_png(&name(f), [f as u8 * 40, 0, 0, 255]);
@@ -4172,8 +4172,8 @@ mod key_path_tests {
     fn build_ui_registers_every_panel() {
         let mut gpu = NoGpu;
         let status = GpuStatus { name: String::new(), backend: String::new(), vram_budget: None };
-        let dir = std::env::temp_dir().join(format!("exr-view-keypath-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new().prefix("exr-view-keypath-").tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let name = |f: i32| dir.join(format!("shot.{f:04}.exr"));
         let win = imath_rs::Box2i::from_min_max(imath_rs::V2i::new(0, 0), imath_rs::V2i::new(1, 1));
         for f in 1..=2 {

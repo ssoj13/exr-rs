@@ -63,6 +63,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
 dependencies = [
  "cfg-if",
+ "const-random",
  "getrandom 0.3.4",
  "once_cell",
  "serde",
@@ -729,6 +730,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
+name = "const-random"
+version = "0.1.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87e00182fe74b066627d63b85fd550ac2998d4b0bd86bfed477a0ae4c7c71359"
+dependencies = [
+ "const-random-macro",
+]
+
+[[package]]
+name = "const-random-macro"
+version = "0.1.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9d839f2a20b0aee515dc581a6172f2321f96cab76c1a38a4c584a194955390e"
+dependencies = [
+ "getrandom 0.2.17",
+ "once_cell",
+ "tiny-keccak",
+]
+
+[[package]]
 name = "constant_time_eq"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -947,6 +968,7 @@ dependencies = [
  "murmur3",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
@@ -977,7 +999,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 [[package]]
 name = "curves"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/curves-rs.git?branch=main#169ded7299f85d1f2b2472c5f579679993c9c222"
+source = "git+ssh://git@github.com/ssoj13/curves-rs.git?branch=main#ada2822fe7eae5a7badeb5622be4f8db2a6a3d7a"
 
 [[package]]
 name = "dashmap"
@@ -1628,7 +1650,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1728,6 +1750,7 @@ dependencies = [
  "imath-rs",
  "log",
  "png",
+ "tempfile",
 ]
 
 [[package]]
@@ -1774,7 +1797,6 @@ dependencies = [
  "egui-winit",
  "egui_dock",
  "egui_kittest",
- "env_logger",
  "exr-core",
  "exr-gpu",
  "exr-import",
@@ -1950,7 +1972,7 @@ dependencies = [
 [[package]]
 name = "fractal-core"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#717cbedb39a8c26ded62ae9cf0d1d578081b0c89"
+source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#f6a3c5f5fd437ffe124d319d844854451899f560"
 dependencies = [
  "standard-surface-bsdf",
 ]
@@ -1958,7 +1980,7 @@ dependencies = [
 [[package]]
 name = "fractal-env"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#717cbedb39a8c26ded62ae9cf0d1d578081b0c89"
+source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#f6a3c5f5fd437ffe124d319d844854451899f560"
 dependencies = [
  "fractal-core",
  "pt-integrator",
@@ -1968,7 +1990,7 @@ dependencies = [
 [[package]]
 name = "fractal-materials"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#717cbedb39a8c26ded62ae9cf0d1d578081b0c89"
+source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#f6a3c5f5fd437ffe124d319d844854451899f560"
 
 [[package]]
 name = "futures-core"
@@ -2002,6 +2024,17 @@ checksum = "1bd49230192a3797a9a4d6abe9b3eed6f7fa4c8a8a4947977c6f80025f92cbd8"
 dependencies = [
  "rustix 1.1.5",
  "windows-link",
+]
+
+[[package]]
+name = "getrandom"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "wasi",
 ]
 
 [[package]]
@@ -2116,7 +2149,7 @@ dependencies = [
 [[package]]
 name = "gpu-info-rs"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/gpu-info-rs.git?branch=main#5d345b3bc2a44e1ff2bcbbcfe2f9d89b9a66568c"
+source = "git+ssh://git@github.com/ssoj13/gpu-info-rs.git?branch=main#136386b436625acf0fdbce834ed99a51e04a0a90"
 dependencies = [
  "ash",
  "bytemuck",
@@ -2974,6 +3007,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
+name = "no-std-compat"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b93853da6d84c2e3c7d730d6473e8817692dd89be387eb01b94d7f108ecb5b8c"
+dependencies = [
+ "spin",
+]
+
+[[package]]
 name = "no_std_io2"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3444,7 +3486,7 @@ dependencies = [
 [[package]]
 name = "ofx"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "cudarc",
  "gpu-info-rs",
@@ -3459,7 +3501,7 @@ dependencies = [
 [[package]]
 name = "ofx-cuda"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "bytemuck",
  "cudarc",
@@ -3469,7 +3511,7 @@ dependencies = [
 [[package]]
 name = "ofx-density"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -3478,7 +3520,7 @@ dependencies = [
 [[package]]
 name = "ofx-effects"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "gpu-info-rs",
  "ofx",
@@ -3500,7 +3542,7 @@ dependencies = [
 [[package]]
 name = "ofx-finish"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "bytemuck",
  "libm",
@@ -3511,7 +3553,7 @@ dependencies = [
 [[package]]
 name = "ofx-flare"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -3521,7 +3563,7 @@ dependencies = [
 [[package]]
 name = "ofx-format"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "ofx-sys",
 ]
@@ -3529,7 +3571,7 @@ dependencies = [
 [[package]]
 name = "ofx-fractal"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "cudarc",
  "fractal-core",
@@ -3547,7 +3589,7 @@ dependencies = [
 [[package]]
 name = "ofx-gen"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "bytemuck",
  "gpu-info-rs",
@@ -3560,7 +3602,7 @@ dependencies = [
 [[package]]
 name = "ofx-host"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -3578,7 +3620,7 @@ dependencies = [
 [[package]]
 name = "ofx-host-egui"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "anyhow",
  "egui",
@@ -3595,7 +3637,7 @@ dependencies = [
 [[package]]
 name = "ofx-host-gl"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "anyhow",
  "libloading 0.9.0",
@@ -3605,7 +3647,7 @@ dependencies = [
 [[package]]
 name = "ofx-host-wgpu"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "anyhow",
  "ash",
@@ -3621,7 +3663,7 @@ dependencies = [
 [[package]]
 name = "ofx-noise"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -3630,7 +3672,7 @@ dependencies = [
 [[package]]
 name = "ofx-preset"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "serde",
  "serde_json",
@@ -3640,7 +3682,7 @@ dependencies = [
 [[package]]
 name = "ofx-runtime"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "anyhow",
  "gpu-info-rs",
@@ -3655,7 +3697,7 @@ dependencies = [
 [[package]]
 name = "ofx-sim"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -3664,12 +3706,12 @@ dependencies = [
 [[package]]
 name = "ofx-sys"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 
 [[package]]
 name = "ofx-warp"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#cc009e2b81ca31523edf227565fda68d41bdd05f"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#a7785695389bb7d0d1b8e8bbf9c85d21fe00b9e2"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -3680,6 +3722,9 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "once_cell_polyfill"
@@ -4011,7 +4056,7 @@ dependencies = [
 [[package]]
 name = "pt-core"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#ef2c6990bcdf12b89ba4de7feda650deae867c08"
+source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#6901ac14cf77c2cbc849862a410d5a515347d5be"
 dependencies = [
  "bytemuck",
  "glam",
@@ -4020,7 +4065,7 @@ dependencies = [
 [[package]]
 name = "pt-integrator"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#ef2c6990bcdf12b89ba4de7feda650deae867c08"
+source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#6901ac14cf77c2cbc849862a410d5a515347d5be"
 dependencies = [
  "half",
  "pt-core",
@@ -4354,7 +4399,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "render-env"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#ef2c6990bcdf12b89ba4de7feda650deae867c08"
+source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#6901ac14cf77c2cbc849862a410d5a515347d5be"
 dependencies = [
  "bytemuck",
  "image",
@@ -4391,6 +4436,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "rhai"
+version = "1.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0334639972c0ea5a3fd366aa36116754a11431b619fec3ed559b3f73bcbcebf5"
+dependencies = [
+ "ahash",
+ "bitflags 2.13.2",
+ "no-std-compat",
+ "num-traits",
+ "once_cell",
+ "rhai_codegen",
+ "smallvec",
+ "smartstring",
+ "thin-vec",
+ "web-time",
+]
+
+[[package]]
+name = "rhai_codegen"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3cd3a7535e50bf36857e7be7bec276d334e8c2dfa469c2201226fd01638ea5ca"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -4466,7 +4540,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4731,12 +4805,13 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 [[package]]
 name = "slate"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/slate-rs.git?branch=main#da738c1f4c4f4ed2c84483baad3065685309b582"
+source = "git+ssh://git@github.com/ssoj13/slate-rs.git?branch=main#a2bb525a55479945b81c354fbb4da815f8ef99c7"
 dependencies = [
  "cosmic-text",
  "kdl",
  "png",
  "resvg",
+ "rhai",
  "strsim",
  "time",
  "tiny-skia 0.12.0",
@@ -4759,6 +4834,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "smartstring"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fb72c633efbaa2dd666986505016c32c3044395ceaf881518399d2f4127ee29"
+dependencies = [
+ "autocfg",
+ "static_assertions",
+ "version_check",
 ]
 
 [[package]]
@@ -4840,6 +4926,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4aaa7368fcf4852a4c2dd92df0cace6a71f2091ca0a23391ce7f3a31833f1523"
 
 [[package]]
+name = "spin"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
+
+[[package]]
 name = "spirv"
 version = "0.4.0+sdk-1.4.341.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4857,7 +4949,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "standard-surface-bsdf"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#ef2c6990bcdf12b89ba4de7feda650deae867c08"
+source = "git+ssh://git@github.com/ssoj13/render-rs.git?branch=main#6901ac14cf77c2cbc849862a410d5a515347d5be"
 dependencies = [
  "libm",
 ]
@@ -4977,7 +5069,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4988,6 +5080,12 @@ checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
 ]
+
+[[package]]
+name = "thin-vec"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6a4b9ba8738cb4a4f399d37e266becfd475e75eb73425b87a05a2f2039ba63e"
 
 [[package]]
 name = "thiserror"
@@ -5074,6 +5172,15 @@ checksum = "7e689342a48d2ea927c87ea50cabf8594854bf940e9310208848d680d668ed85"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "tiny-keccak"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c9d3793400a45f954c52e73d068316d76b6f4e36977e3fcebb13a2721e80237"
+dependencies = [
+ "crunchy",
 ]
 
 [[package]]
@@ -5594,6 +5701,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasi"
+version = "0.11.1+wasi-snapshot-preview1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
+
+[[package]]
 name = "wasip2"
 version = "1.0.4+wasi-0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6053,7 +6166,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
