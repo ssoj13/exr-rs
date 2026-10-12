@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use ofx_host_egui::{
     Backend, CanonicalView, EffectStack, EffectUi, MessageKind, StackAction, StackRow, StackStatus,
-    OfxParamsUi, UiEvents, backend_options, plugin_menu,
+    UiEvents, backend_options, plugin_menu,
 };
 use ofx_runtime::ofx_host::{HostContext, HostInfo, RenderSite};
 use ofx_runtime::{
@@ -497,16 +497,10 @@ impl OfxEffects {
         if self.ui.as_ref().is_some_and(|ui| ui.shows(effect)) { return; }
         if let Some(attached) = EffectUi::attach(effect) {
             match attached {
-                Ok(mut ui) => {
+                Ok(ui) => {
                     for problem in ui.problems() { log::warn!("OpenFX effect UI: {problem}"); }
-                    // `EffectUi` builds its editor without a file dialog: rebuild it with ours, or the
-                    // path parameters' browse buttons report "no file dialog installed".
-                    // TODO: ofx-rs lacks `EffectUi::with_picker`; replace this rebuild when it lands.
-                    match OfxParamsUi::for_instance(ui.instance()) {
-                        Ok(params) => *ui.params_mut() = params.with_picker(self.adapter.clone()),
-                        Err(error) => log::warn!("OpenFX browse dialog not installed: {error:#}"),
-                    }
-                    self.ui = Some(ui);
+                    // The path parameters' browse buttons open the viewer's one file dialog.
+                    self.ui = Some(ui.with_picker(self.adapter.clone()));
                 }
                 Err(error) => self.error = Some(format!("{error:#}")),
             }

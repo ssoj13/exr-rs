@@ -287,11 +287,16 @@ impl FilePick {
     #[cfg(feature = "ofx")]
     pub fn ofx(&mut self, mem: &DialogMemory, fallback: Option<PathBuf>, request: ofx_host_egui::PickRequest) {
         use ofx_host_egui::PickKind;
-        let key = format!("ofx:{}", match request.kind {
+        let kind = match request.kind {
             PickKind::Open => "open",
             PickKind::Save => "save",
             PickKind::Folder => "folder",
-        });
+        };
+        // Per parameter when the panel names its owner; the kind alone otherwise.
+        let key = match &request.owner {
+            Some((plugin, param)) => format!("ofx:{plugin}:{param}:{kind}"),
+            None => format!("ofx:{kind}"),
+        };
         let mut dialog = Self::blank(&request.title);
         if let Some(name) = &request.name {
             dialog = dialog.default_file_name(name);
@@ -540,6 +545,7 @@ mod tests {
             dir,
             name: Some("p.json".into()),
             filters,
+            owner: None,
         };
         let mut p = FilePick::new(true);
         let json = vec![("JSON".to_owned(), vec!["json".to_owned()])];
