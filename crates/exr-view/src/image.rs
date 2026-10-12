@@ -157,6 +157,11 @@ pub struct DecodedFrame {
     pub display_window: Box2i,
     /// Validated typed header pixel aspect ratio, retained for canonical processing.
     pub pixel_aspect: f32,
+    /// Absolute light: the nits of RGB (1, 1, 1), from the standard `whiteLuminance` attribute
+    /// (OpenEXR `ImfStandardAttributes.h`) or an imported PQ still (`exr_import::Loaded::white_nits`).
+    /// The display shows such a frame at those nits whatever the SDR white is
+    /// ([`Self::light_gain`]); `None` = scene-relative, 1.0 shown at SDR white.
+    pub white_nits: Option<f32>,
     /// EXR channel names, in header (alphabetical) order — same order as
     /// [`Self::channels`] and the indices in [`Self::layers`].
     pub channel_names: Vec<String>,
@@ -290,6 +295,7 @@ impl DecodedFrame {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: validated_aspect(header.pixel_aspect_ratio().map_err(LoadError::from_exr)?)?,
+            white_nits: white_nits_of(header)?,
         })
     }
 
@@ -302,6 +308,14 @@ impl DecodedFrame {
             Self::decode(path, peek_header(path).as_ref()).map(Self::warmed)
         };
         frame.map(|f| Self { version, ..f })
+    }
+
+    /// The gain on this frame's light for `target`: an absolute frame's pixels reach the nits
+    /// they hold (`white_nits` per 1.0) on an HDR output whatever its SDR white is; on SDR,
+    /// BT.2408's HDR reference white (203 nits) is SDR white. A scene-relative frame is 1.0.
+    pub fn light_gain(&self, target: &crate::present::Target) -> f32 {
+        let white = if target.hdr { target.white } else { crate::present::HDR_REF_WHITE };
+        self.white_nits.map_or(1.0, |nits| nits / white)
     }
 
     /// A non-EXR still (`exr-import`: PNG, DPX, HDR, ...), always resident. It arrives as
@@ -332,6 +346,7 @@ impl DecodedFrame {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
+            white_nits: loaded.white_nits,
         })
     }
 
@@ -393,6 +408,7 @@ impl DecodedFrame {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: validated_aspect(header.pixel_aspect_ratio().map_err(LoadError::from_exr)?)?,
+            white_nits: white_nits_of(header)?,
         })
     }
 
@@ -481,6 +497,7 @@ impl DecodedFrame {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect,
+            white_nits: header.map(white_nits_of).transpose()?.flatten(),
         })
     }
 
@@ -2299,6 +2316,16 @@ fn validated_aspect(value: f32) -> Result<f32, LoadError> {
     else { Err(LoadError::Read("pixelAspectRatio must be finite and positive".into())) }
 }
 
+/// The header's `whiteLuminance` (nits of RGB 1, 1, 1), `None` when absent.
+fn white_nits_of(header: &Header) -> Result<Option<f32>, LoadError> {
+    if !header.has_white_luminance() {
+        return Ok(None);
+    }
+    let nits = *header.white_luminance().map_err(LoadError::from_exr)?;
+    if nits.is_finite() && nits > 0.0 { Ok(Some(nits)) }
+    else { Err(LoadError::Read(format!("whiteLuminance {nits} must be finite and positive"))) }
+}
+
 // ── Tests (headless — the load + materialize seam, no GPU) ─────────────────────
 
 #[cfg(test)]
@@ -2336,6 +2363,7 @@ pub(crate) mod tests_support {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
+            white_nits: None,
         }
     }
 }
@@ -2727,6 +2755,7 @@ pub(crate) mod tests {
                 spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
+            white_nits: None,
             },
             w,
             h,
@@ -2762,6 +2791,7 @@ pub(crate) mod tests {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
+            white_nits: None,
         });
         let mut img = ImageBackend::from_frame(frame);
 
@@ -2832,6 +2862,7 @@ pub(crate) mod tests {
                 spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
+            white_nits: None,
             };
             let group = frame.resolve_layer(layer);
             let mut buf = Vec::new();
@@ -2870,6 +2901,7 @@ pub(crate) mod tests {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
+            white_nits: None,
         });
         let mut img = ImageBackend::from_frame(frame);
         img.set_view(&Selection::layer("depth"));
@@ -2939,6 +2971,7 @@ pub(crate) mod tests {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
+            white_nits: None,
         }));
         assert_eq!(img.pixel_at(2, 0), None);
         assert_eq!(img.pixel_at(0, 2), None);
@@ -2964,6 +2997,7 @@ pub(crate) mod tests {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
+            white_nits: None,
         };
         let b = |x0, y0, x1, y1| {
             Box2i::from_min_max(imath_rs::V2i::new(x0, y0), imath_rs::V2i::new(x1, y1))
@@ -3007,6 +3041,7 @@ pub(crate) mod tests {
                 spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
+            white_nits: None,
             })
         };
         let mut img = ImageBackend::from_frame(frame(0.25, 1));
@@ -3055,6 +3090,7 @@ pub(crate) mod tests {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: f.pixel_aspect,
+            white_nits: f.white_nits,
         }
     }
 

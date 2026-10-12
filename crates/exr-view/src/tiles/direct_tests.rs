@@ -677,6 +677,7 @@ fn look() -> Look {
         nearest: true,
         hdr: false,
         ocio_gain: 1.0,
+        light_gain: 1.0,
     }
 }
 #[test]

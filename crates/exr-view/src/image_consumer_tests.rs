@@ -185,6 +185,7 @@ fn look() -> DisplayLook {
         nearest: true,
         hdr: false,
         ocio_gain: 1.0,
+        light_gain: 1.0,
     }
 }
 fn place(zoom: f32, width: f32) -> Placement {

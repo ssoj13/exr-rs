@@ -56,6 +56,9 @@ pub struct Look {
     /// the OS's, else 1000): an HLG PNG is encoded for it, so the file is what an HLG window
     /// shows. HLG is relative to its display; PQ and the EXR ignore this.
     pub peak: f32,
+    /// Gain on the colour image's source light (`DecodedFrame::light_gain`): an absolute-light
+    /// frame is saved at the nits the viewer shows it at. 1.0 for scene-relative frames.
+    pub light_gain: f32,
 }
 
 impl Default for Look {
@@ -69,6 +72,7 @@ impl Default for Look {
             ocio: None,
             white: crate::present::SCRGB_NITS,
             peak: egui_display::export::HLG_REFERENCE_PEAK_NITS,
+            light_gain: 1.0,
         }
     }
 }
@@ -173,6 +177,7 @@ impl<'a> RowSession<'a> {
         let (rgba, alpha, _) = self.buffers();
         let pixels: &mut [[f32; 4]] = bytemuck::try_cast_slice_mut(rgba)
             .map_err(|_| anyhow::anyhow!("export RGBA row is not aligned"))?;
+        light(pixels, look);
         if let Some(transform) = look.ocio.as_ref().filter(|_| look.mode == transfer::mode::RGBA) {
             transform.display_scratch(pixels, alpha, look.exposure, look.gamma, transform.gain(look.white))
                 .map_err(anyhow::Error::msg)?;
@@ -229,18 +234,31 @@ impl<'a> RowSession<'a> {
 /// PNG's is straight, so the image is saved as the viewer paints it, without the
 /// checkerboard behind it.
 fn canvas_px(linear: &[f32], look: &Look) -> Vec<[f32; 3]> {
+    let mut px: Vec<[f32; 4]> = linear.as_chunks::<4>().0.to_vec();
+    light(&mut px, look);
     if let Some(t) = look.ocio.as_ref().filter(|_| look.mode == transfer::mode::RGBA) {
-        let mut px: Vec<[f32; 4]> = linear.as_chunks::<4>().0.to_vec();
         t.display(&mut px, look.exposure, look.gamma, t.gain(look.white));
         return px.iter().map(|d| [d[0], d[1], d[2]]).collect();
     }
-    linear
-        .as_chunks::<4>().0.iter()
+    px.iter()
         .map(|p| {
-            let d = transfer::display_pixel([p[0], p[1], p[2], p[3]], look.exposure, look.gamma, look.mode, look.tonemap);
+            let d = transfer::display_pixel(*p, look.exposure, look.gamma, look.mode, look.tonemap);
             [d[0], d[1], d[2]]
         })
         .collect()
+}
+
+/// The tile shader's `lit`: the colour image's light times `look.light_gain`; isolated channels
+/// are data and stay as stored.
+fn light(px: &mut [[f32; 4]], look: &Look) {
+    if look.mode != transfer::mode::RGBA || look.light_gain == 1.0 {
+        return;
+    }
+    for p in px {
+        for c in &mut p[..3] {
+            *c *= look.light_gain;
+        }
+    }
 }
 
 /// `linear` (`w * h * 4` RGBA) through the display transform, as SDR 8-bit RGB.
@@ -592,14 +610,16 @@ const HEADLESS_WAIT: Duration = Duration::from_secs(600);
 
 /// Open `input` as the viewer does (file-backed above `backing` bytes) and wait for its
 /// level 0 / overview; `ram_budget` sizes the tile cache. No window, no GPU.
-fn grab_wait(input: &Path, backing: u64, ram_budget: usize, upload: usize) -> Result<Raw> {
+fn grab_wait(input: &Path, backing: u64, ram_budget: usize, upload: usize) -> Result<(Raw, f32)> {
     let frame = DecodedFrame::open(input, backing).map_err(|e| anyhow::anyhow!("{}: {e}", input.display()))?;
+    // Headless SDR and HDR both put SDR white at BT.2408's HDR reference white (203 nits).
+    let gain = frame.white_nits.map_or(1.0, |nits| nits / HEADLESS_WHITE);
     let mut img = ImageBackend::from_frame(std::sync::Arc::new(frame));
     let mut target = DisplayTarget::new(ram_budget, upload);
     let deadline = Instant::now() + HEADLESS_WAIT;
     loop {
         if let Some(raw) = grab(&mut img, &mut target, u32::MAX, None)? {
-            return Ok(raw);
+            return Ok((raw, gain));
         }
         if Instant::now() > deadline {
             bail!("{}: the overview did not arrive within {HEADLESS_WAIT:?}", input.display());
@@ -610,8 +630,8 @@ fn grab_wait(input: &Path, backing: u64, ram_budget: usize, upload: usize) -> Re
 
 /// Open `input`, take the shot with the neutral look and write it to `output` as an SDR PNG.
 pub fn headless(input: &Path, output: &Path, backing: u64, ram_budget: usize, upload: usize) -> Result<Shot> {
-    let raw = grab_wait(input, backing, ram_budget, upload)?;
-    let shot = raw.sdr(&Look::default())?;
+    let (raw, light_gain) = grab_wait(input, backing, ram_budget, upload)?;
+    let shot = raw.sdr(&Look { light_gain, ..Look::default() })?;
     write_png(output, &shot)?;
     Ok(shot)
 }
@@ -629,8 +649,8 @@ pub fn headless_hdr(
     ram_budget: usize,
     upload: usize,
 ) -> Result<(u32, u32)> {
-    let raw = grab_wait(input, backing, ram_budget, upload)?;
-    save_hdr(output, &raw, &Look { white: HEADLESS_WHITE, ..Look::default() }, png)?;
+    let (raw, light_gain) = grab_wait(input, backing, ram_budget, upload)?;
+    save_hdr(output, &raw, &Look { white: HEADLESS_WHITE, light_gain, ..Look::default() }, png)?;
     Ok((raw.w, raw.h))
 }
 
@@ -970,6 +990,29 @@ mod tests {
             let c = ch.map(|a| a.value).expect("chromaticities");
             assert_eq!((c.red, c.green, c.blue, c.white), ([0.64, 0.33], [0.30, 0.60], [0.15, 0.06], [0.3127, 0.3290]));
         }
+    }
+
+    /// A display-light EXR reopens as absolute light: its `whiteLuminance` is the frame's
+    /// `white_nits`, so an HDR output shows it at the saved nits whatever its SDR white, and an
+    /// SDR output puts BT.2408's 203 nits at white. Save view scales the colour image only.
+    #[test]
+    fn absolute_light_round_trips_and_scales_only_colour() {
+        let guard = tmp("absolute");
+        let path = guard.path().join("a.exr");
+        let px = vec![1.0f32, 0.5, 0.25, 1.0];
+        write_exr(&path, &raw(1, 1, px.clone()), &Look { white: 300.0, ..Look::default() }).unwrap();
+        let frame = DecodedFrame::load(&path).unwrap();
+        assert_eq!(frame.white_nits, Some(300.0));
+        let target = |hdr, white| crate::present::Target { hdr, white, peak: 1000.0 };
+        assert_eq!(frame.light_gain(&target(true, 150.0)), 2.0);
+        assert_eq!(frame.light_gain(&target(false, 80.0)), 300.0 / crate::present::HDR_REF_WHITE);
+        let scene = crate::image::tests_support::frame_of(1, 1, Vec::new());
+        assert_eq!(scene.light_gain(&target(true, 150.0)), 1.0, "scene-relative light is not scaled");
+
+        let lit = canvas_px(&px, &Look { light_gain: 2.0, ..Look::default() });
+        assert_eq!(lit, canvas_px(&[2.0, 1.0, 0.5, 1.0], &Look::default()));
+        let red = |light_gain| Look { light_gain, mode: transfer::mode::R, ..Look::default() };
+        assert_eq!(canvas_px(&px, &red(2.0)), canvas_px(&px, &red(1.0)), "an isolated channel is data");
     }
 
 

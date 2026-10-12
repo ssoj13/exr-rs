@@ -281,6 +281,7 @@ pub fn show(
         nearest: img.zoom >= 1.0,
         hdr: controls.target.hdr,
         ocio_gain: controls.colour.active().map_or(1.0, |t| t.gain(controls.target.white)),
+        light_gain: img.frame.light_gain(&controls.target),
     };
     let colour = controls.colour.active().map(|t| &**t);
     let shown = match gpu.gpu() {

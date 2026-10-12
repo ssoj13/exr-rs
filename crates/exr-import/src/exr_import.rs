@@ -42,6 +42,10 @@ pub struct Loaded {
     pub image: Image,
     /// Source facts in display order: format, colour space, alpha handling, reader attributes.
     pub meta: Vec<(String, String)>,
+    /// Absolute light: the nits of RGB (1, 1, 1) when the source encodes absolute luminance
+    /// (PQ: [`HDR_REFERENCE_WHITE_NITS`]), `None` for scene-relative sources. The EXR equivalent
+    /// is the `whiteLuminance` attribute.
+    pub white_nits: Option<f32>,
 }
 
 /// Why a still did not load.
@@ -137,11 +141,21 @@ pub enum Tf {
     /// Kodak Cineon printing-density log. `lin = (10^((code - 685) * 0.002 / 0.6) - k) / (1 - k)`
     /// with `k = 10^((95 - 685) * 0.002 / 0.6)`, `code = v * 1023`: 685 maps to 1, 95 to 0.
     Cineon,
-    /// SMPTE ST 2084, 100 cd/m2 = 1.0.
+    /// SMPTE ST 2084, [`HDR_REFERENCE_WHITE_NITS`] = 1.0.
     Pq,
-    /// BT.2100 HLG inverse OETF (scene light, no display OOTF).
+    /// BT.2100 HLG inverse OETF (scene light, no display OOTF), reference white (75 % signal) = 1.0.
     Hlg,
 }
+
+/// BT.2408 HDR reference white in cd/m2: the level SDR white (1.0 here and in the viewer) sits at
+/// in HDR. A PQ still decodes as `nits / 203`, so the viewer, which shows 1.0 at the display's SDR
+/// white, puts its pixels at the nits the file holds when that white is 203. (OCIO's display
+/// reference, 1.0 = 100 nits, would show every PQ still about twice as bright.)
+pub const HDR_REFERENCE_WHITE_NITS: f32 = 203.0;
+
+/// HLG scene light of BT.2408's reference white (75 % HLG signal), the divisor that puts it at 1.0;
+/// without it a reference white decodes to ~0.26 and HLG stills show about four times too dark.
+static HLG_REFERENCE_WHITE: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| vfx_transfer::hlg::eotf(0.75));
 
 impl Tf {
     /// Encoded value `v` to scene-linear.
@@ -151,8 +165,8 @@ impl Tf {
             Tf::Srgb => vfx_transfer::srgb::eotf(v),
             Tf::Rec709 => vfx_transfer::rec709::eotf(v),
             Tf::Gamma(g) => vfx_transfer::gamma::gamma_eotf(v, g),
-            Tf::Pq => vfx_transfer::pq::eotf_normalized(v),
-            Tf::Hlg => vfx_transfer::hlg::eotf(v),
+            Tf::Pq => vfx_transfer::pq::eotf(v) / HDR_REFERENCE_WHITE_NITS,
+            Tf::Hlg => vfx_transfer::hlg::eotf(v) / *HLG_REFERENCE_WHITE,
             Tf::Cineon => {
                 let k = 10f32.powf((95.0 - 685.0) * 0.002 / 0.6);
                 (10f32.powf((v * 1023.0 - 685.0) * 0.002 / 0.6) - k) / (1.0 - k)
@@ -369,7 +383,8 @@ pub fn load(path: &Path) -> Result<Loaded, ImportError> {
             meta.push((k.to_string(), v));
         }
     }
-    Ok(Loaded { image: out, meta })
+    let white_nits = (tf == Tf::Pq).then_some(HDR_REFERENCE_WHITE_NITS);
+    Ok(Loaded { image: out, meta, white_nits })
 }
 
 /// A header-level summary for `exr-rs info` (size, channels, format) without decoding the pixels.

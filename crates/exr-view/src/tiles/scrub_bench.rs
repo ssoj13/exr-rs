@@ -117,6 +117,7 @@ fn resident_frame_switch_cost() {
         nearest: false,
         hdr: false,
         ocio_gain: 1.0,
+        light_gain: 1.0,
     };
 
     let mut img = ImageBackend::from_frame(Arc::clone(first));

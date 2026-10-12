@@ -52,7 +52,7 @@ fn image(w: u32, h: u32) -> Vec<f32> {
 /// arrive before the assertion. Drop releases workers even after an assertion.
 struct WorkerGate(Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>);
 fn test_look() -> Look {
-    Look { exposure_ev: 0.0, gamma: 1.0, channel_mode: mode::RGBA, tonemap: 0, nearest: true, hdr: false, ocio_gain: 1.0 }
+    Look { exposure_ev: 0.0, gamma: 1.0, channel_mode: mode::RGBA, tonemap: 0, nearest: true, hdr: false, ocio_gain: 1.0, light_gain: 1.0 }
 }
 impl WorkerGate {
     fn new() -> Self { Self(Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()))) }
@@ -294,6 +294,9 @@ fn render(
 /// Compare a render with the built-in CPU twin over the level-`k` `f16` texels.
 fn check(got: &[f32], level: &[f32], w: u32, h: u32, look: Look, what: &str) {
     let twin = |t: [f32; 4]| {
+        // `lit`: the colour image's light gain; an isolated channel is data.
+        let g = if look.channel_mode == mode::RGBA { look.light_gain } else { 1.0 };
+        let t = [t[0] * g, t[1] * g, t[2] * g, t[3]];
         transfer::canvas(transfer::display_pixel(t, look.exposure_ev, look.gamma, look.channel_mode, look.tonemap), look.hdr)
     };
     check_with(got, level, w, h, what, twin);
@@ -361,17 +364,23 @@ fn tiles_render_the_display_transform_of_every_texel() {
         (2.0, 1.0, mode::RGBA, tonemap::AGX, false),
         (-3.0, 1.1, mode::RGBA, tonemap::AGX, false),
     ] {
-        let look = Look { exposure_ev: ev, gamma, channel_mode, tonemap, nearest: true, hdr, ocio_gain: 1.0 };
+        let look = Look { exposure_ev: ev, gamma, channel_mode, tonemap, nearest: true, hdr, ocio_gain: 1.0, light_gain: 1.0 };
         let got = render(&device, &queue, &mut gpu, &mut state, 1.0, look, w, h);
         let what = format!("level 0 ev={ev} gamma={gamma} mode={channel_mode} tone={tonemap} hdr={hdr}");
         check(&got, &rgba, w, h, look, &what);
+    }
+    // An absolute-light frame's gain scales the colour image only.
+    for (channel_mode, hdr) in [(mode::RGBA, true), (mode::RGBA, false), (mode::R, true)] {
+        let look = Look { exposure_ev: 0.0, gamma: 1.0, channel_mode, tonemap: tonemap::NONE, nearest: true, hdr, ocio_gain: 1.0, light_gain: 2.5 };
+        let got = render(&device, &queue, &mut gpu, &mut state, 1.0, look, w, h);
+        check(&got, &rgba, w, h, look, &format!("light gain 2.5 mode={channel_mode} hdr={hdr}"));
     }
 
     // Zoom 0.5: level 1, one level texel per target pixel.
     let grid = Grid::new(w, h);
     let (lw, lh) = grid.level_size(1);
     let level1 = level_from_rgba(&rgba, &grid, 1).unwrap();
-    let look = Look { exposure_ev: 0.0, gamma: 1.0, channel_mode: mode::RGBA, tonemap: 0, nearest: false, hdr: false, ocio_gain: 1.0 };
+    let look = Look { exposure_ev: 0.0, gamma: 1.0, channel_mode: mode::RGBA, tonemap: 0, nearest: false, hdr: false, ocio_gain: 1.0, light_gain: 1.0 };
     let got = render(&device, &queue, &mut gpu, &mut state, 0.5, look, lw, lh);
     check(&got, &level1, lw, lh, look, "level 1 at zoom 0.5");
 }
@@ -474,6 +483,7 @@ fn tiles_render_the_ocio_transform_of_every_texel() {
             nearest: true,
             hdr: out_hdr,
             ocio_gain: gain,
+            light_gain: 1.0,
         };
         let got = render(&device, &queue, &mut gpu, &mut state, 1.0, look, w, h);
         let what = format!("{} ev={ev} gamma={gamma} mode={channel_mode} hdr={out_hdr}", t.key);
@@ -499,6 +509,7 @@ fn tiles_render_the_ocio_transform_of_every_texel() {
         nearest: true,
         hdr: false,
         ocio_gain: 1.0,
+        light_gain: 1.0,
     };
     let got = render(&device, &queue, &mut gpu, &mut state, 1.0, look, w, h);
     check(&got, &rgba, w, h, look, "built-in again");

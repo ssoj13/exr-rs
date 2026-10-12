@@ -8,6 +8,18 @@ All notable changes to **exr-rs** are documented here. The format follows
 
 ### 2026-10-12
 
+- **HDR stills show at their real brightness.** A PQ (HDR10) still decoded to `nits / 100` and was
+  then shown with 1.0 at the display's SDR white, so it came out `white / 100` times too bright
+  (twice at 203 nits); HLG decoded with its reference white at ~0.26, about four times too dark.
+  Now, per BT.2408, PQ is `nits / 203` and HLG's 75 % reference white is 1.0. Absolute light is a
+  property of the frame: an imported PQ still, or an EXR with the standard `whiteLuminance`
+  attribute (the nits of RGB 1, 1, 1; OpenEXR `ImfStandardAttributes.h`), is shown on an HDR
+  output at the nits it holds whatever the SDR white is set to, and on SDR with 203 nits at
+  white. Save view writes the same light, so a saved display-light EXR reopens unchanged.
+  Isolated channels are data and are not scaled.
+- **PFM opens linear** (oiio-rs d6d5c95): PFM files were tagged `Rec709` like the integer PNM
+  formats (OIIO's rule) and showed dark; their samples are linear quantities.
+
 - **Dependencies**: every ssoj13 git dependency at its head (ofx-rs a778569: OpenFX Auto computes
   on the CPU when only a software GPU adapter exists; gpu-info-rs 136386b; render-rs 6901ac1).
 - **Tests leave no files behind**: the Cryptomatte and viewer tests write into self-removing

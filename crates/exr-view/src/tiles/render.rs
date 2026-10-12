@@ -98,6 +98,10 @@ pub struct Look {
     pub hdr: bool,
     /// Gain on a linear OCIO transform's light (`ocio::Transform::gain`).
     pub ocio_gain: f32,
+    /// Gain on the colour image's source light: an absolute-light frame's nits per 1.0 over the
+    /// SDR white (`DecodedFrame::light_gain`), 1.0 for scene-relative frames. Isolated channels
+    /// are data and stay unscaled.
+    pub light_gain: f32,
 }
 
 /// One frame's draw: instances grouped by atlas page.
@@ -121,6 +125,8 @@ struct Uniforms {
     tonemap: u32,
     hdr: u32,
     ocio_gain: f32,
+    light_gain: f32,
+    _pad: [f32; 3],
 }
 
 /// The WGSL of the tile pipeline; with `ocio` the colour image goes through the
@@ -131,16 +137,16 @@ pub(crate) fn shader_src(ocio: Option<&Transform>) -> String {
     // linear one, which is then encoded like the built-in chain.
     let colour = match ocio {
         Some(t) if t.linear() => {
-            "let o = ocio_transform(raw);
+            "let o = ocio_transform(lit);
         let l = o.rgb * u.ocio_gain;
         out_rgb = vec3(srgb_oetf(apply_gamma(l.r)), srgb_oetf(apply_gamma(l.g)), srgb_oetf(apply_gamma(l.b)));"
         }
         Some(_) => {
-            "let o = ocio_transform(raw);
+            "let o = ocio_transform(lit);
         out_rgb = vec3(apply_gamma(o.r), apply_gamma(o.g), apply_gamma(o.b));"
         }
         None => {
-            "let rgb = tone(raw.rgb * u.exposure_mult, u.tonemap);
+            "let rgb = tone(lit.rgb * u.exposure_mult, u.tonemap);
         out_rgb = vec3(
             srgb_oetf(apply_gamma(rgb.r)),
             srgb_oetf(apply_gamma(rgb.g)),
@@ -159,6 +165,10 @@ struct Uniforms {{
     tonemap:       u32,
     hdr:           u32,
     ocio_gain:     f32,
+    light_gain:    f32,
+    _pad0:         f32,
+    _pad1:         f32,
+    _pad2:         f32,
 }}
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -217,6 +227,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {{
     var out_rgb: vec3<f32>;
     var out_a: f32 = raw.a;
     if u.channel_mode == 0u {{
+        let lit = vec4(raw.rgb * u.light_gain, raw.a);
         {colour}
     }} else {{
         var val: f32;
@@ -477,6 +488,8 @@ impl TilePipeline {
             tonemap: look.tonemap,
             hdr: u32::from(look.hdr),
             ocio_gain: look.ocio_gain,
+            light_gain: look.light_gain,
+            _pad: [0.0; 3],
         };
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&u));
         if let Some(ocio) = &mut self.ocio {
@@ -589,13 +602,13 @@ mod tests {
             let src = shader_src(Some(&t));
             crate::scopes::wgsl_probe::validate("tiles + OCIO", &src);
             assert!(src.contains(&t.prelude));
-            assert!(src.contains("let o = ocio_transform(raw);"));
-            assert!(!src.contains("tone(raw.rgb"), "the tone operator is not in the OCIO chain");
+            assert!(src.contains("let o = ocio_transform(lit);"));
+            assert!(!src.contains("tone(lit.rgb"), "the tone operator is not in the OCIO chain");
             let encodes = src.contains("srgb_oetf(apply_gamma(l.r))");
             assert_eq!(encodes, linear, "linear = {linear}");
             assert!(src.contains(&format!("@group({OCIO_HOST_GROUP_START}) @binding(0) var page")));
         }
-        assert!(shader_src(None).contains("tone(raw.rgb"));
+        assert!(shader_src(None).contains("tone(lit.rgb"));
     }
 
     /// Every display/view of every OCIO built-in config, SDR (encoded) and HDR

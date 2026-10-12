@@ -1614,7 +1614,7 @@ impl AppState {
     /// Save what is shown (`export.rs`) and say how it went on the status line: an SDR
     /// 8-bit PNG, or with `hdr` the display light as `.exr` / that signal as a `.png`.
     fn save_view(&mut self, path: &Path, max_dim: u32, hdr: Option<crate::export::HdrPng>) {
-        let look = crate::export::Look {
+        let mut look = crate::export::Look {
             exposure: self.controls.exposure,
             gamma: self.controls.gamma,
             mode: self.controls.channel.to_channel_mode(),
@@ -1622,6 +1622,7 @@ impl AppState {
             ocio: self.controls.colour.active().cloned(),
             white: self.controls.target.white,
             peak: self.controls.target.peak,
+            light_gain: 1.0,
         };
         let display_gpu = &mut self.display_gpu;
         #[cfg(feature = "ofx")]
@@ -1637,6 +1638,10 @@ impl AppState {
             self.status = "Nothing to save".to_owned();
             return;
         };
+        // The file holds the light the saved encoding shows: HDR at the display's SDR white,
+        // the SDR PNG at BT.2408's (as the viewer on an SDR output).
+        let target = crate::present::Target { hdr: hdr.is_some(), ..self.controls.target };
+        look.light_gain = img.frame.light_gain(&target);
         self.status = match crate::export::grab(img, display_gpu, max_dim, stage) {
             Ok(None) => "Save view: the image is still loading, try again".to_owned(),
             Err(crate::tiles::region::RegionError::Pending) =>

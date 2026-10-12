@@ -144,7 +144,20 @@ fn display_gamma_tag_is_the_inverse_display_eotf() {
     assert_eq!(space_of(&tagged("srgb_rec709_display")).unwrap().tf, Tf::Srgb);
     let pq = space_of(&tagged("pq_rec2020_display")).unwrap();
     assert_eq!(pq.tf, Tf::Pq);
-    assert!((pq.tf.lin(0.508_078) - 1.0).abs() < 0.01, "ST 2084: 100 nits is signal 0.508");
+    assert!((pq.tf.lin(0.508_078) - 100.0 / 203.0).abs() < 0.005, "ST 2084: 100 nits is signal 0.508");
+}
+
+/// HDR stills land on the viewer's SDR scale by BT.2408: the HDR reference white (203 nits in PQ,
+/// 75 % of the HLG signal) is 1.0, so 1.0 shows at the display's SDR white.
+#[test]
+fn hdr_reference_white_is_one() {
+    let pq = space_of(&tagged("pq_rec2020_display")).unwrap().tf;
+    assert!((pq.lin(vfx_transfer::pq::oetf(203.0)) - 1.0).abs() < 1e-4);
+    assert!((pq.lin(vfx_transfer::pq::oetf(1000.0)) - 1000.0 / 203.0).abs() < 1e-3);
+    let hlg = space_of(&tagged("hlg_rec2020_display")).unwrap().tf;
+    assert_eq!(hlg, Tf::Hlg);
+    assert!((hlg.lin(0.75) - 1.0).abs() < 1e-6);
+    assert!(hlg.lin(1.0) > 3.0, "HLG peak is about 3.8 x reference white");
 }
 
 #[test]
