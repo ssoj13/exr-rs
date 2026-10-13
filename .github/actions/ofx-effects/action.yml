@@ -1,7 +1,7 @@
 # Installs ofx-rs's built-in effects (ofx-effects.ofx.bundle) for the tests that render a real
 # OpenFX effect, and exports OFX_PLUGIN_PATH for the following steps. Hosts do not ship plug-ins:
 # this is test infrastructure only. The bundle is built from exactly the ofx-rs commit
-# Cargo.lock pins for ofx-runtime, with ofx-rs's own `bootstrap.py u`, and cached per commit + OS.
+# Cargo.lock pins for ofx-runtime, with ofx-rs's own `bootstrap.py r`, and cached per commit + OS.
 # A missing bundle fails the exr-view tests loudly (EXR_ALLOW_SKIP does not bypass it).
 name: ofx-effects bundle
 description: Build ofx-rs's ofx-effects.ofx.bundle at the Cargo.lock-pinned commit and point OFX_PLUGIN_PATH at it
@@ -39,7 +39,7 @@ runs:
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       working-directory: ofx-rs-src
-      run: python bootstrap.py u -o "${{ steps.pin.outputs.dir }}" -f
+      run: python bootstrap.py r -o "${{ steps.pin.outputs.dir }}" -f
     - name: Export OFX_PLUGIN_PATH
       shell: bash
       run: |

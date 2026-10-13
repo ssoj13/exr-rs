@@ -84,6 +84,8 @@ pub(crate) struct RenderInputs<'a> {
     pub(crate) inputs:&'a Inputs,
     pub(crate) anchor:CanonicalAnchor,
     pub(crate) view:&'a Selection,
+    /// Stage 1 for every frame the effect reads.
+    pub(crate) decoder:&'a crate::ocio::Decoder,
     pub(crate) context:&'a ProductionContext,
     pub(crate) budget:&'a RegionBudget,
     pub(crate) owners:Mutex<Vec<FrameOwner>>,
@@ -112,9 +114,9 @@ impl RenderInputs<'_> {
     /// for an unchanged file, layer/channel, mip level and data window however often the input is rebuilt,
     /// so a plug-in's caches keyed on it hit. Everything that changes the delivered pixels is in it; an
     /// unversionable frame (`DecodedFrame::version` is `None`) stays unstamped = new content every time.
-    fn stamp(&self, frame: &DecodedFrame, level: u32) -> Option<u64> {
+    fn stamp(&self, frame: &DecodedFrame, level: u32, decode_key: &str) -> Option<u64> {
         let dw = frame.data_window;
-        let version = (frame.version?, self.view, level, (dw.min.x, dw.min.y, dw.max.x, dw.max.y));
+        let version = (frame.version?, self.view, level, decode_key, (dw.min.x, dw.min.y, dw.max.x, dw.max.y));
         Some(CpuFrame::content_stamp_of(&version))
     }
     fn aspect(&self, frame: &DecodedFrame) -> Result<PixelAspect, RegionError> {
@@ -162,15 +164,21 @@ impl FrameInput<u32> for RenderInputs<'_> {
         let (plan,bounds)=match self.anchor.region(frame.data_window,par,level,request.region) {
             Ok(Some(region))=>region,Ok(None)=>return InputFrame::Blank,Err(error)=>return self.fail(error.into()),
         };
+        // Stage 1 of this frame, the rule the frame on screen is decoded by: an effect reads
+        // scene_linear with associated alpha, never stored codes.
+        let decode=match self.decoder.decode(frame) {Ok(decode)=>decode,Err(error)=>return self.fail(RegionError::Failed(error))};
+        let group=frame.resolve(self.view);
+        let decode=crate::image::layer_decode(&decode,frame,group.as_deref());
+        let decode_key=decode.key.clone();
         let region=if let Some(types)=&frame.file_types {
             let names:Vec<&str>=frame.channel_names.iter().map(String::as_str).collect();
             let dw=frame.data_window;
             match super::file::FileSource::new(frame.path.clone(),((dw.min.x,dw.min.y),frame.width,frame.height),
-                &names,types,Mapping::of(&names,frame.resolve(self.view).as_deref())) {
+                &names,types,Mapping::of(&names,group.as_deref()),decode) {
                 Ok(source)=>super::source::TileSource::read_region(&source,plan,self.context,self.budget),
                 Err(error)=>Err(error.into()),
             }
-        } else {super::effect_input::planar_region(frame,self.view,plan,self.context,self.budget)};
+        } else {super::effect_input::planar_region(frame,self.view,&decode,plan,self.context,self.budget)};
         let region=match region {Ok(region)=>region,Err(error)=>return self.fail(error)};
         if region.plan() != plan {
             return self.fail(RegionError::Failed("original provider changed its checked sampling declaration".into()));
@@ -186,7 +194,7 @@ impl FrameInput<u32> for RenderInputs<'_> {
         let picture=match CpuFrame::from_storage(layout,full,Arc::new(RegionPixels(region)),par.value(),Premultiplication::Premultiplied) {
             Ok(picture)=>picture,Err(_)=>return self.fail("input image metadata is invalid".into()),
         };
-        let picture=match self.stamp(frame,level) {Some(stamp)=>picture.with_content_stamp(stamp),None=>picture};
+        let picture=match self.stamp(frame,level,&decode_key) {Some(stamp)=>picture.with_content_stamp(stamp),None=>picture};
         #[cfg(test)]
         if let Some(trace) = self.trace {
             trace.delivered.lock().unwrap().push(ProviderObservation {
@@ -257,7 +265,8 @@ mod tests {
         let context = ProductionContext::default();
         let budget = RegionBudget::new(4096);
         let view = Selection::default();
-        let frames = RenderInputs { inputs: &inputs, anchor, view: &view,
+        let decoder = crate::ocio::Decoder::builtin_only();
+        let frames = RenderInputs { inputs: &inputs, anchor, view: &view, decoder: &decoder,
             context: &context, budget: &budget, owners: Mutex::new(Vec::new()),
             outcome: Mutex::new(None), trace: None };
         let source = InputSource::Primary;

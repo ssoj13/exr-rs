@@ -213,7 +213,7 @@ fn native_temporal_requests_preserve_project_timing_and_reject_rewritten_inputs(
             effect.clone(),
             inputs,
             primary,
-            Selection::default(),
+            Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()),
             -1.75,
             Some(23.976),
             Some([-2.0, 2.0]),

@@ -1219,3 +1219,52 @@ fn single_sample_half_rounding_is_exact_at_level_zero_and_clipped_edges() {
         }
     }
 }
+
+/// Encoded half planes need a fresh precision profile after stage 1: the curves can enlarge
+/// their range and introduce fractional values the stored half profile cannot represent.
+#[test]
+#[ignore = "needs a GPU adapter"]
+fn decoded_colour_reduction_profiles_linear_pixels() {
+    let (d, q) = device();
+    let (w, h) = (1025u32, 3u32);
+    let grid = Grid::new(w, h);
+    let values = [Half::from(0.11), Half::from(0.3333), Half::from(0.61), Half::from(0.95)];
+    for ocio_on in [false, true] {
+        for space in ["srgb_rec709_display", "pq_rec2020_display"] {
+            let plane = || exr_core::api::ChannelData::Half((0..w * h).map(|i| values[(i % w % 4) as usize]).collect());
+            let mut frame = crate::image::tests_support::frame_of(w, h,
+                ["R", "G", "B"].into_iter().map(|name| (name.into(), plane())).collect());
+            frame.tag = exr_import::ColorTag { space: space.into(), origin: exr_import::TagOrigin::File };
+            let frame = Arc::new(frame);
+            let mut colour = crate::ocio::State::new(crate::ocio::Sel {
+                on: ocio_on, config: "ocio://studio-config-latest".into(), ..Default::default()
+            });
+            let mut image = ImageBackend::from_frame(frame.clone());
+            let mut target = DisplayTarget::new(8 << 20, usize::MAX);
+            let mut renderer = egui_wgpu::Renderer::new(&d, crate::present::CANVAS_FORMAT, Default::default());
+            renderer.callback_resources.insert(TileGpu::new(&d, 64 << 20));
+            image.colour(&mut colour, &crate::present::Target::default()).unwrap();
+            let mut linear: Vec<f32> = (0..w * h).flat_map(|i| {
+                let v = values[(i % w % 4) as usize].to_f32();
+                [v, v, v, 1.0]
+            }).collect();
+            colour.decode().unwrap().apply(&mut linear);
+            let callback = image.present(&d, &q, &mut renderer, &mut target, None,
+                place(257, 1, 0.25), look(), None).unwrap();
+            assert!(callback.direct, "{space} OCIO={ocio_on}: resident GPU path");
+            let gpu = renderer.callback_resources.get::<TileGpu>().unwrap();
+            let direct = gpu.direct.as_ref().unwrap();
+            assert_eq!((direct.profiles, direct.scans), (1, 1),
+                "{space} OCIO={ocio_on}: stored-plane profile cannot describe decoded light");
+            let level = grid.pick_level(0.25);
+            assert_eq!(level, 2);
+            let reference = level_from_rgba(&linear, &grid, level).unwrap();
+            let (rw, rh) = grid.level_size(level);
+            let bytes = read_texture(&d, &q, &direct.pages()[0].tex, rw, rh, 8);
+            for (i, (got, want)) in bytes.as_chunks::<2>().0.iter().zip(reference).enumerate() {
+                assert_eq!(u16::from_le_bytes(*got), Half::from(want).bits(),
+                    "{space} OCIO={ocio_on}: reduced component {i}");
+            }
+        }
+    }
+}

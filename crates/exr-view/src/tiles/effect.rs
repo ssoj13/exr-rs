@@ -52,6 +52,8 @@ pub(crate) struct EffectSource {
     inputs: Arc<Inputs>,
     primary_window: Box2i,
     view: Selection,
+    /// Stage 1 for every frame the effect reads (`ocio::Decoder`).
+    decoder: Arc<crate::ocio::Decoder>,
     anchor: CanonicalAnchor,
     project: EffectProject,
     time: f64,
@@ -64,7 +66,7 @@ pub(crate) struct EffectSource {
 impl EffectSource {
     #[allow(clippy::too_many_arguments, reason = "Keeps the immutable input, timing, and budget snapshot explicit at one boundary.")]
     pub(crate) fn new(effect:Arc<Effect<u32>>,inputs:Arc<Inputs>,primary:Arc<DecodedFrame>,
-        view:Selection,time:f64,frame_rate:Option<f64>,frame_range:Option<[f64;2]>,
+        view:Selection,decoder:Arc<crate::ocio::Decoder>,time:f64,frame_rate:Option<f64>,frame_range:Option<[f64;2]>,
         budget:RegionBudget)->Result<Self,RegionError> {
         discrete_time(time)?;
         let (primary_index, frame_id) = match inputs.as_ref() {
@@ -91,7 +93,7 @@ impl EffectSource {
         }
         let anchor=CanonicalAnchor::new(canvas,aspect)?;
         Grid::on_lattice(w,h,(0,-i64::from(h)))?.with_aspect(aspect.value())?;
-        Ok(Self{effect,inputs,primary_window:primary.data_window,view,anchor,project:EffectProject{geometry,frame_rate,frame_range},
+        Ok(Self{effect,inputs,primary_window:primary.data_window,view,decoder,anchor,project:EffectProject{geometry,frame_rate,frame_range},
             time,budget,canvas,lineage,
             #[cfg(test)] trace: Default::default()})
     }
@@ -201,7 +203,7 @@ impl EffectSource {
         if output_bytes > budget.retained_limit() {
             return Err(RegionError::Budget { needed: output_bytes, limit: budget.retained_limit() });
         }
-        let frames=RenderInputs{inputs:&self.inputs,anchor:self.anchor,view:&self.view,
+        let frames=RenderInputs{inputs:&self.inputs,anchor:self.anchor,view:&self.view,decoder:&self.decoder,
             context,budget,owners:Mutex::new(Vec::new()),outcome:Mutex::new(None),
             #[cfg(test)] trace: Some(&self.trace)};
         let metadata=CpuFrame::from_declaration(self.declaration(full,full)?);
@@ -283,6 +285,52 @@ mod tests {
     use ofx_runtime::ofx_host::HostContext;
 
     #[test]
+    fn identity_effect_reads_decoded_light_and_round_trips_video_frames() {
+        let runtime = Runtime::new(crate::ofx::OfxEffects::host_info(), crate::ofx::OfxEffects::bundle_scan());
+        let described = runtime.describe(&PluginKey::new("net.ofxrs.basic_gain", 1), HostContext::Filter).unwrap();
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        for ocio_on in [false, true] {
+            for (space, display, hdr) in [
+                ("srgb_rec709_display", "sRGB - Display", false),
+                ("pq_rec2020_display", "Rec.2100-PQ - Display", true),
+            ] {
+                let mut primary = crate::image::tests_support::frame_of(2, 2,
+                    ["R", "G", "B", "A"].into_iter().enumerate().map(|(c, name)|
+                        (name.into(), ChannelData::Float(if c == 3 { vec![1.0; 4] } else { vec![0.1, 0.25, 0.5, 0.75] }))).collect());
+                primary.tag = exr_import::ColorTag { space: space.into(), origin: exr_import::TagOrigin::File };
+                let primary = Arc::new(primary);
+                let mut colour = crate::ocio::State::new(crate::ocio::Sel {
+                    on: ocio_on, config: "ocio://studio-config-latest".into(), display: display.into(),
+                    ..crate::ocio::Sel::default()
+                });
+                colour.set_hdr(hdr);
+                let target = crate::present::Target { hdr, ..crate::present::Target::default() };
+                let src = colour.frame(&primary, &target).unwrap();
+                let mut expected: Vec<f32> = [0.1, 0.25, 0.5, 0.75].into_iter().flat_map(|v| [v, v, v, 1.0]).collect();
+                colour.decode().unwrap().apply(&mut expected);
+                let effect = runtime.effect(0, &described, EffectSetup::default());
+                let source = EffectSource::new(effect,
+                    Arc::new(Inputs::Static { frame: primary.clone(), index: 0 }), primary,
+                    Selection::default(), colour.decoder(), 0.0, Some(24.0), Some([0.0, 0.0]),
+                    RegionBudget::new(65536)).unwrap();
+                let grid = source.grid().unwrap();
+                let work = pool.install(|| source.render_window(&grid, TileId { level: 0, tx: 0, ty: 0 }, &ProductionContext::default())).unwrap();
+                assert_eq!(work.pixels(), expected, "{space} OCIO {ocio_on}: the identity effect sees scene_linear");
+                if let Some(display) = colour.active() {
+                    let mut pixels: Vec<[f32; 4]> = work.pixels().as_chunks::<4>().0.to_vec();
+                    display.display(&mut pixels, &src, 0.0, 1.0);
+                    for (pixel, code) in pixels.iter().zip([0.1, 0.25, 0.5, 0.75]) {
+                        let got = if hdr {
+                            crate::present::pq(crate::transfer::eotf(pixel[0]) * target.white)
+                        } else { pixel[0] };
+                        assert!((got - code).abs() < 3e-5, "{space}: {got} != {code}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn actual_builtin_worker_request_preserves_top_first_original_precision() {
         let runtime=Runtime::new(crate::ofx::OfxEffects::host_info(),crate::ofx::OfxEffects::bundle_scan());
         let described=runtime.describe(&PluginKey::new("net.ofxrs.basic_gain",1),HostContext::Filter).unwrap();
@@ -298,7 +346,7 @@ mod tests {
         let primary=Arc::new(primary);
         let inputs=Arc::new(Inputs::Static{frame:primary.clone(),index:0});
         let budget=RegionBudget::new(4096);
-        let source=EffectSource::new(effect,inputs,primary,Selection::default(),0.5,
+        let source=EffectSource::new(effect,inputs,primary,Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()),0.5,
             Some(24.),Some([0.,0.]),budget.clone()).unwrap();
         let grid=source.grid().unwrap();
         let pool=rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
@@ -329,9 +377,9 @@ mod tests {
         let primary = Arc::new(primary);
         let inputs = Arc::new(Inputs::Static { frame: primary.clone(), index: 0 });
         let whole_source = EffectSource::new(effect.clone(), inputs.clone(), primary.clone(),
-            Selection::default(), 0.75, Some(24.0), Some([0.0, 0.0]), RegionBudget::new(8 << 20)).unwrap();
+            Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()), 0.75, Some(24.0), Some([0.0, 0.0]), RegionBudget::new(8 << 20)).unwrap();
         let tiled_budget = RegionBudget::new(8 << 20);
-        let tiled_source = EffectSource::new(effect, inputs, primary, Selection::default(), 0.75,
+        let tiled_source = EffectSource::new(effect, inputs, primary, Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()), 0.75,
             Some(24.0), Some([0.0, 0.0]), tiled_budget.clone()).unwrap();
         let grid = tiled_source.grid().unwrap();
         assert_eq!(grid.size(), (520, 11));
@@ -381,7 +429,7 @@ mod tests {
         let retained = budget.begin_attempt().unwrap();
         let old = retained.reserve(384).unwrap();
         retained.promote().unwrap();
-        let source = EffectSource::new(effect, inputs, primary, Selection::default(),
+        let source = EffectSource::new(effect, inputs, primary, Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()),
             0.0, None, Some([0.0, 0.0]), budget.clone()).unwrap();
         let grid = source.grid().unwrap();
         let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();

@@ -8,20 +8,42 @@ All notable changes to **exr-rs** are documented here. The format follows
 
 ### 2026-10-13
 
-- **Frames keep their own colour space; one OCIO conversion per frame** (`COLOR_PLAN.md`,
-  supersedes the absolute-light change below). A PQ HDR10 PNG showed almost black through an ACES
-  view: every still was linearised at import and every frame fed to OCIO as `scene_linear`, so a
-  finished picture was rendered a second time. Now a frame holds its values as read and a colour
-  tag (reader tag; EXR `colorInteropID`, `whiteLuminance`, `chromaticities`; else the config's file
-  rules), the processor input is that colour space, and the views offered are the ones the
-  config's viewing rules allow for it (`Video (colorimetric)` for display-referred pictures; a PQ
-  PNG round-trips bit-exactly through the HDR10 Save view on a PQ display). The view is remembered
-  per encoding class, Input is a per-file override, an unknown tag is a typed error. Without OCIO
-  the tag drives a built-in decode in the tile shader. Alpha is unpremultiplied before the
-  transform and premultiplied in light after it. Scopes can read display values; Pixel Info shows
-  `scene_linear`. The headless screenshot uses the saved OCIO choice. `convert` writes foreign
-  stills as read with `colorInteropID`. Removed: `HDR_REFERENCE_WHITE_NITS`, `white_nits`,
-  `light_gain`, the persisted `ocio.input` / `ocio.view` (now `scene_view` / `video_view`).
+- **Decode images to scene-linear light before processing, then display by source class.**
+  A finished PQ HDR10 picture previously received another ACES rendering and appeared almost
+  black. Frames now retain their source values and colour/alpha tags; one CPU decode feeds
+  layer assembly, pyramid reduction, OpenFX, scopes, and Pixel Info. The display stage starts
+  from `scene_linear`, while the source class selects and remembers its view and look:
+  `Video (colorimetric)` for display-referred pictures. Both stages cache processors by their
+  complete inputs. OCIO config, source-space, and transform failures are explicit errors;
+  turning OCIO off selects the built-in decode/display pair. Tags come from the reader, EXR
+  `colorInteropID` / `whiteLuminance` / `chromaticities`, or config file rules; Input remains a
+  per-file override. `convert` writes foreign stills as read with `colorInteropID`. This
+  supersedes the absolute-light change below and removes `HDR_REFERENCE_WHITE_NITS`,
+  `white_nits`, `light_gain`, and global `ocio.input` / `ocio.view` (now per-class views).
+- **Decoded-source changes invalidate cached presentation and temporal inputs.** The primary
+  decode key and decoder policy (config load revision and input override) enter source identity
+  and OpenFX render stamps. Native file MIPs are reused only with an identity decode. Pixel
+  Info prepares scene-linear readout even when the viewport and scopes are hidden. Save view
+  and headless screenshots use the display stage's CPU twin over decoded pixels. Disabling
+  an effect clears accepted effect pixels for readout, scopes, export, and presentation even
+  without a viewport frame.
+- **Focused color validation is complete:** the viewer suite reports 335 passed, 0 failed,
+  and 23 ignored tests (188.34s). Three GPU checks cover tile/CPU twins and Direct decoded
+  profiles (every half component for OCIO/built-in sRGB/PQ); Pixel Info-only preparation also
+  passes. A separate singular default-view bridge regression passes (0.01s), verifying typed
+  `OcioError::Transform` rejection by worker decode, frame resolution, and the shown decode.
+  The real WarpBro PQ PNG round-trips with worst and mean code error 0; the visually inspected
+  SDR proof shows the Venice environment and blue fractal. The native/GPU effect-disable
+  regression also passes (1.84s, explicit ignored-test run). No native HDR viewport screenshot
+  was captured. The six-stage bootstrap gate, integration, and release remain pending.
+- **Release preparation for a same-version v0.1.0 rebuild (pending).** Nineteen own Git source
+  pins were verified against remote revisions. The inaccessible OFX `fabb` pin was replaced
+  manually with `9cf607d`, adding the required `ofx-banner` and `ofx-expiry` packages without
+  changing `windows-sys`. Bootstrap's obsolete `u` action was replaced by `r`; it builds the
+  exact pinned OpenFX bundle. The local bundle build produced 35 release plug-ins in 4m17s;
+  its source hash `03e011bcb9a34e9193a3bb32ea1f9ab71767899c35d9c4bb1c00d60782375a89`
+  matches recomputation. Final gates, tag/release replacement, CI, and published assets are
+  still pending.
 
 ### 2026-10-12
 

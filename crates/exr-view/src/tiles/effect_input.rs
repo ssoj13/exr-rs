@@ -3,7 +3,9 @@ use std::sync::Arc;
 use crate::image::{DecodedFrame, Mapping, Selection};
 use super::region::{RegionAccumulator, RegionBudget, RegionData, RegionError, RegionPlan, RegionPolicy};
 use super::source::ProductionContext;
-pub(crate) fn planar_region(frame:&DecodedFrame,view:&Selection,plan:RegionPlan,context:&ProductionContext,budget:&RegionBudget)->Result<Arc<RegionData>,RegionError>{
+/// `decode` is the frame's stage 1 for the layer (`image::layer_decode`), applied to each row
+/// before it is reduced, so region levels average scene_linear light.
+pub(crate) fn planar_region(frame:&DecodedFrame,view:&Selection,decode:&crate::ocio::Decode,plan:RegionPlan,context:&ProductionContext,budget:&RegionBudget)->Result<Arc<RegionData>,RegionError>{
     if frame.file_types.is_some() {return Err(RegionError::Unsupported)}
     if plan.size()!=(frame.width,frame.height) {return Err("region source geometry does not match original planes".into())}
     if plan.policy()==RegionPolicy::MatchingStoredNative && plan.level()>0 {return Err(RegionError::Unsupported)}
@@ -33,6 +35,7 @@ pub(crate) fn planar_region(frame:&DecodedFrame,view:&Selection,plan:RegionPlan,
             let i=y as usize*frame.width as usize+x as usize;
             row[x as usize*4..x as usize*4+4].copy_from_slice(&bound.sample(i).map_err(|e|RegionError::Failed(e.to_string()))?);
         }
+        decode.apply(&mut row);
         acc.push_row(y,&row)?;
     }
     if context.is_cancelled() {return Err(RegionError::Cancelled)}
@@ -60,7 +63,7 @@ mod tests {
             *channel=ChannelData::Float(vec![f32::from_bits(bit)]);
         }
         let budget = RegionBudget::new(32);
-        let region = planar_region(&frame,&Selection::default(),full(),
+        let region = planar_region(&frame,&Selection::default(),&crate::ocio::Decode::identity(),full(),
             &ProductionContext::default(),&budget).unwrap();
         assert_eq!(region.rgba().iter().map(|v|v.to_bits()).collect::<Vec<_>>(),bits);
         assert_eq!(budget.used(),16,"only retained output remains charged");
@@ -75,11 +78,11 @@ mod tests {
         frame.channels[2].1=ChannelData::Uint(vec![u32::MAX/2]);
         let budget=RegionBudget::new(32);
         let context=ProductionContext::default();
-        let region=planar_region(&frame,&Selection::default(),full(),&context,&budget).unwrap();
+        let region=planar_region(&frame,&Selection::default(),&crate::ocio::Decode::identity(),full(),&context,&budget).unwrap();
         assert_eq!(region.rgba(),[1.0,0.0,(u32::MAX/2) as f32/u32::MAX as f32,1.0]);
         drop(region);
         context.cancel();
-        assert!(matches!(planar_region(&frame,&Selection::default(),full(),&context,&budget),
+        assert!(matches!(planar_region(&frame,&Selection::default(),&crate::ocio::Decode::identity(),full(),&context,&budget),
             Err(RegionError::Cancelled)));
         assert_eq!(budget.used(),0);
     }
@@ -87,15 +90,31 @@ mod tests {
     fn intrinsic_peak_and_temporary_pressure_are_distinct() {
         let frame=frame_with(&["R","G","B"]);
         let context=ProductionContext::default();
-        assert!(matches!(planar_region(&frame,&Selection::default(),full(),&context,
+        assert!(matches!(planar_region(&frame,&Selection::default(),&crate::ocio::Decode::identity(),full(),&context,
             &RegionBudget::new(31)),Err(RegionError::Budget{needed:32,limit:31})));
         let budget=RegionBudget::new(32);
         let held=budget.reserve(1).unwrap();
-        assert!(matches!(planar_region(&frame,&Selection::default(),full(),&context,&budget),
+        assert!(matches!(planar_region(&frame,&Selection::default(),&crate::ocio::Decode::identity(),full(),&context,&budget),
             Err(RegionError::Pending)));
         drop(held);
-        let region=planar_region(&frame,&Selection::default(),full(),&context,&budget).unwrap();
+        let region=planar_region(&frame,&Selection::default(),&crate::ocio::Decode::identity(),full(),&context,&budget).unwrap();
         drop(region);
         assert_eq!(budget.used(),0);
     }
+    #[test]
+    fn original_region_reduces_srgb_in_linear_light() {
+        let mut frame = crate::image::tests_support::frame_of(2, 2, vec![
+            ("R".into(), ChannelData::Float(vec![0.0, 1.0, 1.0, 0.0])),
+            ("G".into(), ChannelData::Float(vec![0.0, 1.0, 1.0, 0.0])),
+            ("B".into(), ChannelData::Float(vec![0.0, 1.0, 1.0, 0.0])),
+        ]);
+        frame.tag = exr_import::ColorTag { space: "srgb_rec709_display".into(), origin: exr_import::TagOrigin::File };
+        let decode = crate::ocio::Decoder::builtin_only().decode(&frame).unwrap();
+        let plan = RegionPlan::new((2,2),1,PixRect{x:0,y:0,w:1,h:1},
+            RegionPolicy::OriginalArea,SamplingPhase::BOTTOM_LEFT).unwrap();
+        let region = planar_region(&frame,&Selection::default(),&decode,plan,
+            &ProductionContext::default(),&RegionBudget::new(4096)).unwrap();
+        assert_eq!(region.rgba(), [0.5, 0.5, 0.5, 1.0]);
+    }
+
 }

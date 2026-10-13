@@ -47,11 +47,11 @@ pub struct Look {
     pub mode: u32,
     /// `transfer::tonemap::*`.
     pub tonemap: u32,
-    /// The OCIO transform of the shown frame's colour image in place of the built-in decode,
-    /// the tone operator and the sRGB encode (`None` = the built-in transform).
+    /// Stage-2 OCIO display transform of decoded scene-linear colour (`None` = the built-in
+    /// tone operator and sRGB encode). Stage 1 has already decoded the exported pixels.
     pub ocio: Option<Arc<crate::ocio::Transform>>,
-    /// How the frame's stored values are read (`ocio::State::frame`): the built-in decode, the
-    /// alpha kind and the display gain for the output the file is saved for.
+    /// Display gain for the output the file is saved for (`ocio::State::frame`). Input pixels
+    /// are scene-linear with associated alpha; this does not decode the original file values.
     pub src: transfer::Src,
     /// SDR white in nits: the nits of canvas light 1.0 in an HDR file.
     pub white: f32,
@@ -229,8 +229,7 @@ impl Look {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         let floats = [self.exposure, self.gamma, self.src.gain, self.white, self.peak];
         floats.map(f32::to_bits).hash(&mut h);
-        (self.mode, self.tonemap, self.src.straight).hash(&mut h);
-        format!("{:?}", self.src.builtin).hash(&mut h);
+        (self.mode, self.tonemap).hash(&mut h);
         self.ocio.as_ref().map(|t| t.key.as_str()).hash(&mut h);
         h.finish().max(1)
     }
@@ -299,6 +298,9 @@ pub fn grab(
     max_dim: u32,
     stage: Option<&mut (dyn ImageStage + '_)>,
 ) -> Result<Option<Raw>, crate::tiles::region::RegionError> {
+    target.sync_decode(img.decode_key());
+    #[cfg(feature = "ofx")]
+    target.sync_worker(stage.as_ref().is_some_and(|stage| stage.uses_worker()));
     #[cfg(feature = "ofx")]
     if let Some(pixels) = target.accepted_pixels() {
         let level = pixels.level(u64::MAX, max_dim);
@@ -617,14 +619,24 @@ const HEADLESS_WAIT: Duration = Duration::from_secs(600);
 
 /// Open `input` as the viewer does (file-backed above `backing` bytes) and wait for its
 /// level 0 / overview; `ram_budget` sizes the tile cache. No window, no GPU.
-fn grab_wait(input: &Path, backing: u64, ram_budget: usize, upload: usize) -> Result<(Raw, Arc<DecodedFrame>)> {
+/// The look of the shot comes first (`headless_look`): it sets the frame's stage 1, which the
+/// grabbed pixels are.
+fn grab_wait(
+    input: &Path,
+    sel: &crate::ocio::Sel,
+    out: &crate::present::Target,
+    backing: u64,
+    ram_budget: usize,
+    upload: usize,
+) -> Result<(Raw, Look)> {
     let frame = Arc::new(DecodedFrame::open(input, backing).map_err(|e| anyhow::anyhow!("{}: {e}", input.display()))?);
-    let mut img = ImageBackend::from_frame(frame.clone());
+    let mut img = ImageBackend::from_frame(frame);
+    let look = headless_look(&mut img, sel, out)?;
     let mut target = DisplayTarget::new(ram_budget, upload);
     let deadline = Instant::now() + HEADLESS_WAIT;
     loop {
         if let Some(raw) = grab(&mut img, &mut target, u32::MAX, None)? {
-            return Ok((raw, frame));
+            return Ok((raw, look));
         }
         if Instant::now() > deadline {
             bail!("{}: the overview did not arrive within {HEADLESS_WAIT:?}", input.display());
@@ -637,7 +649,7 @@ fn grab_wait(input: &Path, backing: u64, ram_budget: usize, upload: usize) -> Re
 /// the OCIO choice `sel` as the viewer would show it (`ocio::State::frame`: the frame's colour
 /// space, its view, the same processor). OCIO on but not shown (a config that does not load, a
 /// colour space the config lacks) is an error, not a silent built-in shot.
-fn headless_look(frame: &DecodedFrame, sel: &crate::ocio::Sel, target: &crate::present::Target) -> Result<Look> {
+fn headless_look(img: &mut ImageBackend, sel: &crate::ocio::Sel, target: &crate::present::Target) -> Result<Look> {
     let mut colour = crate::ocio::State::new(sel.clone());
     // The SDR shot is an sRGB-tagged 8-bit PNG: rendered for the config's sRGB display, whatever
     // display the choice names (`State::for_srgb_file`).
@@ -645,7 +657,7 @@ fn headless_look(frame: &DecodedFrame, sel: &crate::ocio::Sel, target: &crate::p
         colour = colour.for_srgb_file()?;
     }
     colour.set_hdr(target.hdr);
-    let src = colour.frame(frame, target).map_err(anyhow::Error::msg)?;
+    let src = img.colour(&mut colour, target).map_err(anyhow::Error::msg)?;
     if let Some(e) = &colour.err {
         bail!("OCIO: {e}");
     }
@@ -662,9 +674,9 @@ pub fn headless(
     ram_budget: usize,
     upload: usize,
 ) -> Result<Shot> {
-    let (raw, frame) = grab_wait(input, backing, ram_budget, upload)?;
     let target = crate::present::Target { hdr: false, white: HEADLESS_WHITE, ..crate::present::Target::default() };
-    let shot = raw.sdr(&headless_look(&frame, sel, &target)?)?;
+    let (raw, look) = grab_wait(input, sel, &target, backing, ram_budget, upload)?;
+    let shot = raw.sdr(&look)?;
     write_png(output, &shot)?;
     Ok(shot)
 }
@@ -684,9 +696,9 @@ pub fn headless_hdr(
     ram_budget: usize,
     upload: usize,
 ) -> Result<(u32, u32)> {
-    let (raw, frame) = grab_wait(input, backing, ram_budget, upload)?;
     let target = crate::present::Target { hdr: true, white: HEADLESS_WHITE, ..crate::present::Target::default() };
-    save_hdr(output, &raw, &headless_look(&frame, sel, &target)?, png)?;
+    let (raw, look) = grab_wait(input, sel, &target, backing, ram_budget, upload)?;
+    save_hdr(output, &raw, &look, png)?;
     Ok((raw.w, raw.h))
 }
 
@@ -745,7 +757,7 @@ mod tests {
     #[test]
     fn encode_uses_ocio_for_colour_only() {
         let o = crate::ocio::Ocio::load("ocio://default").unwrap();
-        let t = Arc::new(o.transform(&o.resolve(&crate::ocio::Sel::default(), &o.scene(), false).unwrap(), None, false).unwrap());
+        let t = Arc::new(o.transform(&o.resolve(&crate::ocio::Sel::default(), &o.scene(), false).unwrap(), false).unwrap());
         let px = [0.18f32, 0.18, 0.18, 1.0];
         let look = Look { ocio: Some(t), ..Look::default() };
         assert_eq!(encode(&px, &look).unwrap(), [89, 89, 89]);
@@ -1113,7 +1125,7 @@ mod tests {
     #[test]
     fn light_follows_ocio() {
         let o = crate::ocio::Ocio::load("ocio://default").unwrap();
-        let t = Arc::new(o.transform(&o.resolve(&crate::ocio::Sel::default(), &o.scene(), false).unwrap(), None, false).unwrap());
+        let t = Arc::new(o.transform(&o.resolve(&crate::ocio::Sel::default(), &o.scene(), false).unwrap(), false).unwrap());
         let look = Look { ocio: Some(t), ..Look::default() };
         let l = light_px(&[0.18, 0.18, 0.18, 1.0], &look)[0];
         for c in l {
@@ -1337,4 +1349,27 @@ mod tests {
         let sdr = crate::ocio::Sel { display: "sRGB - Display".into(), ..sel };
         headless(&input, &dir.join("pq_round_trip.sdr.png"), &sdr, u64::MAX, 1 << 31, 64 << 20).unwrap();
     }
+    #[test]
+    fn tagged_srgb_png_round_trips_through_headless_export() {
+        let temp = tmp("srgb-two-stage");
+        let input = temp.path().join("input.png");
+        let codes = [0u8, 0, 0, 17, 64, 128, 200, 128, 64, 255, 255, 255];
+        let mut encoder = png::Encoder::new(std::fs::File::create(&input).unwrap(), 4, 1);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&codes).unwrap();
+        writer.finish().unwrap();
+        for on in [false, true] {
+            let sel = crate::ocio::Sel { on, config: "ocio://studio-config-latest".into(), ..crate::ocio::Sel::default() };
+            let shot = headless(&input, &temp.path().join(format!("output-{on}.png")), &sel,
+                u64::MAX, 1 << 30, 64 << 20).unwrap();
+            assert_eq!((shot.w, shot.h), (4, 1));
+            for (got, want) in shot.rgb().iter().zip(codes) {
+                assert!(got.abs_diff(want) <= 1, "OCIO={on}: {got} vs {want}");
+            }
+        }
+    }
+
 }

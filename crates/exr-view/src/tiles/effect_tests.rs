@@ -40,7 +40,7 @@ fn native_completed_replacement_waits_for_external_snapshot_without_rerendering(
     let frame = Arc::new(frame);
     let source = Arc::new(EffectSource::new(effect,
         Arc::new(Inputs::Static { frame: frame.clone(), index: 0 }), frame,
-        Selection::default(), 0.25, Some(24.0), Some([0.0, 0.0]), budget.clone()).unwrap());
+        Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()), 0.25, Some(24.0), Some([0.0, 0.0]), budget.clone()).unwrap());
     let old_place = super::view::Placement { origin: egui::pos2(0.0, 0.0), zoom: 1.0,
         clip: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 64.0)) };
     let next_place = super::view::Placement { origin: egui::pos2(9.0, 7.0), zoom: 0.5, ..old_place };
@@ -141,7 +141,7 @@ fn native_source_rejects_a_different_primary_identity_before_render_or_admission
     let budget = RegionBudget::new(4096);
     let result = EffectSource::new(effect,
         Arc::new(Inputs::Static { frame: Arc::new(other), index: 0 }),
-        Arc::new(primary), Selection::default(), 0.25, Some(24.0),
+        Arc::new(primary), Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()), 0.25, Some(24.0),
         Some([0.0, 0.0]), budget.clone());
     assert!(matches!(result, Err(RegionError::Cancelled)));
     assert_eq!(NORMAL.load(Ordering::Acquire), 0);
@@ -231,7 +231,7 @@ fn native_large_output_preparation_and_surviving_owner_probe() {
     let frame = Arc::new(frame);
     let make = |budget| EffectSource::new(effect.clone(),
         Arc::new(Inputs::Static { frame: frame.clone(), index: 0 }), frame.clone(),
-        Selection::default(), 0.25, Some(24.0), Some([0.0, 0.0]), budget).unwrap();
+        Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()), 0.25, Some(24.0), Some([0.0, 0.0]), budget).unwrap();
     let bounds = OfxRectI { x1: 0, y1: -33, x2: 513, y2: 0 };
     let payload = super::processed::ChargedPixelStorage::required_bytes(bounds).unwrap();
     let original = RegionBudget::new(payload * 4 + 64);
@@ -373,7 +373,7 @@ fn native_source(runtime: &Arc<Runtime<u32>>, kind: usize, budget: RegionBudget)
     }
     let frame = Arc::new(frame);
     let inputs = Arc::new(Inputs::Static { frame: frame.clone(), index: 0 });
-    Arc::new(EffectSource::new(effect, inputs, frame, Selection::default(),
+    Arc::new(EffectSource::new(effect, inputs, frame, Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()),
         0.25, Some(24.0), Some([0.0, 0.0]), budget).unwrap())
 }
 fn finish(state: &mut TileState) {
@@ -550,7 +550,7 @@ fn escaped_preparation_storage_keeps_original_budget_failure_and_retires_on_dest
         let budget = RegionBudget::new(513 * 33 * 16 * 4 + 64);
         let source = EffectSource::new(effect,
             Arc::new(Inputs::Static { frame: frame.clone(), index: 0 }), frame,
-            Selection::default(), 0.0, None, None, budget.clone()).unwrap();
+            Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()), 0.0, None, None, budget.clone()).unwrap();
         let result = pool.install(|| source.render_level(&ProductionContext::default()));
         assert!(matches!(result, Err(RegionError::Budget { needed, limit })
             if needed > limit && limit == budget.candidate_limit()),
@@ -667,7 +667,7 @@ fn completed_identity_keeps_same_owner_through_later_upload_budget_failure() {
     let budget = RegionBudget::new(1 << 20);
     let source = EffectSource::new(effect,
         Arc::new(Inputs::Static { frame: frame.clone(), index: 0 }), frame,
-        Selection::default(), 0.0, None, None, budget.clone()).unwrap();
+        Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()), 0.0, None, None, budget.clone()).unwrap();
     let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
     let work = pool.install(|| source.render_level(&ProductionContext::default())).unwrap();
     assert_eq!(work.level, 0);

@@ -699,6 +699,7 @@ impl DisplayPath {
 /// resources ([`TileGpu`]), where the paint callback can bind them.
 pub struct DisplayTarget {
     tiles: TileState,
+    decode_key: Option<String>,
     scope: Option<ScopeTex>,
     direct_frame: Option<u64>,
     blocked_frame: Option<u64>,
@@ -722,6 +723,20 @@ struct ScopeTex {
 }
 
 impl DisplayTarget {
+    #[cfg(feature = "ofx")]
+    pub(crate) fn sync_worker(&mut self, worker: bool) {
+        if !worker && self.accepted_pixels().is_some() {
+            self.clear_presentation();
+        }
+    }
+    /// Held pixels may survive a frame transition, but never a change of working space.
+    pub(crate) fn sync_decode(&mut self, key: &str) {
+        if self.decode_key.as_deref().is_some_and(|old| old != key) {
+            self.clear_presentation();
+            if let Some(scope) = &mut self.scope { scope.key = None; }
+        }
+        self.decode_key = Some(key.to_owned());
+    }
     /// The scopes' own linear texture, if one was ever needed.
     #[cfg(test)]
     pub(crate) fn scope_texture(&self) -> Option<&wgpu::Texture> {
@@ -828,6 +843,7 @@ impl DisplayTarget {
     pub fn new(ram_budget: usize, upload: usize) -> Self {
         Self {
             tiles: TileState::new(ram_budget),
+            decode_key: None,
             scope: None,
             direct_frame: None,
             blocked_frame: None,
@@ -961,6 +977,13 @@ pub struct ImageBackend {
     /// the planes, and the tile source materializes f32 only on demand
     /// ([`LayerSource`]). Decided per prepare by [`Self::planes_eligible`].
     planes: bool,
+    /// Stage 1 of this frame (`ocio::Decode`, set by [`Self::colour`]): the colour layers are
+    /// materialized through it, so everything downstream (the pyramid, effects, scopes, the
+    /// readout, Save view) works on scene_linear with associated alpha.
+    decode: Arc<crate::ocio::Decode>,
+    /// Stage 1 for any frame under the same choice (an effect's neighbour frames).
+    decoder: Arc<crate::ocio::Decoder>,
+    decode_identity: String,
     /// Interleaved linear RGBA f32 of the materialized active layer (`w*h*4`).
     /// The tile source and the pixel-readout source. Built lazily. Shared with
     /// the tile workers (`Arc`); re-materializing reuses the allocation unless a
@@ -1008,8 +1031,9 @@ pub trait ImageStage {
     #[cfg(feature = "ofx")]
     fn uses_worker(&self) -> bool { false }
 
+    /// `decoder` is stage 1 for the frames the stage reads (`ocio::Decoder`).
     #[cfg(feature = "ofx")]
-    fn worker(&self, _frame: Arc<DecodedFrame>, _view: Selection,
+    fn worker(&self, _frame: Arc<DecodedFrame>, _view: Selection, _decoder: Arc<crate::ocio::Decoder>,
         _budget: crate::tiles::region::RegionBudget) -> Result<Option<Arc<dyn TileSource>>, String> { Ok(None) }
 
     #[cfg(feature = "ofx")]
@@ -1078,6 +1102,9 @@ impl ImageBackend {
             pixels_gen: 0,
             materialized: None,
             planes: false,
+            decode: Arc::new(crate::ocio::Decode::identity()),
+            decoder: Arc::new(crate::ocio::Decoder::builtin_only()),
+            decode_identity: "identity|builtin".to_owned(),
             pixels: Arc::new(Vec::new()),
             readout: Vec::new(),
             file_source: None,
@@ -1138,6 +1165,45 @@ impl ImageBackend {
             // recomputes it from the live rect on the next draw.
             self.fit_zoom = 0.0;
         }
+    }
+
+    /// Resolve this frame's colour under `colour` (`ocio::State::frame`) and take its stage 1:
+    /// a different decode is new pixels (re-materialized, a new tile source). Every consumer
+    /// (viewport, scopes, Save view, headless shot) calls this before it reads pixels, so they
+    /// all see the same scene_linear. Returns what stage 2 needs (`Err`: no transform can show
+    /// the colour image).
+    pub fn colour(&mut self, colour: &mut crate::ocio::State, target: &crate::present::Target) -> Result<crate::transfer::Src, String> {
+        let src = colour.frame(&self.frame, target)?;
+        let decode = colour.decode()?;
+        let decoder = colour.decoder();
+        let identity = format!("{}|{}", decode.key, decoder.key());
+        if identity != self.decode_identity {
+            self.decode = decode;
+            self.decode_identity = identity;
+            self.materialized = None;
+            self.pixels_gen = self.pixels_gen.wrapping_add(1);
+        }
+        self.decoder = decoder;
+        Ok(src)
+    }
+
+    pub(crate) fn decode_key(&self) -> &str { &self.decode_identity }
+
+    /// Prepare Pixel Info even when neither viewport nor scopes is drawn.
+    pub(crate) fn prepare_readout(&mut self, target: &mut DisplayTarget,
+        stage: Option<&mut (dyn ImageStage + '_)>) -> Result<bool, String> {
+        target.sync_decode(self.decode_key());
+        #[cfg(feature = "ofx")]
+        target.sync_worker(stage.as_ref().is_some_and(|stage| stage.uses_worker()));
+        #[cfg(feature = "ofx")]
+        if stage.as_ref().is_some_and(|stage| stage.uses_worker()) {
+            self.sync_source(u32::MAX, &mut target.tiles, stage);
+            return Ok(target.accepted_pixels().is_some());
+        }
+        let stage_key = stage.as_ref().map_or(0, |s| s.key());
+        self.prepare_source_cpu(target, stage_key, u32::MAX).map_err(|e| e.to_string())?;
+        self.sync_source(u32::MAX, &mut target.tiles, stage);
+        Ok(true)
     }
 
     /// Set what is shown (the toolbar combo and the channel tree both write the
@@ -1261,6 +1327,8 @@ impl ImageBackend {
             self.height,
             group,
         )?;
+        let decoded: &mut Vec<f32> = Arc::make_mut(&mut self.pixels);
+        layer_decode(&self.decode, &self.frame, group).apply(decoded);
         if let Some(ref cov) = self.coverage_overlay {
             let n = (self.width as usize) * (self.height as usize);
             if cov.len() == n && self.pixels.len() == n * 4 {
@@ -1295,6 +1363,7 @@ impl ImageBackend {
     fn planes_eligible(&self, stage: u64, max_dim: u32) -> bool {
         stage == 0
             && self.coverage_overlay.is_none()
+            && layer_decode(&self.decode, &self.frame, self.frame.resolve(&self.view).as_deref()).is_identity()
             && self.direct_eligible(false, max_dim)
             && self.frame.half_slots(&self.view).is_some()
     }
@@ -1403,7 +1472,7 @@ impl ImageBackend {
                     pixels_gen: self.pixels_gen, stage: stage.key() };
                 tiles.set_region_wake(stage.worker_wake());
                 if tiles.is_stale(&desc) {
-                    match stage.worker(self.frame.clone(), self.view.clone(), tiles.region_budget()) {
+                    match stage.worker(self.frame.clone(), self.view.clone(), self.decoder.clone(), tiles.region_budget()) {
                         Ok(Some(source)) => {
                             self.file_source = None;
                             tiles.set_source(desc, source);
@@ -1453,8 +1522,9 @@ impl ImageBackend {
             let source = match &self.coverage_file {
                 Some((ranked, id)) => FileSource::coverage(path, window, &names, types, ranked.clone(), *id),
                 None => {
-                    let mapping = Mapping::of(&names, self.frame.resolve(&self.view).as_deref());
-                    FileSource::new(path, window, &names, types, mapping)
+                    let group = self.frame.resolve(&self.view);
+                    let mapping = Mapping::of(&names, group.as_deref());
+                    FileSource::new(path, window, &names, types, mapping, layer_decode(&self.decode, &self.frame, group.as_deref()))
                 }
             };
             match source {
@@ -1540,10 +1610,13 @@ impl ImageBackend {
         // Times the whole present of a new frame / layer (the stale materialize marks it).
         let _lap = (self.materialized.as_ref() != Some(&self.view))
             .then(|| crate::timing::Lap::start("present"));
+        target.sync_decode(self.decode_key());
         #[cfg(feature = "ofx")]
         let worker = stage.as_ref().is_some_and(|stage| stage.uses_worker());
         #[cfg(not(feature = "ofx"))]
         let worker = false;
+        #[cfg(feature = "ofx")]
+        target.sync_worker(worker);
         let max_dim = device.limits().max_texture_dimension_2d;
         let stage_key = stage.as_ref().map_or(0, |s| s.key());
         if !worker { self.prepare_source_cpu(target, stage_key, max_dim).map_err(|e| e.to_string())?; }
@@ -1583,9 +1656,10 @@ impl ImageBackend {
             let direct = gpu
                 .direct
                 .get_or_insert_with(|| crate::tiles::direct::DirectGpu::new(device));
-            // The shown pixels are the materialized layer itself (no stage
-            // output, no overlay): its profile comes from the channel spans.
-            let known = (desc.stage == 0 && self.coverage_overlay.is_none())
+            // Source-channel spans describe these pixels only for an identity decode.
+            // Converted scene-linear light is rescanned before GPU fixed-point reduction.
+            let known = (desc.stage == 0 && self.coverage_overlay.is_none()
+                && layer_decode(&self.decode, &self.frame, self.frame.resolve(&self.view).as_deref()).is_identity())
                 .then(|| self.frame.profile(&self.view));
             match direct.prepare(
                 device,
@@ -1718,6 +1792,9 @@ impl ImageBackend {
         stage: Option<&mut (dyn ImageStage + '_)>,
         display: Option<&crate::export::Look>,
     ) -> Option<(wgpu::TextureView, u32, u32)> {
+        target.sync_decode(self.decode_key());
+        #[cfg(feature = "ofx")]
+        target.sync_worker(stage.as_ref().is_some_and(|stage| stage.uses_worker()));
         #[cfg(feature = "ofx")]
         if let Some(pixels) = target.accepted_pixels() {
             return target.ensure_processed_linear(device, queue, pixels, display).map(|(view, w, h)| (view.clone(), w, h));
@@ -1817,6 +1894,7 @@ impl ImageBackend {
         max_dim: u32,
         stage: Option<&mut (dyn ImageStage + '_)>,
     ) -> Option<(u32, u32, u32, Arc<Vec<f32>>)> {
+        target.sync_decode(self.decode_key());
         #[cfg(feature = "ofx")]
         if stage.as_ref().is_some_and(|stage| stage.uses_worker()) { return None; }
         let stage_key = stage.as_ref().map_or(0, |s| s.key());
@@ -2176,6 +2254,31 @@ fn names_of(channels: &[(String, ChannelData)]) -> Vec<&str> {
     channels.iter().map(|(n, _)| n.as_str()).collect()
 }
 
+/// Whether `group` of `frame` is a colour layer, the channels the frame's colour tag describes:
+/// the main layer's `R`/`G`/`B` (or `Y`), or a named layer whose first three components are
+/// `R`, `G`, `B` (light AOVs such as `diffuse.R`). Data layers (normals, position, depth, ids,
+/// motion) are not colour and are never decoded.
+pub(crate) fn colour_layer(frame: &DecodedFrame, group: Option<&LayerGroup>) -> bool {
+    let Some(g) = group else { return false };
+    let names = &frame.channel_names;
+    let last = |i: usize| names.get(i).map(|n| n.rsplit('.').next().unwrap_or(n).to_ascii_uppercase());
+    if g.name.is_empty() {
+        return g.channels.iter().filter_map(|&i| last(i)).any(|n| matches!(n.as_str(), "R" | "G" | "B" | "Y"));
+    }
+    let comps: Vec<String> = g.channels.iter().take(3).filter_map(|&i| last(i)).collect();
+    comps == ["R", "G", "B"]
+}
+
+/// Stage 1 for `group` of `frame`: `decode` for a colour layer ([`colour_layer`]), the identity
+/// for data.
+pub(crate) fn layer_decode(
+    decode: &Arc<crate::ocio::Decode>,
+    frame: &DecodedFrame,
+    group: Option<&LayerGroup>,
+) -> Arc<crate::ocio::Decode> {
+    if colour_layer(frame, group) { decode.clone() } else { Arc::new(crate::ocio::Decode::identity()) }
+}
+
 /// Materialize the given layer of `frame` into an interleaved linear RGBA f32
 /// buffer (`w*h*4`) through its [`Mapping`].
 fn materialize_into(
@@ -2398,6 +2501,62 @@ pub(crate) mod consumer_tests;
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn equivalent_primary_override_invalidates_other_input_decodes() {
+        let mut primary = tests_support::frame_with(&["R", "G", "B", "A"]);
+        primary.tag = exr_import::ColorTag { space: "srgb_rec709_display".into(), origin: exr_import::TagOrigin::File };
+        let mut image = ImageBackend::from_frame(Arc::new(primary));
+        let target = crate::present::Target::default();
+        let mut colour = crate::ocio::State::new(crate::ocio::Sel { on: true, ..crate::ocio::Sel::default() });
+        image.colour(&mut colour, &target).unwrap();
+        let primary_key = image.decode.key.clone();
+        let policy = image.decode_key().to_owned();
+        let generation = image.pixels_gen;
+        let neighbour = tests_support::frame_with(&["R", "G", "B", "A"]);
+        let old_neighbour = image.decoder.decode(&neighbour).unwrap().key.clone();
+        colour.over = Some("srgb_rec709_display".into());
+        colour.rebuild();
+        image.colour(&mut colour, &target).unwrap();
+        assert_eq!(image.decode.key, primary_key, "the primary transform itself is unchanged");
+        assert_ne!(image.decode_key(), policy);
+        assert_ne!(image.pixels_gen, generation, "effect sources must be rebuilt with the new decoder");
+        assert_ne!(image.decoder.decode(&neighbour).unwrap().key, old_neighbour);
+    }
+
+    #[test]
+    fn decode_change_retires_held_presentation_before_consumers_read_it() {
+        let mut target = DisplayTarget::new(4096, 4096);
+        target.sync_decode("builtin");
+        target.direct_frame = Some(7);
+        target.blocked_frame = Some(8);
+        target.sync_decode("builtin");
+        assert_eq!(target.direct_frame, Some(7), "unchanged working space retains the frame");
+        target.sync_decode("ocio/ACEScg");
+        assert_eq!(target.direct_frame, None);
+        assert_eq!(target.blocked_frame, None);
+        assert!(target.tiles.accepted_description().is_none());
+    }
+
+    #[test]
+    fn stored_colour_is_decoded_but_data_layers_keep_their_values() {
+        let mut frame = tests_support::frame_of(1, 1, vec![
+            ("R".into(), ChannelData::Float(vec![0.5])),
+            ("G".into(), ChannelData::Float(vec![0.5])),
+            ("B".into(), ChannelData::Float(vec![0.5])),
+            ("depth.Z".into(), ChannelData::Float(vec![0.5])),
+        ]);
+        frame.tag = exr_import::ColorTag { space: "srgb_rec709_display".into(), origin: exr_import::TagOrigin::File };
+        let mut image = ImageBackend::from_frame(Arc::new(frame));
+        let mut colour = crate::ocio::State::new(crate::ocio::Sel::default());
+        image.colour(&mut colour, &crate::present::Target::default()).unwrap();
+        let mut target = DisplayTarget::new(4096, 4096);
+        image.prepare_source_cpu(&mut target, 0, 8192).unwrap();
+        assert!((image.pixel_at(0, 0).unwrap()[0] - crate::transfer::eotf(0.5)).abs() < 1e-6);
+        image.set_view(&Selection::layer("depth"));
+        image.prepare_source_cpu(&mut target, 0, 8192).unwrap();
+        assert_eq!(image.pixel_at(0, 0).unwrap()[0], 0.5);
+    }
 
     /// The profile assembled from the channel spans equals a rescan of the
     /// materialized buffer, for every channel type, every mapping kind

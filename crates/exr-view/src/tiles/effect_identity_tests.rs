@@ -58,11 +58,12 @@ fn write(path: &std::path::Path, size: i32, value: f32) {
 
 /// The Source identifier the probe sees when `frame` is rendered at pyramid `level` through `view`.
 /// `effect` is one instance throughout: the identifier names the instance too.
-fn id_of(effect: &Arc<ofx_runtime::Effect<u32>>, frame: DecodedFrame, view: Selection, level: u32) -> String {
+fn id_of(effect: &Arc<ofx_runtime::Effect<u32>>, frame: DecodedFrame, view: Selection, level: u32,
+    decoder: Arc<crate::ocio::Decoder>) -> String {
     let effect = effect.clone();
     let frame = Arc::new(frame);
     let inputs = Arc::new(Inputs::Static { frame: frame.clone(), index: 0 });
-    let source = EffectSource::new(effect, inputs, frame, view, 0.0, Some(24.0), Some([0.0, 0.0]),
+    let source = EffectSource::new(effect, inputs, frame, view, decoder, 0.0, Some(24.0), Some([0.0, 0.0]),
         crate::tiles::region::RegionBudget::new(64 << 20)).unwrap();
     let grid = source.grid().unwrap();
     IDS.lock().unwrap().clear();
@@ -85,7 +86,12 @@ fn input_identity_is_stable_for_an_unchanged_input_and_changes_with_the_pixels()
     let runtime = runtime();
     let described = runtime.describe(&PluginKey::new(IdProbe::ID, 1), HostContext::Filter).unwrap();
     let effect = runtime.effect(5, &described, EffectSetup::default());
-    let id_of = |frame, view, level| id_of(&effect, frame, view, level);
+    let builtin = Arc::new(crate::ocio::Decoder::builtin_only());
+    let base = id_of(&effect, load(), Selection::default(), 0, builtin.clone());
+    let ocio = crate::ocio::State::new(crate::ocio::Sel { on: true, ..crate::ocio::Sel::default() });
+    let converted = id_of(&effect, load(), Selection::default(), 0, ocio.decoder());
+    assert_ne!(base, converted, "a changed decode must invalidate plug-in input caches");
+    let id_of = |frame, view, level| id_of(&effect, frame, view, level, builtin.clone());
 
     let base = id_of(load(), Selection::default(), 0);
     assert_eq!(base, id_of(load(), Selection::default(), 0), "a rebuilt unchanged input keeps its identity");

@@ -275,7 +275,7 @@ pub fn show(
     let place = Placement { origin: if worker { canvas.min } else { img_rect.min }, zoom: img.zoom, clip: rect };
     // The frame's colour space resolves here, once per frame and choice (`ocio::State::frame`):
     // its OCIO transform, or the built-in decode of its tag.
-    let src = controls.colour.frame(&img.frame, &controls.target);
+    let src = img.colour(&mut controls.colour, &controls.target);
     let colour = controls.colour.active().map(|t| &**t);
     let shown = match (gpu.gpu(), src) {
         (_, Err(e)) => Err(format!("{e} (OCIO off: no built-in decode for the frame's colour space)")),

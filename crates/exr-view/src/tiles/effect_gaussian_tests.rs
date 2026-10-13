@@ -36,7 +36,7 @@ fn source(effect: Arc<Effect<u32>>, primary: Arc<DecodedFrame>) -> EffectSource 
             index: 0,
         }),
         primary,
-        Selection::default(),
+        Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()),
         0.75,
         Some(24.0),
         Some([0.0, 0.0]),

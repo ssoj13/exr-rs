@@ -1,9 +1,11 @@
-# COLOR_PLAN: frames keep their own colour space, one OCIO conversion at display
+# COLOR_PLAN: decode to scene-linear light, then display by source class
 
-Status: approved by the operator 2026-10-12; implemented 2026-10-13 on branch `color-plan`
-(items 1-9 and the Tests done; see "Progress"). Replaces the import-time linearisation
-and the per-frame light gain (`8e7f166`). Keep this file current while the work goes on; when it
-is done, its summary goes to CHANGELOG.md and the file is removed.
+Status: approved by the operator 2026-10-12; two-stage source implementation reviewed
+2026-10-13 on branch `color-plan`. Focused viewer, color, and GPU validation is complete:
+335 passed, 0 failed, 23 ignored. The full six-stage bootstrap gate, integration, and
+same-version v0.1.0 release replacement remain pending. Replaces the
+import-time linearisation and per-frame light gain (`8e7f166`). Keep this file while the work
+goes on; remove it only after final gates and integration, with the summary in CHANGELOG.md.
 
 ## Why
 
@@ -60,7 +62,7 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
 - Both halves are cached by key (stage 1 per frame space + pre-matrix, stage 2 per display, view,
   look, output form), asked before anything is built.
 
-## Work
+## Work (focused validation complete; full gates and integration pending)
 
 1. [x] **exr-import: no linearisation.** `Loaded` returns the decoded values and a `ColorTag`
    `{ space: String, origin: TagOrigin }` instead of linear Rec.709. Tag order (OIIO's,
@@ -83,8 +85,9 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
    is a typed error shown in the status bar and the frame's info, with the manual override
    (below) offered; never a silent substitute.
 4. [x] **OCIO per frame.**
-   - Processor input = the frame's space; cache processors (and their WGSL) by (space, display,
-     view, looks, config revision).
+   - Stage 1 input = the frame's space; output = `scene_linear`. Stage 2 input =
+     `scene_linear`; source space still selects the view and look. Cache each stage before
+     building, including config load revision, source pre-matrix, and alpha kind for decode.
    - Views offered = `Config::get_views_for_colorspace(display, space)` (vfx-ocio
      `config.rs:2135-2149`, OCIO `getNumViews(display, colorspace)`); default =
      the first of them (OCIO `getDefaultView(display, colorspace)`).
@@ -94,21 +97,23 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
      input of everything. Data colour spaces stay bypassed (`data_bypass`).
    - Exposure stays OCIO's `linearCC` in `scene_linear` (`ocio.rs:192-207`): it works for any
      input space.
-5. [x] **Alpha in the shader.** Associated alpha: unpremultiply, run the processor on colour,
-   premultiply for the canvas (egui's premultiplied blend). Straight alpha: process, then
-   premultiply. One function in the tile shader and its CPU twin.
-6. [x] **Without OCIO** (off or no config): the same tag drives a built-in decode in the shader
-   (the `Tf` curves move from exr-import to the shader: sRGB, Rec.709, gamma, PQ, HLG, Cineon;
-   primaries to the display's). One path, two sources of the transform.
+5. [x] **Alpha at both stages.** CPU decode unpremultiplies associated source colour and
+   processes straight source colour as stored; both leave stage 1 associated in linear light.
+   Stage 2 unpremultiplies that light for display processing and premultiplies for the canvas.
+   The tile shader and CPU display twin share the same alpha rule.
+6. [x] **Without OCIO** (explicitly off): the tag selects CPU built-in decode to linear Rec.709
+   (sRGB, Rec.709, gamma, PQ, HLG, Cineon, and primaries). The shader runs the built-in display
+   stage only. With OCIO on, a failed config load or transform is an explicit error.
 7. [x] **Absolute light.** Drop `DecodedFrame::light_gain` / `white_nits` for imported stills: PQ
    and HLG are display colour spaces in OCIO (1.0 = 100 nits of the display reference, the same
    unit WarpBro writes with). The HDR output's SDR white stays the present pass's business
-   (`present::Target`). Open point: an EXR with `whiteLuminance` but no colour space tag (our own
-   display-light EXRs) - tag it `display-linear` through a config space if the config has one,
-   else keep the gain only for that case; decide when implementing, document it here.
-8. [x] **Inspector, scopes, export.** The pixel inspector shows the stored values and their
-   `scene_linear` (CPU processor). Scopes run on source or display values (a switch). Save view
-   and the headless screenshot use the same per-frame processor (one codepath).
+   (`present::Target`). EXR `whiteLuminance` without a colour-space tag is resolved as
+   display-referred light with a pre-matrix; relative displays retain their reference white,
+   and absolute outputs use the stated nits. See the decision below.
+8. [x] **Inspector, scopes, export.** Original all-channel probes retain stored values;
+   the active pixel readout uses `scene_linear` from stage 1. Scopes switch between
+   scene-linear and display values. Save view and headless screenshots apply the same stage-2
+   CPU twin to decoded pixels. Pixel Info resolves colour and prepares readout even when viewport and scopes are hidden.
 9. [x] **UI.** The frame's tag and its origin in the info panel and status bar; the view combo lists
    only the allowed views and marks the remembered one.
 
@@ -122,20 +127,29 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
 - [x] 4 `ocio::State::frame` (per frame id + choice revision), transforms cached by key,
   `Ocio::views(display, space, hdr)` = `get_views_for_colorspace`, `Sel::{scene_view,
   video_view}` per `Class`, `State::over` (per file, not persisted).
-- [x] 5 `transfer::{unpremul, premul, alpha_wgsl}`; the shader and every CPU twin use them.
-- [x] 6 `exr_import::{builtin, Builtin, Tf}` + `transfer::{decode, decode_wgsl}` (HLG on its
-  1000-nit reference display, PQ in units of 100 nits; absolute light uses `ocio::display_gain`).
+- [x] 5 `transfer::{unpremul, premul, alpha_wgsl}`; stage 1 associates decoded light,
+  stage 2 shares the CPU/shader alpha rule.
+- [x] 6 `exr_import::{builtin, Builtin, Tf}` + CPU `transfer::decode` (HLG on its 1000-nit
+  reference display, PQ in units of 100 nits; absolute light uses `ocio::display_gain`).
+  Shader decode and source curve/matrix/straight uniforms are removed.
 - [x] 7 `HDR_REFERENCE_WHITE_NITS`, `Loaded::white_nits`, `DecodedFrame::{white_nits,
   light_gain}`, `render::Look::{ocio_gain, light_gain}` removed. Open point decided (below).
-- [x] 8 Pixel Info shows `scene_linear` (`State::scene_linear`); scopes' "Display values" switch
-  (`Config::scope_display`, `export::shade_flat`); Save view and the headless screenshot share
-  `export::shade` and `State::frame` (the screenshot uses the saved OCIO choice).
+- [x] 8 Pixel Info reads stage-1 `scene_linear` and prepares independently of the viewport;
+  scopes' "Display values" switch (`Config::scope_display`, `export::shade_flat`); Save view
+  and headless screenshots share `export::shade` and `State::frame` over decoded pixels.
 - [x] 9 Metadata > Colour (`State::rows`), status bar colour section (`State::summary`), the view
   combo lists the allowed views and says which class it is remembered for.
-- [ ] Follow-ups: OpenFX effects and the tile pyramid work on stored (possibly encoded) values;
-  vfx-io tags every chunkless PNG/JPEG `srgb_rec709_scene` (OIIO's assumption), so such a still is
-  "tagged", never "untagged" (the file-rule path serves formats that never tag: TIFF without
-  EXIF, SGI, IFF, ICO, ...); telling an assumed tag from a stated one needs a vfx-io fact.
+- [x] OpenFX inputs and every generated pyramid level now consume decoded scene-linear light.
+  Native file MIPs are used only for an identity decode. Decode identity includes the primary
+  decode key and decoder policy (config load serial and override); temporal neighbour sources
+  and `RenderInputs::stamp` change with that identity. Held presentation is discarded when
+  the decode identity changes. `DisplayTarget::sync_worker` clears accepted effect pixels
+  when the worker becomes inactive, keeping readout, scopes, export, and presentation on the
+  current source even without a viewport frame.
+- [ ] Separate metadata follow-up: vfx-io tags every chunkless PNG/JPEG
+  `srgb_rec709_scene` (OIIO's assumption), so such a still is "tagged", never "untagged"
+  (the file-rule path serves formats that never tag: TIFF without EXIF, SGI, IFF, ICO, ...);
+  telling an assumed tag from a stated one needs a vfx-io fact.
 
 ## Review fixes (2026-10-13)
 
@@ -156,27 +170,56 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
   (the white of a relative display), `nits` only sets where an absolute (HDR) output shows it
   (`Builtin::nits`, `ocio::display_gain(nits, target)`); test `white_luminance_exr_is_display_light`
   (203 nits: 1.0 = white on sRGB - Display, 203 nits on a PQ display at any SDR white).
-- [x] MEDIUM 4 `Ocio::key(names, pre, linear)` is asked of the cache before `transform` builds;
+- [x] MEDIUM 4 `Ocio::key(names, linear)` is asked of the cache before `transform` builds;
+  the pre-matrix belongs to stage 1's separate cache key;
   test `frames_of_one_space_share_the_transform`.
 - [x] MEDIUM 5 `TagOrigin::Chromaticities { to709 }`: primaries no interop ID names are taken
   as they are (their matrix into `lin_rec709_scene`, Bradford to D65; OCIO pre-matrix and the
   built-in decode); degenerate ones are `ImportError::Attr`. Tests in `exr_tag_rules` and
   `exr_tags_follow_chromaticities_then_file_rules` (a P3 matrix equals the named P3 space).
-- [ ] BLOCKER (operator): the two-stage model above replaces the single frame -> display
-  processor. Steps, a checkpoint commit after each:
-  - [ ] A `ocio::Decode` (stage 1, CPU, `apply` over RGBA rows) and its resolver per frame.
-  - [ ] B stage 2 transforms from `scene_linear` (view / look by the source class), pre-matrix
+- [ ] Final acceptance (operator): the two-stage model replaces the single frame -> display
+  processor. A-D source review and E focused validation are complete; the six-stage bootstrap
+  gate and integration remain pending.
+  - [x] A `ocio::Decode` (stage 1, CPU, `apply` over RGBA rows) and its resolver per frame.
+  - [x] B stage 2 transforms from `scene_linear` (view / look by the source class), pre-matrix
     moved to stage 1, cache keys per half.
-  - [ ] C stage 1 applied where layers are assembled (materialize, file bands, effect inputs);
+  - [x] C stage 1 applied where layers are assembled (materialize, file bands, effect inputs);
     half planes only for an identity decode; tile identity follows the decode key.
-  - [ ] D the tile shader is stage 2 only (built-in decode, curve / matrix / straight uniforms
+  - [x] D the tile shader is stage 2 only (built-in decode, curve / matrix / straight uniforms
     and `decode_wgsl` removed); Save view, scopes and readout on the stage-1 output.
-  - [ ] E tests: PQ and sRGB PNG identity through both stages with and without an identity
+  - [x] E tests: PQ and sRGB PNG identity through both stages with and without an identity
     effect; a 2x2 black/white sRGB checker's level 1 is 0.5 linear.
 
 ## Tests
 
-All in place and passing (2026-10-13): `ocio::tests::{pq_png_is_an_identity_on_a_pq_display,
+Historical first-pass tests below predate final acceptance of the two-stage implementation.
+Final focused receipts (coordinator verified, 2026-10-13):
+
+- The real WarpBro PQ fixture round-trips through both stages with worst code error 0 and
+  mean code error 0. Proof images are retained under `target/color-resume-proof/` (HDR
+  `pq_round_trip.png` and the SDR result). The coordinator visually inspected the SDR image:
+  the Venice environment and blue fractal are visible, without the repeated-ACES near-black
+  failure. No native HDR viewport screenshot was captured; the strongest evidence is exact
+  real PQ codes, CPU/GPU twins, and the visually inspected SDR artifact.
+- GPU checks: 3 passed, including tile display/CPU twins and the Direct decoded-profile
+  regression checking every half component for OCIO and built-in sRGB/PQ sources.
+- Pixel Info with viewport and scopes hidden: 1 passed.
+- Native/GPU `disabling_effect_updates_consumers_without_a_viewport_frame`: 1 passed in
+  1.84s (explicit ignored-test run). Disabling the effect updates readout, scopes, export, and
+  presentation by clearing accepted effect pixels when the worker becomes inactive.
+- A-D source review covers source-class views/looks, explicit invalid-config errors,
+  scene-linear effect/pyramid inputs, decode-policy/acceptance cache identity, metadata, and
+  identity-only native MIPs.
+- [x] Focused viewer suite (358 tests): 335 passed, 0 failed, 23 ignored in 188.34s. This
+  replaces the initial run's 332 passes, 1 test defect, and 22 ignored tests.
+- [x] Singular default-view bridge regression: 1 passed in 0.01s. The processor returns typed
+  `OcioError::Transform("Singular Matrix can’t be inverted")`; worker decode, frame resolution,
+  and the shown decode all reject it explicitly.
+- [ ] Full six-stage bootstrap gate on the frozen candidate: pending (parity first, then
+  cargo, clippy, and Python checks).
+- [ ] Integration and same-version v0.1.0 release replacement: pending.
+
+First-pass test inventory (2026-10-13): `ocio::tests::{pq_png_is_an_identity_on_a_pq_display,
 srgb_png_is_an_identity_on_an_srgb_display, exr_tags_follow_chromaticities_then_file_rules,
 untagged_png_follows_the_file_rules, an_unknown_tag_is_a_typed_error,
 alpha_is_processed_unpremultiplied, builtin_decode_matches_the_config,

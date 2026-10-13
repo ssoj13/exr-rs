@@ -31,7 +31,8 @@ exr-core = { path = "../exr-core" }
 # the one place width/height/row/byte limits are validated before `create_texture`.
 exr-gpu = { path = "../exr-gpu" }
 imath-rs = { path = "../imath-rs" }
-# Non-EXR stills (PNG, DPX, HDR, ...) as linear associated-alpha frames; the one format registry.
+# Non-EXR stills (PNG, DPX, HDR, ...) as stored pixels plus colour/alpha tags; the one format
+# registry. ocio::Decoder converts them to scene-linear associated-alpha pixels in the viewer.
 exr-import = { path = "../exr-import" }
 # Tile production off the UI thread (`tiles::view`); the workspace pool exr-core uses too.
 rayon.workspace = true

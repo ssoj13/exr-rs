@@ -81,9 +81,9 @@ pub(crate) struct OfxEffectsSnapshot {
     frame_range: Option<[f64; 2]>,
 }
 impl OfxEffectsSnapshot {
-    fn source(self, frame: Arc<DecodedFrame>, view: Selection, budget: RegionBudget)
+    fn source(self, frame: Arc<DecodedFrame>, view: Selection, decoder: Arc<crate::ocio::Decoder>, budget: RegionBudget)
         -> Result<Arc<dyn TileSource>, String> {
-        EffectSource::new(self.effect, self.inputs, frame, view, self.time,
+        EffectSource::new(self.effect, self.inputs, frame, view, decoder, self.time,
             self.frame_rate, self.frame_range, budget)
             .map(|source| Arc::new(source) as Arc<dyn TileSource>)
             .map_err(|error| error.to_string())
@@ -533,10 +533,10 @@ impl ImageStage for OfxEffects {
     }
 
     fn uses_worker(&self) -> bool { self.active() }
-    fn worker(&self, frame: Arc<DecodedFrame>, view: Selection, budget: RegionBudget)
+    fn worker(&self, frame: Arc<DecodedFrame>, view: Selection, decoder: Arc<crate::ocio::Decoder>, budget: RegionBudget)
         -> Result<Option<Arc<dyn TileSource>>, String> {
         if !self.active() { return Ok(None); }
-        self.snapshot(frame.clone())?.source(frame, view, budget).map(Some)
+        self.snapshot(frame.clone())?.source(frame, view, decoder, budget).map(Some)
     }
     fn worker_wake(&self) -> Option<Arc<dyn Fn() + Send + Sync>> { self.wake.clone() }
     fn accepted(&mut self, shown: Option<crate::tiles::view::AcceptedEffect>) { self.accepted = shown; }
@@ -615,7 +615,7 @@ mod tests {
         }
         let frame = Arc::new(frame);
         let budget = RegionBudget::new(4096);
-        let source = fx.worker(frame, Selection::default(), budget.clone()).unwrap().unwrap();
+        let source = fx.worker(frame, Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()), budget.clone()).unwrap().unwrap();
         let grid = source.grid();
         let id = crate::tiles::grid::TileId { level: 0, tx: 0, ty: 0 };
         let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
@@ -674,7 +674,7 @@ mod tests {
             *channel = exr_core::api::ChannelData::Float(vec![0.5; 4]);
         }
         let source = fx
-            .worker(Arc::new(frame), Selection::default(), RegionBudget::new(4096))
+            .worker(Arc::new(frame), Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()), RegionBudget::new(4096))
             .expect("the worker")
             .expect("an active effect");
         let grid = source.grid();
@@ -735,7 +735,7 @@ mod tests {
         let error = fx
             .worker(
                 Arc::new(crate::image::tests_support::frame_with(&["R", "G", "B", "A"])),
-                Selection::default(),
+                Selection::default(), std::sync::Arc::new(crate::ocio::Decoder::builtin_only()),
                 RegionBudget::new(4096),
             )
             .err()

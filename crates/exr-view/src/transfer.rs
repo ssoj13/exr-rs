@@ -202,9 +202,8 @@ pub fn dial(v: f32, gamma: f32) -> f32 {
 
 pub use exr_import::{Builtin, Tf};
 
-/// Decode curve, as the tile shader's `curve` uniform encodes [`Tf`] (the single definition; the
-/// shader's `switch` arms are generated from it).
-pub mod curve {
+/// Decode curve codes of [`decode1`] (stage 1 runs on the CPU; the codes keep its `match` flat).
+mod curve {
     pub const LINEAR: u32 = 0;
     pub const SRGB: u32 = 1;
     pub const REC709: u32 = 2;
@@ -214,8 +213,8 @@ pub mod curve {
     pub const HLG: u32 = 6;
 }
 
-/// `tf` as the shader's `(curve, curve_gamma)` uniforms.
-pub fn curve_of(tf: Tf) -> (u32, f32) {
+/// `tf` as a `(curve code, gamma)` pair.
+fn curve_of(tf: Tf) -> (u32, f32) {
     match tf {
         Tf::Linear => (curve::LINEAR, 1.0),
         Tf::Srgb => (curve::SRGB, 1.0),
@@ -268,9 +267,9 @@ fn decode1(code: u32, g: f32, v: f32) -> f32 {
     }
 }
 
-/// CPU twin of the tile shader's `decode`: a frame's stored colour to linear Rec.709 light (the
-/// curve, HLG's display OOTF, then the matrix into Rec.709). Relative light (1.0 = the display's
-/// white) for SDR curves, units of 100 nits for PQ / HLG.
+/// The built-in stage 1 (no OCIO, `ocio::Decode`): a frame's stored colour to linear Rec.709
+/// light (the curve, HLG's display OOTF, then the matrix into Rec.709). Relative light (1.0 = the
+/// display's white) for SDR curves, units of 100 nits for PQ / HLG.
 pub fn decode(b: &Builtin, rgb: [f32; 3]) -> [f32; 3] {
     let (code, g) = curve_of(b.tf);
     let mut l = rgb.map(|v| decode1(code, g, v));
@@ -287,67 +286,6 @@ pub fn decode(b: &Builtin, rgb: [f32; 3]) -> [f32; 3] {
     }
     let m = &b.to709;
     std::array::from_fn(|r| m[r][0] * l[0] + m[r][1] * l[1] + m[r][2] * l[2])
-}
-
-/// The WGSL twin of [`decode`], generated from the same constants: declares
-/// `fn decode(c: vec3<f32>) -> vec3<f32>` over the tile uniforms `curve`, `curve_gamma` and the
-/// matrix rows `m0`..`m2` (applied when `rotate` is set). Needs `srgb_eotf`
-/// (`egui_display::transfer::eotf_wgsl`).
-pub fn decode_wgsl() -> String {
-    let [r_slope, r_cut, r_pow, r_scale, r_off] = R709.map(fl);
-    let [c_scale, c_white, c_black, c_step, c_gamma] = CINEON.map(fl);
-    let [m1, m2, c1, c2, c3, pq_peak] = PQ.map(fl);
-    let [ha, hb, hc, h_peak, h_gamma] = HLG.map(fl);
-    let [l0, l1, l2] = LUMA_2020.map(fl);
-    format!(
-        "\
-fn mirror_pow(v: f32, g: f32) -> f32 {{
-    return sign(v) * pow(abs(v), g);
-}}
-
-fn decode1(v: f32) -> f32 {{
-    switch u.curve {{
-        case {srgb}u: {{ return srgb_eotf(v); }}
-        case {rec709}u: {{
-            let a = abs(v);
-            return sign(v) * select(pow((a + {r_off}) / {r_scale}, {r_pow}), a / {r_slope}, a < {r_cut});
-        }}
-        case {gamma}u: {{ return mirror_pow(v, u.curve_gamma); }}
-        case {cineon}u: {{
-            let k = pow(10.0, ({c_black} - {c_white}) * {c_step} / {c_gamma});
-            return (pow(10.0, (v * {c_scale} - {c_white}) * {c_step} / {c_gamma}) - k) / (1.0 - k);
-        }}
-        case {pq}u: {{
-            let p = pow(clamp(v, 0.0, 1.0), 1.0 / {m2});
-            return pow(max(p - {c1}, 0.0) / ({c2} - {c3} * p), 1.0 / {m1}) * {pq_peak};
-        }}
-        case {hlg}u: {{
-            let e = max(v, 0.0);
-            return select((exp((e - {hc}) / {ha}) + {hb}) / 12.0, e * e / 3.0, e <= 0.5);
-        }}
-        default: {{ return v; }}
-    }}
-}}
-
-fn decode(c: vec3<f32>) -> vec3<f32> {{
-    var l = vec3(decode1(c.r), decode1(c.g), decode1(c.b));
-    if u.curve == {hlg}u {{
-        let y = max(dot(l, vec3({l0}, {l1}, {l2})), 0.0);
-        l = l * ({h_peak} * pow(y, {h_gamma} - 1.0));
-    }}
-    if u.rotate == 0u {{
-        return l;
-    }}
-    return vec3(dot(u.m0.xyz, l), dot(u.m1.xyz, l), dot(u.m2.xyz, l));
-}}
-",
-        srgb = curve::SRGB,
-        rec709 = curve::REC709,
-        gamma = curve::GAMMA,
-        cineon = curve::CINEON,
-        pq = curve::PQ,
-        hlg = curve::HLG,
-    )
 }
 
 /// The colour as the display transforms take it: associated colour divided by its alpha (a
@@ -374,17 +312,17 @@ pub fn premul(d: [f32; 3], a: f32, straight: bool) -> [f32; 3] {
     if a < 1.0 && (straight || a > 0.0) { d.map(|c| oetf(eotf(c) * a.max(0.0))) } else { d }
 }
 
-/// The WGSL twins of [`unpremul`] and [`premul`] over the tile uniform `straight`. Need
-/// `srgb_oetf` and `srgb_eotf`.
+/// The WGSL twins of [`unpremul`] and [`premul`] for associated texels (stage 1 leaves every
+/// frame associated). Need `srgb_oetf` and `srgb_eotf`.
 pub fn alpha_wgsl() -> &'static str {
     "\
 fn unpremul(c: vec3<f32>, a: f32) -> vec3<f32> {
-    if u.straight == 0u && a > 0.0 && a < 1.0 { return c / a; }
+    if a > 0.0 && a < 1.0 { return c / a; }
     return c;
 }
 
 fn premul(d: vec3<f32>, a: f32) -> vec3<f32> {
-    if a < 1.0 && (u.straight == 1u || a > 0.0) {
+    if a < 1.0 && a > 0.0 {
         let k = max(a, 0.0);
         return vec3(srgb_oetf(srgb_eotf(d.r) * k), srgb_oetf(srgb_eotf(d.g) * k), srgb_oetf(srgb_eotf(d.b) * k));
     }
@@ -393,41 +331,37 @@ fn premul(d: vec3<f32>, a: f32) -> vec3<f32> {
 "
 }
 
-/// How the tile shader reads one frame: its built-in decode (the colour without OCIO, and whether
-/// an isolated channel is light or a code), its alpha kind, and the gain on the colour image's
-/// display light (`ocio::display_gain`).
+/// What the tile shader needs of one frame beyond the dials: the gain on the colour image's
+/// display light (`ocio::display_gain`). Stage 1 has already taken the frame to scene_linear with
+/// associated alpha, so this is all stage 2 varies by.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Src {
-    pub builtin: Builtin,
-    pub straight: bool,
     pub gain: f32,
 }
 
 impl Src {
-    /// Linear Rec.709, associated alpha, no gain: an untagged EXR without a config.
-    pub const LINEAR: Src = Src { builtin: Builtin::LINEAR, straight: false, gain: 1.0 };
+    /// Relative light: no gain.
+    pub const LINEAR: Src = Src { gain: 1.0 };
 }
 
-/// CPU twin of the built-in colour pass (no OCIO): one stored RGBA sample of a frame read as `src`
-/// in, one canvas RGBA sample out.
+/// CPU twin of the built-in stage 2 (no OCIO): one scene_linear associated RGBA sample in, one
+/// canvas RGBA sample out.
 ///
-/// Colour mode: unpremultiply ([`unpremul`]), decode ([`decode`]), the display gain, `exposure_ev`
-/// stops, the tone operator `op` ([`tonemap`]), the gamma dial (`pow(c, 1/gamma)` before the
-/// encode), the sRGB OETF, then premultiply in light ([`premul`]). An isolated channel
-/// (`channel_mode`, one of [`mode`]) is data: its stored value as grey, encoded by the OETF when
-/// it is light (a linear frame, or alpha), shown as the code it is otherwise. This exists so the
-/// display chain can be asserted numerically in tests; the shader is generated from the same
-/// constants, and `tiles::render::tests::shader_carries_the_display_transform` guards the
-/// structural match.
+/// Colour mode: unpremultiply ([`unpremul`]), the display gain, `exposure_ev` stops, the tone
+/// operator `op` ([`tonemap`]), the gamma dial (`pow(c, 1/gamma)` before the encode), the sRGB
+/// OETF, then premultiply in light ([`premul`]). An isolated channel (`channel_mode`, one of
+/// [`mode`]) is data: its value as grey, encoded by the OETF. This exists so the display chain can
+/// be asserted numerically in tests; the shader is generated from the same constants, and
+/// `tiles::render::tests::shader_carries_the_display_transform` guards the structural match.
 pub fn display_pixel(raw: [f32; 4], src: &Src, exposure_ev: f32, gamma: f32, channel_mode: u32, op: u32) -> [f32; 4] {
     let dial = |v: f32| dial(v, gamma);
     let mult = 2.0_f32.powf(exposure_ev);
 
     if channel_mode == mode::RGBA {
         let a = raw[3];
-        let l = decode(&src.builtin, unpremul([raw[0], raw[1], raw[2]], a, src.straight));
+        let l = unpremul([raw[0], raw[1], raw[2]], a, false);
         let [r, g, b] = tone(l.map(|c| c * src.gain * mult), op);
-        let [r, g, b] = premul([oetf(dial(r)), oetf(dial(g)), oetf(dial(b))], a, src.straight);
+        let [r, g, b] = premul([oetf(dial(r)), oetf(dial(g)), oetf(dial(b))], a, false);
         [r, g, b, a]
     } else {
         let val = match channel_mode {
@@ -438,16 +372,11 @@ pub fn display_pixel(raw: [f32; 4], src: &Src, exposure_ev: f32, gamma: f32, cha
             _ => raw[0] * LUMA_709[0] + raw[1] * LUMA_709[1] + raw[2] * LUMA_709[2],
         };
         // Every isolate is opaque grey, alpha's too (the shader's `out_a = 1.0`).
-        let v = if light(src, channel_mode) { oetf(dial(val * mult)) } else { dial(val * mult) };
+        let v = oetf(dial(val * mult));
         [v, v, v, 1.0]
     }
 }
 
-/// An isolated channel holds light (encoded by the OETF for the canvas), not a code: the frame's
-/// curve is linear, or the channel is alpha (coverage, never encoded).
-fn light(src: &Src, channel_mode: u32) -> bool {
-    src.builtin.tf == Tf::Linear || channel_mode == mode::A
-}
 
 /// The canvas value the tile shader stores for display value `d` on an output:
 /// negatives are clipped to 0 on SDR (a negative would subtract in egui's
@@ -653,74 +582,64 @@ mod tests {
         assert_ne!(display_pixel(raw, &Src::LINEAR, 0.0, 1.0, mode::RGBA, tonemap::AGX), display_pixel(raw, &Src::LINEAR, 0.0, 1.0, mode::RGBA, tonemap::NONE));
     }
 
-    fn src(space: &str, straight: bool) -> Src {
+    fn builtin(space: &str) -> Builtin {
         let tag = exr_import::ColorTag { space: space.to_owned(), origin: exr_import::TagOrigin::File };
-        Src { builtin: exr_import::builtin(&tag).unwrap(), straight, gain: 1.0 }
+        exr_import::builtin(&tag).unwrap()
     }
 
-    /// The built-in path shows an sRGB-encoded frame as it is (decode, then the canvas sRGB
-    /// encode: 128 stays 128), and the curves hit their closed forms: Cineon 685 -> 1, 95 -> 0;
-    /// PQ 0.508 -> 100 nits (1.0 in units of 100); HLG 0.75 (BT.2408 reference white) -> 203
-    /// nits on the 1000-nit display.
+    fn decoded_pixel(space: &str, straight: bool, raw: [f32; 4], mode: u32) -> [f32; 4] {
+        let mut frame = crate::image::tests_support::frame_with(&["R", "G", "B", "A"]);
+        frame.tag = exr_import::ColorTag { space: space.to_owned(), origin: exr_import::TagOrigin::File };
+        frame.straight = straight;
+        let mut pixel = raw;
+        crate::ocio::Decoder::builtin_only().decode(&frame).unwrap().apply(&mut pixel);
+        display_pixel(pixel, &Src::LINEAR, 0.0, 1.0, mode, tonemap::NONE)
+    }
+
     #[test]
     fn builtin_decode_closed_forms() {
-        let srgb = src("srgb_rec709_scene", false);
         for k in [0u8, 1, 64, 128, 200, 255] {
             let v = f32::from(k) / 255.0;
-            assert_eq!(code8(display_pixel([v, v, v, 1.0], &srgb, 0.0, 1.0, mode::RGBA, tonemap::NONE)[0]), k);
+            assert_eq!(code8(decoded_pixel("srgb_rec709_scene", false, [v, v, v, 1.0], mode::RGBA)[0]), k);
         }
-        let b = |t: &str| src(t, false).builtin;
-        let cin = b("KodakLog");
+        let cin = builtin("KodakLog");
         assert!((decode(&cin, [685.0 / 1023.0; 3])[0] - 1.0).abs() < 1e-5);
         assert!(decode(&cin, [95.0 / 1023.0; 3])[0].abs() < 1e-5);
-        let pq = Builtin { to709: exr_import::IDENTITY, ..b("pq_rec2020_display") };
-        assert!((decode(&pq, [0.508_078; 3])[0] - 1.0).abs() < 2e-3, "{:?}", decode(&pq, [0.508_078; 3]));
-        let hlg = Builtin { to709: exr_import::IDENTITY, ..b("hlg_rec2020_display") };
-        assert!((decode(&hlg, [0.75; 3])[0] - 2.03).abs() < 0.02, "{:?}", decode(&hlg, [0.75; 3]));
-        assert!((decode(&hlg, [1.0; 3])[0] - 10.0).abs() < 1e-3, "HLG peak is the display's 1000 nits");
+        let pq = Builtin { to709: exr_import::IDENTITY, ..builtin("pq_rec2020_display") };
+        assert!((decode(&pq, [0.508_078; 3])[0] - 1.0).abs() < 2e-3);
+        let hlg = Builtin { to709: exr_import::IDENTITY, ..builtin("hlg_rec2020_display") };
+        assert!((decode(&hlg, [0.75; 3])[0] - 2.03).abs() < 0.02);
+        assert!((decode(&hlg, [1.0; 3])[0] - 10.0).abs() < 1e-3);
     }
 
-    /// Alpha: an associated texel is unpremultiplied before the decode and premultiplied in light
-    /// after it; a straight one is decoded as stored; both give `oetf(L * a)` of the colour's
-    /// light `L`. Alpha 0 keeps an associated texel's light (a flare); a straight one goes black.
     #[test]
     fn alpha_is_unpremultiplied_then_premultiplied_in_light() {
         let (c, a) = (0.5f32, 0.4f32);
-        let want = oetf(decode(&src("srgb_rec709_scene", false).builtin, [c; 3])[0] * a);
-        let assoc = display_pixel([c * a, c * a, c * a, a], &src("srgb_rec709_scene", false), 0.0, 1.0, mode::RGBA, tonemap::NONE);
-        let straight = display_pixel([c, c, c, a], &src("srgb_rec709_scene", true), 0.0, 1.0, mode::RGBA, tonemap::NONE);
-        assert!((assoc[0] - want).abs() < 1e-6 && (straight[0] - want).abs() < 1e-6, "{assoc:?} {straight:?} vs {want}");
+        let want = oetf(decode(&builtin("srgb_rec709_scene"), [c; 3])[0] * a);
+        let assoc = decoded_pixel("srgb_rec709_scene", false, [c * a, c * a, c * a, a], mode::RGBA);
+        let straight = decoded_pixel("srgb_rec709_scene", true, [c, c, c, a], mode::RGBA);
+        assert!((assoc[0] - want).abs() < 1e-6 && (straight[0] - want).abs() < 1e-6);
         assert_eq!((assoc[3], straight[3]), (a, a));
-        let flare = display_pixel([0.25, 0.25, 0.25, 0.0], &Src::LINEAR, 0.0, 1.0, mode::RGBA, tonemap::NONE);
-        assert_eq!(flare[0], oetf(0.25), "associated light without coverage stays");
-        let gone = display_pixel([0.25, 0.25, 0.25, 0.0], &Src { straight: true, ..Src::LINEAR }, 0.0, 1.0, mode::RGBA, tonemap::NONE);
+        let flare = decoded_pixel("lin_rec709_scene", false, [0.25, 0.25, 0.25, 0.0], mode::RGBA);
+        assert_eq!(flare[0], oetf(0.25));
+        let gone = decoded_pixel("lin_rec709_scene", true, [0.25, 0.25, 0.25, 0.0], mode::RGBA);
         assert_eq!(gone[0], 0.0);
-        // A linear frame under partial alpha is what it always was: oetf of the texel.
         let lin = display_pixel([0.09, 0.09, 0.09, 0.5], &Src::LINEAR, 0.0, 1.0, mode::RGBA, tonemap::NONE);
         assert!((lin[0] - oetf(0.09)).abs() < 1e-6);
     }
 
-    /// An isolated channel of an encoded frame is its code as grey; of a linear frame, light
-    /// encoded by the OETF; alpha is always coverage (encoded).
+    /// A selected data channel bypasses stage 1; display sees its original value as light.
     #[test]
     fn isolated_channels_show_codes_of_encoded_frames() {
         let raw = [0.5, 0.25, 0.0, 0.25];
-        assert_eq!(display_pixel(raw, &src("srgb_rec709_scene", false), 0.0, 1.0, mode::R, tonemap::NONE)[0], 0.5);
         assert_eq!(display_pixel(raw, &Src::LINEAR, 0.0, 1.0, mode::R, tonemap::NONE)[0], oetf(0.5));
-        assert_eq!(display_pixel(raw, &src("srgb_rec709_scene", false), 0.0, 1.0, mode::A, tonemap::NONE)[0], oetf(0.25));
+        assert_eq!(display_pixel(raw, &Src::LINEAR, 0.0, 1.0, mode::A, tonemap::NONE)[0], oetf(0.25));
     }
 
-    /// The decode and alpha WGSL carry the constants and the uniform names the tile shader binds.
     #[test]
     fn decode_wgsl_carries_the_constants() {
-        let src = decode_wgsl();
-        for c in PQ.iter().chain(&HLG).chain(&R709).chain(&CINEON) {
-            assert!(src.contains(&fl(*c)), "decode WGSL is missing {c}:
-{src}");
-        }
-        for name in ["u.curve", "u.curve_gamma", "u.rotate", "u.m0", "u.m1", "u.m2", "srgb_eotf"] {
-            assert!(src.contains(name), "{name}");
-        }
-        assert!(alpha_wgsl().contains("u.straight"));
+        let shader = alpha_wgsl();
+        assert!(shader.contains("fn unpremul") && shader.contains("fn premul"));
+        assert!(!shader.contains("u.straight"));
     }
 }

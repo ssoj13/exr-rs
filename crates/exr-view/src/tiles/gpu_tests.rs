@@ -396,30 +396,34 @@ fn tiles_render_the_display_transform_of_every_texel() {
     // The curves past sRGB read straight texels: their codes stay in 0..1, the domain they are
     // defined on (an associated code over a 0.2 alpha is 5, past PQ's 1.0 and Cineon's f16 range).
     let codes: Vec<f32> = rgba.iter().map(|v| v.rem_euclid(1.0)).collect();
-    state.set_source(
-        SourceDesc { frame: 2, view: crate::image::Selection::default(), pixels_gen: 0, stage: 0 },
-        Arc::new(FrameSource { rgba: Arc::new(codes.clone()), w, h }),
-    );
-    let read = |space: &str, straight: bool, gain: f32| {
-        let tag = exr_import::ColorTag { space: space.to_owned(), origin: exr_import::TagOrigin::File };
-        transfer::Src { builtin: exr_import::builtin(&tag).unwrap(), straight, gain }
-    };
-    for (src, channel_mode, hdr, what) in [
-        (read("srgb_rec709_scene", true, 1.0), mode::RGBA, false, "sRGB straight"),
-        (read("srgb_rec709_scene", false, 1.0), mode::RGBA, false, "sRGB associated"),
-        (read("srgb_rec709_scene", true, 1.0), mode::R, false, "sRGB isolate"),
-        (read("pq_rec2020_display", true, 100.0 / 203.0), mode::RGBA, true, "PQ"),
-        (read("hlg_rec2020_display", true, 100.0 / 203.0), mode::RGBA, true, "HLG"),
-        (read("srgb_p3d65_display", true, 1.0), mode::RGBA, true, "Display P3"),
-        (read("KodakLog", true, 1.0), mode::RGBA, false, "Cineon"),
-    ] {
+    for (case, (space, straight, gain, channel_mode, hdr, what)) in [
+        ("srgb_rec709_scene", true, 1.0, mode::RGBA, false, "sRGB straight"),
+        ("srgb_rec709_scene", false, 1.0, mode::RGBA, false, "sRGB associated"),
+        ("srgb_rec709_scene", true, 1.0, mode::R, false, "sRGB isolate"),
+        ("pq_rec2020_display", true, 100.0 / 203.0, mode::RGBA, true, "PQ"),
+        ("hlg_rec2020_display", true, 100.0 / 203.0, mode::RGBA, true, "HLG"),
+        ("srgb_p3d65_display", true, 1.0, mode::RGBA, true, "Display P3"),
+        ("KodakLog", true, 1.0, mode::RGBA, false, "Cineon"),
+    ].into_iter().enumerate() {
+        let mut frame = crate::image::tests_support::frame_with(&["R", "G", "B", "A"]);
+        frame.tag = exr_import::ColorTag { space: space.to_owned(), origin: exr_import::TagOrigin::File };
+        frame.straight = straight;
+        let mut light = codes.clone();
+        if channel_mode == mode::RGBA {
+            crate::ocio::Decoder::builtin_only().decode(&frame).unwrap().apply(&mut light);
+        }
+        state.set_source(
+            SourceDesc { frame: case as u64 + 2, view: crate::image::Selection::default(), pixels_gen: 0, stage: 0 },
+            Arc::new(FrameSource { rgba: Arc::new(light.clone()), w, h }),
+        );
+        let src = transfer::Src { gain };
         let look = Look { exposure_ev: 0.5, gamma: 1.1, channel_mode, tonemap: tonemap::NONE, nearest: true, hdr, src };
         let got = render(&device, &queue, &mut gpu, &mut state, 1.0, look, w, h);
         let what = format!("decode {what} mode={channel_mode} hdr={hdr}");
-        if src.builtin.nits.is_some() {
-            check_light(&got, &codes, w, h, look, &what);
+        if space.contains("pq_") || space.contains("hlg_") {
+            check_light(&got, &light, w, h, look, &what);
         } else {
-            check(&got, &codes, w, h, look, &what);
+            check(&got, &light, w, h, look, &what);
         }
     }
     state.set_source(
@@ -494,7 +498,7 @@ fn tiles_render_the_ocio_transform_of_every_texel() {
 
     let o = crate::ocio::Ocio::load("ocio://studio-config-latest").unwrap();
     let scene = o.scene();
-    let aces = o.transform(&o.resolve(&crate::ocio::Sel::default(), &scene, false).unwrap(), None, false).unwrap();
+    let aces = o.transform(&o.resolve(&crate::ocio::Sel::default(), &scene, false).unwrap(), false).unwrap();
     assert!(!aces.has_luts(), "the ACES 2.0 view is fixed function; the LUT case below covers group 2");
     // The HDR (linear) form of a 1000-nit view: canvas values well above 1.0.
     let hdr_sel = crate::ocio::Sel {
@@ -502,7 +506,7 @@ fn tiles_render_the_ocio_transform_of_every_texel() {
         scene_view: "ACES 2.0 - HDR 1000 nits (P3 D65)".into(),
         ..Default::default()
     };
-    let hdr = o.transform(&o.resolve(&hdr_sel, &scene, true).unwrap(), None, true).unwrap();
+    let hdr = o.transform(&o.resolve(&hdr_sel, &scene, true).unwrap(), true).unwrap();
     assert!(hdr.linear());
     let lut = lut_transform();
     assert!(lut.has_luts());

@@ -364,6 +364,46 @@ fn wait_for(mut poll: impl FnMut() -> bool, message: &str) {
         std::thread::yield_now();
     }
 }
+
+#[test]
+#[ignore = "requires a GPU adapter and native effect"]
+fn disabling_effect_updates_consumers_without_a_viewport_frame() {
+    let _serial = SERIAL.lock().unwrap();
+    let (device, queue) = device();
+    let mut renderer = egui_wgpu::Renderer::new(&device, crate::present::CANVAS_FORMAT, Default::default());
+    renderer.callback_resources.insert(TileGpu::new(&device, 64 << 20));
+    let mut display = DisplayTarget::new(1 << 20, usize::MAX);
+    let mut source = tests_support::frame_with(&["R", "G", "B", "A"]);
+    source.id = 61; source.width = 513; source.height = 7; source.pixel_aspect = 1.5;
+    source.data_window = imath_rs::Box2i::from_min_max(imath_rs::V2i::new(-13, 5), imath_rs::V2i::new(499, 11));
+    source.display_window = source.data_window;
+    for (_, channel) in &mut source.channels {
+        *channel = exr_core::api::ChannelData::Float(vec![0.1; 513 * 7]);
+    }
+    let mut image = ImageBackend::from_frame(Arc::new(source));
+    let mut stage = stage();
+    for consumer in 0..3 {
+        wait_for(|| {
+            let _ = present(&mut image, &mut display, &mut stage, &device, &queue, &mut renderer, place(1.0, 770.0));
+            display.accepted_pixels().is_some()
+        }, "processed image never became accepted");
+        assert_ne!(display.accepted_pixels().unwrap().canvas_sample(0, 0).unwrap().pixel[0], 0.1);
+        // No new present call follows disabling the stage. Every consumer must see raw light.
+        match consumer {
+            0 => {
+                assert!(image.prepare_readout(&mut display, None).unwrap());
+                assert_eq!(image.pixel_at(0, 0).unwrap()[0], 0.1);
+            },
+            1 => {
+                assert!(image.ensure_linear(&device, &queue, &mut renderer, &mut display, None, None).is_some());
+            },
+            _ => {
+                wait_for(|| crate::export::grab(&mut image, &mut display, 8192, None).unwrap().is_some(), "raw export never became ready");
+            },
+        }
+        assert!(display.accepted_pixels().is_none(), "disabled effect pixels must not outlive the active source");
+    }
+}
 struct DelayedWriter {
     release: Option<mpsc::Sender<()>>,
     thread: Option<std::thread::JoinHandle<anyhow::Result<()>>>,

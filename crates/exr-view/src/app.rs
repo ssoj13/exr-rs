@@ -1436,19 +1436,22 @@ impl AppState {
         // transform, the export's CPU twin): a switch over every scope.
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.config.scope_display, "Display values")
-                .on_hover_text("Off: the frame's stored values. On: the colour image as displayed (its colour space through the display transform, exposure and gamma), encoded.");
+                .on_hover_text("Off: scene-linear light. On: the colour image as displayed, including the display transform, exposure and gamma.");
         });
+        // The scopes read stage 1's output: resolve the frame's colour even when the viewport
+        // is not drawn this frame.
+        let target = self.controls.target;
         let look = if self.config.scope_display {
-            let target = self.controls.target;
-            match Self::display_look(&mut self.controls, &img.frame, &target, false) {
-                Ok(look) => Some(look),
-                Err(e) => {
-                    ui.colored_label(ui.visuals().error_fg_color, e);
-                    return;
-                }
-            }
+            Self::display_look(&mut self.controls, img, &target, false).map(Some)
         } else {
-            None
+            img.colour(&mut self.controls.colour, &target).map(|_| None)
+        };
+        let look = match look {
+            Ok(look) => look,
+            Err(e) => {
+                ui.colored_label(ui.visuals().error_fg_color, e);
+                return;
+            }
         };
 
         // Ensure the linear source texture is on the GPU (no-op if present()
@@ -1641,13 +1644,13 @@ impl AppState {
     /// the config's sRGB display whatever display the viewport uses (`ocio::State::for_srgb_file`).
     fn display_look(
         controls: &mut ViewControls,
-        frame: &DecodedFrame,
+        img: &mut ImageBackend,
         target: &crate::present::Target,
         srgb_file: bool,
     ) -> Result<crate::export::Look, String> {
         let mut sdr = if srgb_file { Some(controls.colour.for_srgb_file().map_err(|e| e.to_string())?) } else { None };
         let colour = sdr.as_mut().unwrap_or(&mut controls.colour);
-        let src = colour.frame(frame, target)?;
+        let src = img.colour(colour, target)?;
         if let (Some(e), true) = (&colour.err, srgb_file) {
             return Err(format!("OCIO: {e}"));
         }
@@ -1683,7 +1686,7 @@ impl AppState {
         // The same per-frame resolution as the viewport (`ocio::State::frame`); the gain is the
         // saved encoding's: HDR at the display's SDR white, SDR as on an SDR output.
         let target = crate::present::Target { hdr: hdr.is_some(), ..self.controls.target };
-        let look = match Self::display_look(&mut self.controls, &img.frame, &target, hdr.is_none()) {
+        let look = match Self::display_look(&mut self.controls, img, &target, hdr.is_none()) {
             Ok(look) => look,
             Err(e) => {
                 self.status = format!("Save view failed: {e}");
@@ -1818,6 +1821,22 @@ impl AppState {
     pub fn ui_pixel_info(&mut self, ui: &mut egui::Ui) {
         ui.heading("Pixel Info");
         ui.separator();
+        let target = self.controls.target;
+        #[cfg(feature = "ofx")]
+        let stage = Self::stage(&mut self.effects);
+        #[cfg(not(feature = "ofx"))]
+        let stage = None;
+        let img = self.image.as_mut().or_else(|| self.seq.as_mut().and_then(|seq| seq.display.as_mut()));
+        if let Some(img) = img {
+            img.set_view(&self.controls.view);
+            let ready = img.colour(&mut self.controls.colour, &target)
+                .and_then(|_| img.prepare_readout(&mut self.display_gpu, stage));
+            match ready {
+                Ok(true) => {},
+                Ok(false) => { ui.label("Waiting for the processed image."); return; },
+                Err(error) => { ui.colored_label(ui.visuals().error_fg_color, error); return; },
+            }
+        }
         // Pinned pick: single image keeps it on its backend; a sequence keeps it
         // on the persistent nav (so it survives frame swaps).
         let nav_pick = self.nav.picked_pixel;
@@ -1856,21 +1875,11 @@ impl AppState {
                 };
                 let probe = hovered.or(pinned);
                 if let Some((px, py)) = probe {
+                    // The shown layer after stage 1 (scene_linear, associated); "All channels"
+                    // below are the values as stored.
                     if let Some(rows) = img.readout_at(px, py) {
-                        ui.monospace(format!("x: {px}   y: {py}"));
+                        ui.monospace(format!("x: {px}   y: {py}   (scene_linear)"));
                         for (name, v) in rows {
-                            ui.monospace(format!("{name}: {v:.6}"));
-                        }
-                    }
-                    // The stored colour in the config's scene_linear (OCIO on): the values a
-                    // compositor's working space would hold, next to the file's own.
-                    if self.controls.channel == ChannelDisplay::Rgba
-                        && let Some(p) = img.pixel_at(px, py)
-                        && let Some(lin) = self.controls.colour.scene_linear(crate::transfer::unpremul([p[0], p[1], p[2]], p[3], img.frame.straight))
-                    {
-                        ui.separator();
-                        ui.label(egui::RichText::new("scene_linear (OCIO), unpremultiplied").strong());
-                        for (name, v) in ["R", "G", "B"].into_iter().zip(lin) {
                             ui.monospace(format!("{name}: {v:.6}"));
                         }
                     }
@@ -4333,6 +4342,32 @@ mod backdrop_tests {
     use super::*;
     use crate::viewport::NoGpu;
     use egui_display::{Backdrop, BackdropKind, Checker};
+
+    #[test]
+    fn pixel_info_resolves_colour_without_viewport_or_scopes() {
+        let mut app = app();
+        let mut source = crate::image::tests_support::frame_of(1, 1,
+            ["R", "G", "B"].into_iter().map(|name|
+                (name.into(), exr_core::api::ChannelData::Float(vec![0.5]))).collect());
+        source.tag = exr_import::ColorTag { space: "srgb_rec709_display".into(), origin: exr_import::TagOrigin::File };
+        app.image = Some(ImageBackend::from_frame(Arc::new(source)));
+        app.controls.colour = crate::ocio::State::new(crate::ocio::Sel::default());
+        let ctx = egui::Context::default();
+        frame(&ctx, vec![], |root| {
+            egui::CentralPanel::default().show(root, |ui| app.ui_pixel_info(ui));
+        });
+        let first = app.image.as_ref().unwrap().pixel_at(0, 0).unwrap();
+        assert!((first[0] - crate::transfer::eotf(0.5)).abs() < 1e-6);
+        app.controls.colour.sel.on = true;
+        app.controls.colour.over = Some("lin_rec709_scene".into());
+        app.controls.colour.rebuild();
+        frame(&ctx, vec![], |root| {
+            egui::CentralPanel::default().show(root, |ui| app.ui_pixel_info(ui));
+        });
+        let second = app.image.as_ref().unwrap().pixel_at(0, 0).unwrap();
+        assert!((second[0] - 0.5).abs() < 3e-4, "the new linear input must update a panel-only readout: {second:?}");
+        assert_ne!(first, second);
+    }
 
     /// A 2x2 single image in a fresh `AppState`.
     fn with_image() -> AppState {

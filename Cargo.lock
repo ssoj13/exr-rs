@@ -5527,22 +5527,29 @@ dependencies = [
 [[package]]
 name = "ofx"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "cudarc",
  "gpu-info-rs",
  "half",
  "libloading 0.9.0",
+ "ofx-banner",
  "ofx-cuda",
+ "ofx-expiry",
  "ofx-format",
  "ofx-preset",
  "ofx-sys",
 ]
 
 [[package]]
+name = "ofx-banner"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
+
+[[package]]
 name = "ofx-cuda"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "bytemuck",
  "cudarc",
@@ -5552,7 +5559,7 @@ dependencies = [
 [[package]]
 name = "ofx-density"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -5561,7 +5568,7 @@ dependencies = [
 [[package]]
 name = "ofx-effects"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "gpu-info-rs",
  "ofx",
@@ -5584,7 +5591,7 @@ dependencies = [
 [[package]]
 name = "ofx-finish"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "bytemuck",
  "libm",
@@ -5595,7 +5602,7 @@ dependencies = [
 [[package]]
 name = "ofx-flare"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -5603,9 +5610,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ofx-expiry"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
+
+[[package]]
 name = "ofx-format"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "ofx-sys",
 ]
@@ -5613,7 +5625,7 @@ dependencies = [
 [[package]]
 name = "ofx-fractal"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "cudarc",
  "fractal-core",
@@ -5631,7 +5643,7 @@ dependencies = [
 [[package]]
 name = "ofx-gen"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "bytemuck",
  "gpu-info-rs",
@@ -5644,7 +5656,7 @@ dependencies = [
 [[package]]
 name = "ofx-host"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5662,7 +5674,7 @@ dependencies = [
 [[package]]
 name = "ofx-host-egui"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "anyhow",
  "egui",
@@ -5679,7 +5691,7 @@ dependencies = [
 [[package]]
 name = "ofx-host-gl"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "anyhow",
  "libloading 0.9.0",
@@ -5689,7 +5701,7 @@ dependencies = [
 [[package]]
 name = "ofx-host-wgpu"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "anyhow",
  "ash",
@@ -5705,7 +5717,7 @@ dependencies = [
 [[package]]
 name = "ofx-noise"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -5714,7 +5726,7 @@ dependencies = [
 [[package]]
 name = "ofx-preset"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "serde",
  "serde_json",
@@ -5724,7 +5736,7 @@ dependencies = [
 [[package]]
 name = "ofx-runtime"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "anyhow",
  "gpu-info-rs",
@@ -5739,7 +5751,7 @@ dependencies = [
 [[package]]
 name = "ofx-sim"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -5748,12 +5760,12 @@ dependencies = [
 [[package]]
 name = "ofx-sys"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 
 [[package]]
 name = "ofx-warp"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#fabb6ab111637498e264f28fa76f808ce3168034"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",

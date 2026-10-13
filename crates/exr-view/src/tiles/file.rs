@@ -55,8 +55,8 @@ type Band = Vec<(String, ChannelData)>;
 
 /// How a decoded band becomes RGBA.
 enum Shade {
-    /// The active layer, through its mapping (over the band's channels).
-    Layer(Mapping),
+    /// The active layer, through its mapping (over the band's channels), then its stage 1.
+    Layer(Mapping, std::sync::Arc<crate::ocio::Decode>),
     /// Cryptomatte coverage of `ids` over `ranked` (by channel name), as opaque
     /// grey — the viewer's overlay, the same `extract_coverage_with` the
     /// resident frame uses.
@@ -70,7 +70,11 @@ impl Shade {
     /// Fill `out` with `width * rows` RGBA pixels from `band`.
     fn fill(&self, out: &mut Vec<f32>, band: &Band, width: u32, rows: u32) -> Result<(), String> {
         match self {
-            Shade::Layer(m) => m.fill(out, band, width, rows).map_err(|e| e.to_string()),
+            Shade::Layer(m, decode) => {
+                m.fill(out, band, width, rows).map_err(|e| e.to_string())?;
+                decode.apply(out);
+                Ok(())
+            }
             Shade::Coverage { ranked, ids } => {
                 let matte = cryptomatte::extract_coverage_with(width, rows, ranked, ids, |name| {
                     band.iter()
@@ -326,13 +330,15 @@ impl FileSource {
     }
 
     /// A source for the layer `mapping` describes over the file's channel
-    /// `names`/`types` (header order); `data_window` is `(min, width, height)`.
+    /// `names`/`types` (header order), each band through `decode` (stage 1; the identity for a
+    /// data layer); `data_window` is `(min, width, height)`.
     pub fn new(
         path: PathBuf,
         data_window: ((i32, i32), u32, u32),
         names: &[&str],
         types: &[PixelType],
         mapping: Mapping,
+        decode: std::sync::Arc<crate::ocio::Decode>,
     ) -> Result<Self, String> {
         let used_idx = mapping.channels();
         let used = used_channels(&used_idx, names, types)?;
@@ -345,7 +351,7 @@ impl FileSource {
             path,
             data_window,
             used,
-            Shade::Layer(band),
+            Shade::Layer(band, decode),
             labels,
         ))
     }
@@ -397,11 +403,11 @@ impl FileSource {
     ) -> Self {
         let ((x0, y0), w, h) = data_window;
         let rows = RowCache::new(path.clone(), data_window, used.clone());
-        // Averaged Cryptomatte ids are meaningless: only a plain layer may use the
-        // file's own levels.
-        let own = match shade {
-            Shade::Layer(_) => own_levels(&path, &Grid::new(w, h)),
-            Shade::Coverage { .. } => Vec::new(),
+        // A stored mip may have averaged encoded values. Rebuild from decoded level 0
+        // whenever colour or alpha changes; Cryptomatte ids also cannot be averaged.
+        let own = match &shade {
+            Shade::Layer(_, decode) if decode.is_identity() => own_levels(&path, &Grid::new(w, h)),
+            _ => Vec::new(),
         };
         Self {
             path,
@@ -1057,8 +1063,7 @@ mod tests {
             ((-3, 7), 4, 1),
             &["Y"],
             &[PixelType::Float],
-            Mapping::of(&["Y"], groups.first()),
-        )
+            Mapping::of(&["Y"], groups.first()), std::sync::Arc::new(crate::ocio::Decode::identity()))
         .unwrap();
         let provider: &dyn TileSource = &source;
         let plan = RegionPlan::on_lattice(
@@ -1117,8 +1122,7 @@ mod tests {
             ((-3, -7), 1, 4),
             &["Y"],
             &[PixelType::Float],
-            Mapping::of(&["Y"], groups.first()),
-        )
+            Mapping::of(&["Y"], groups.first()), std::sync::Arc::new(crate::ocio::Decode::identity()))
         .unwrap();
         let plan = RegionPlan::new(
             (1, 4),
@@ -1167,8 +1171,7 @@ mod tests {
             ((5, -9), 4, 6),
             &["Y"],
             &[PixelType::Float],
-            Mapping::of(&["Y"], groups.first()),
-        )
+            Mapping::of(&["Y"], groups.first()), std::sync::Arc::new(crate::ocio::Decode::identity()))
         .unwrap();
         let plan = RegionPlan::new(
             (4, 6),
@@ -1322,7 +1325,7 @@ mod tests {
         let mapping = Mapping::of(&names, frame.layers.first());
         let mut rgba = Vec::new();
         mapping.fill(&mut rgba, &frame.channels, 7, 5).unwrap();
-        let source = FileSource::new(path, ((-9, 13), 7, 5), &names, &types, mapping).unwrap();
+        let source = FileSource::new(path, ((-9, 13), 7, 5), &names, &types, mapping, std::sync::Arc::new(crate::ocio::Decode::identity())).unwrap();
         let resident = crate::tiles::source::FrameSource {
             rgba: Arc::new(rgba),
             w: 7,
@@ -1503,8 +1506,7 @@ mod tests {
             ((0, 0), 3, 3),
             &["Y"],
             &[PixelType::Float],
-            Mapping::of(&["Y"], groups.first()),
-        )
+            Mapping::of(&["Y"], groups.first()), std::sync::Arc::new(crate::ocio::Decode::identity()))
         .unwrap();
         let native = |size, level, w, h| {
             RegionPlan::new(
@@ -1569,8 +1571,7 @@ mod tests {
             ((-9, 13), 4, 6),
             &["R"],
             &[PixelType::Float],
-            Mapping::of(&["R"], None),
-        )
+            Mapping::of(&["R"], None), std::sync::Arc::new(crate::ocio::Decode::identity()))
         .unwrap()
         .with_band_bytes(64);
         let grid = Grid::new(4, 6);
@@ -1610,7 +1611,7 @@ mod tests {
                 name: "R".into(),
                 pixel_type: PixelType::Float,
             }],
-            Shade::Layer(mapping),
+            Shade::Layer(mapping, std::sync::Arc::new(crate::ocio::Decode::identity())),
             vec![("R".into(), 0)],
         )
         .with_band_bytes(64);
@@ -1678,6 +1679,34 @@ mod tests {
         let dir = tempfile::Builder::new().prefix("exr-view-file-").tempdir().unwrap();
         let path = dir.path().join(name);
         (dir, path)
+    }
+
+    #[test]
+    fn encoded_file_levels_are_reduced_after_decode() {
+        use crate::tiles::grid::PixRect;
+        use crate::tiles::region::SamplingPhase;
+        let (_guard, path) = scratch("encoded-checker.exr");
+        let window = Box2i::from_min_max(V2i::new(0, 0), V2i::new(1, 1));
+        Image::new(window).with_channel("Y", ChannelData::Float(vec![0.0, 1.0, 1.0, 0.0]))
+            .write(&path, Compression::Zip).unwrap();
+        let mut frame = DecodedFrame::load(&path).unwrap();
+        frame.tag = exr_import::ColorTag { space: "srgb_rec709_display".into(), origin: exr_import::TagOrigin::File };
+        let decode = crate::ocio::Decoder::builtin_only().decode(&frame).unwrap();
+        let mapping = Mapping::of(&["Y"], frame.layers.first());
+        let source = FileSource::new(path, ((0, 0), 2, 2), &["Y"], &[PixelType::Float], mapping, decode.clone()).unwrap();
+        let plan = RegionPlan::new((2, 2), 1, PixRect { x: 0, y: 0, w: 1, h: 1 },
+            RegionPolicy::OriginalArea, SamplingPhase::TOP_LEFT).unwrap();
+        let budget = RegionBudget::new(4096);
+        let region = source.read_region(plan, &ProductionContext::default(), &budget).unwrap();
+        assert_eq!(region.rgba(), &[0.5, 0.5, 0.5, 1.0]);
+        drop(region);
+        let (_guard, path) = scratch("encoded-mips.exr");
+        write_mip(&path, 7, 5, LevelRoundingMode::RoundDown);
+        let frame = DecodedFrame::load(&path).unwrap();
+        let names: Vec<&str> = frame.channel_names.iter().map(String::as_str).collect();
+        let types: Vec<PixelType> = frame.channels.iter().map(|(_, channel)| channel.pixel_type()).collect();
+        let source = FileSource::new(path, ((0, 0), 7, 5), &names, &types, Mapping::of(&names, frame.layers.first()), decode).unwrap();
+        assert!(source.own.is_empty(), "stored encoded mips must never bypass scene-linear reduction");
     }
 
     /// 1100 x 600 at (3, -2): R G B A (half), depth.Z, N.x N.y N.z (float).
@@ -1765,7 +1794,7 @@ mod tests {
         // ~40 rows per band: several bands per level-0 tile row.
         // ~40 rows per band, and an overview from long side 300 down, so both
         // the row units and the overview unit run.
-        let src = FileSource::new(path.to_path_buf(), (min, w, h), &names, &types, mapping)
+        let src = FileSource::new(path.to_path_buf(), (min, w, h), &names, &types, mapping, std::sync::Arc::new(crate::ocio::Decode::identity()))
             .unwrap()
             .with_band_bytes(w as usize * 16 * 40)
             .with_overview_side(300);
@@ -1989,7 +2018,7 @@ mod tests {
         let (w, h) = (frame.width, frame.height);
         let mut rgba = Vec::new();
         mapping.fill(&mut rgba, &frame.channels, w, h).unwrap();
-        let src = FileSource::new(path.to_path_buf(), (MIN, w, h), &names, &types, mapping)
+        let src = FileSource::new(path.to_path_buf(), (MIN, w, h), &names, &types, mapping, std::sync::Arc::new(crate::ocio::Decode::identity()))
             .unwrap()
             .with_band_bytes(w as usize * 16 * 40)
             .with_overview_side(overview_side);

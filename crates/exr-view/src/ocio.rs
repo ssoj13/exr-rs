@@ -1,14 +1,12 @@
-//! The OCIO display transform of the colour image: the config, the user's choice
-//! (display, the view per encoding class, look, a per-file input override), the frame's
-//! colour space, the transform the tile shader and the CPU twin both run, and the Colour panel.
+//! Decode and display stages for the colour image: the config, the user's display/view/look
+//! choice, per-file input override, source colour space, and Colour panel.
 //!
-//! Everything comes from `vfx-ocio` (the OpenColorIO 2.5 port Playa and vfx-view use):
-//! ONE `Processor` per frame gives the WGSL spliced into the tile shader (`wgsl_prelude`,
-//! bound through `GpuOcioResources::build_for(.., FRAGMENT)` in `tiles::render`) and the
-//! exact CPU twin ([`Transform::display`]) that Save view, the headless screenshot and the
-//! GPU test use.
+//! The OCIO processors come from `vfx-ocio` (the OpenColorIO 2.5 port Playa and vfx-view use).
+//! Stage 1 is a cached CPU [`Decode`]; stage 2 is a cached [`Transform`] with WGSL for the tile
+//! shader (`wgsl_prelude`, bound through `GpuOcioResources::build_for(.., FRAGMENT)`) and the
+//! exact CPU twin ([`Transform::display`]) used by Save view and headless screenshots.
 //!
-//! # One conversion per frame (`COLOR_PLAN.md`)
+//! # Decode before processing, display afterward (`COLOR_PLAN.md`)
 //!
 //! A frame keeps its pixels as read and a colour tag (`exr_import::ColorTag`). [`Ocio::space`]
 //! is THE mapping of a tag to a colour space of the config: the tag by name, alias or role
@@ -17,39 +15,39 @@
 //! then the tag's explicit fallback), or the user's per-file override. A name the config does
 //! not know is a typed [`SpaceError`], shown with the override offered, never a substitute.
 //!
-//! The processor input is that space; the views offered are the ones the config's viewing
-//! rules allow for it (`Config::get_views_for_colorspace`, OCIO `getNumViews(display,
-//! colorspace)`), the default the first of them (OCIO `getDefaultView(display, colorspace)`):
-//! a PQ HDR10 still gets `Video (colorimetric)` (PQ -> XYZ -> PQ, an identity on a PQ display)
-//! instead of a second ACES rendering. The user's view is remembered per encoding class
-//! ([`Class`]), so EXRs and a PQ PNG each keep theirs.
+//! [`Decoder`] builds stage 1 from that source space to the config's `scene_linear` role.
+//! CPU pixels pass through it before layer assembly and pyramid reduction; effects, scopes,
+//! pixel inspection, and exposure all consume scene-linear light with associated alpha.
+//! OCIO off uses the built-in curve and primaries to linear Rec.709. With a loaded OCIO config,
+//! an unresolved source space or failed processor is an explicit decode error.
 //!
-//! The chain in colour mode (`channel_mode == RGBA`) is OCIO's `LegacyViewingPipeline`,
-//! as `ociodisplay` builds it: the input to `scene_linear` and the exposure there (the
-//! pipeline's `linearCC`, a dynamic `ExposureContrastTransform`: an exposure for log and
-//! display-referred inputs too, moved per frame as a uniform / `set_dynamic`, no
-//! rebuild), the display/view transform (with its look), then the gamma dial on the
-//! display-encoded result (where `ociodisplay` applies its display gamma: an
-//! `ExponentTransform` after the display/view transform). No sRGB OETF: the display
-//! colour space already encodes. Isolated channels are data and keep the built-in path.
-//! Associated colour is unpremultiplied before the processor and premultiplied after it
-//! (`transfer::unpremul` / `transfer::premul`).
+//! Stage 2 starts from `scene_linear`. The SOURCE space still selects the views allowed by
+//! `Config::get_views_for_colorspace` and the remembered view/look for its [`Class`]: a PQ
+//! HDR10 still gets `Video (colorimetric)` instead of a second ACES rendering. Its decode
+//! crosses the inverse default view transform, and the colorimetric view crosses forward;
+//! the matching bridges cancel on a PQ display. A data space keeps OCIO's data bypass.
 //!
-//! What the transform ends with follows the window's output (`present::Output`):
+//! The colour branch (`channel_mode == RGBA`) uses OCIO's `LegacyViewingPipeline`: dynamic
+//! exposure in scene-linear light (`linearCC`, moved as a uniform / `set_dynamic` without
+//! rebuilding), the display/view transform with its look, then the gamma dial on the display
+//! result. The CPU and WGSL display paths unpremultiply scene-linear colour before the
+//! processor and premultiply afterward in light (`transfer::unpremul` / `transfer::premul`).
+//! Isolated channels use the built-in display path over the same decoded pixels.
 //!
-//! - **SDR output: encoded.** The display's own code values go to the canvas as
-//!   they are (the user picks the display that matches the monitor, as in any OCIO
-//!   viewer). Only SDR displays are offered: a view is hidden when its display
-//!   colour space says `encoding: hdr-video` or `edr-video` (one without an encoding,
-//!   OCIO v1, is offered), and a display needs a non-data SDR view (in OCIO v2 a shared view
-//!   renders into the DISPLAY's space, so a PQ display's "SDR" views are PQ too).
-//! - **HDR output: linear.** Every display is offered. One processor runs the
-//!   display/view transform, then the display colour space back to OCIO's display
-//!   reference (linear CIE XYZ D65, 1.0 = 100 nits, the config's own
-//!   `to_display_reference` or inverted `from_display_reference`), then XYZ to
-//!   linear Rec.709: linear light with 1.0 = SDR reference white, which the tile
-//!   shader encodes like the built-in chain and the present pass maps to the
-//!   surface. A data view (`Raw`) passes its values through as that light.
+//! Config, source-space, view, look, or processor errors in [`State::frame`] block display;
+//! OCIO-on errors do not select the built-in display transform.
+//!
+//! What the display transform ends with follows the window's output (`present::Output`):
+//!
+//! - **SDR output: encoded.** The display's code values go to the canvas. The user picks the
+//!   display that matches the monitor. Only displays with a non-data SDR view are offered;
+//!   `hdr-video` and `edr-video` display spaces require an HDR output. OCIO v1 spaces without
+//!   an encoding are offered as SDR.
+//! - **HDR output: linear.** Every display is offered. The display/view result returns through
+//!   the display space to OCIO's linear CIE XYZ D65 display reference, then to linear Rec.709.
+//!   Absolute HDR light uses 100 nits per reference unit; SDR and EDR light remain relative to
+//!   SDR white ([`display_gain`]). The tile shader encodes this light for the canvas, and the
+//!   present pass maps it to the surface. A data view (`Raw`) passes its values through.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -205,9 +203,11 @@ pub struct Space {
     pub how: String,
     /// Which remembered view it takes.
     pub class: Class,
-    /// A matrix from the stored values into the space first (EXR `whiteLuminance`: absolute
-    /// CIE XYZ D65, `TagOrigin::Luminance`); row-major.
+    /// A matrix from the stored values into the space first (EXR `whiteLuminance`: CIE XYZ D65,
+    /// `TagOrigin::Luminance`; unnamed EXR `chromaticities`); row-major. Part of stage 1.
     pub pre: Option<[[f32; 3]; 3]>,
+    /// A data colour space (`isdata`): neither stage converts it (OCIO's data bypass).
+    pub data: bool,
 }
 
 /// Why an sRGB-tagged SDR file cannot be rendered with the OCIO choice: the config (or its load)
@@ -249,7 +249,7 @@ impl std::error::Error for SpaceError {}
 /// Names a [`Sel`] resolves to in one config for one frame's colour space.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Names {
-    /// The frame's colour space (the processor input).
+    /// Stage-2 input: `scene_linear`, or the source data space for OCIO's data bypass.
     pub input: String,
     pub display: String,
     pub view: String,
@@ -318,7 +318,7 @@ impl Ocio {
             _ if cs.reference_space_type() == ReferenceSpaceType::Display => Class::Video,
             _ => Class::Scene,
         };
-        Ok(Space { name: cs.name().to_owned(), how, class, pre: None })
+        Ok(Space { name: cs.name().to_owned(), how, class, pre: None, data: cs.is_data() })
     }
 
     /// The active displays offered: with `hdr` every one with a picture (non-data)
@@ -405,19 +405,25 @@ impl Ocio {
         if !look.is_empty() && self.cfg.looks().get(look).is_none() {
             bail!("the config has no look \"{look}\"");
         }
-        Ok(Names { input: space.name.clone(), display: display.to_owned(), view: view.to_owned(), look: look.to_owned() })
+        // Stage 2 starts from stage 1's output, the scene_linear role; a data space is not
+        // decoded and keeps OCIO's data bypass by entering stage 2 as itself.
+        let input = if space.data {
+            space.name.clone()
+        } else if self.cfg.colorspace(SCENE_LINEAR).is_some() {
+            SCENE_LINEAR.to_owned()
+        } else {
+            bail!("the config has no scene_linear role: the frames have no space to be decoded to");
+        };
+        Ok(Names { input, display: display.to_owned(), view: view.to_owned(), look: look.to_owned() })
     }
 
-    /// The viewer transform of `names` for stored values `pre` takes into `names.input` (none:
-    /// they are in it), built as OCIO viewers build it (`LegacyViewingPipeline`, as
-    /// `ociodisplay` does): the exposure is the pipeline's `linearCC`, a DYNAMIC exposure applied
-    /// in `scene_linear` (so it is an exposure for a log or display-referred input too, not a
-    /// gain on its codes), moved per frame without a rebuild ([`Transform::display`], the tile
-    /// shader's uniform); then the display/view transform (a look replaces the view's own looks,
-    /// OCIO's looks override); `linear` continues it to linear Rec.709 light as the pipeline's
-    /// `displayCC` (see the module doc). Needs the config's `scene_linear` role, as OCIO's
-    /// pipeline does; a data input bypasses everything, the exposure included, as in OCIO.
-    pub fn transform(&self, names: &Names, pre: Option<[[f32; 3]; 3]>, linear: bool) -> Result<Transform> {
+    /// Stage 2 from `names.input` (scene-linear light, or a bypassed data space), built with
+    /// OCIO's `LegacyViewingPipeline`: dynamic exposure in `linearCC`, then display/view/look.
+    /// `linear` appends the display-to-linear-Rec.709 chain as `displayCC` for HDR output
+    /// (see the module docs). Source-class view and look selection is already in `names`.
+    /// Stage 1 has applied the source pre-matrix and decode; this processor does not repeat it.
+    /// A data input bypasses the pipeline, including exposure, as OCIO does.
+    pub fn transform(&self, names: &Names, linear: bool) -> Result<Transform> {
         let dvt = DisplayViewTransform {
             src: names.input.clone(),
             display: names.display.clone(),
@@ -442,20 +448,8 @@ impl Ocio {
                 })));
             }
         }
-        let mut proc = pipeline.processor(&self.cfg)?;
-        if let Some(m) = pre {
-            let r = |i: usize| m[i].map(f64::from);
-            let [r0, r1, r2] = [r(0), r(1), r(2)];
-            let matrix = [r0[0], r0[1], r0[2], 0.0, r1[0], r1[1], r1[2], 0.0, r2[0], r2[1], r2[2], 0.0, 0.0, 0.0, 0.0, 1.0];
-            let into = vfx_ocio::Transform::Matrix(MatrixTransform {
-                name: String::new(),
-                matrix,
-                offset: [0.0; 4],
-                direction: TransformDirection::Forward,
-            });
-            proc = Processor::combine(&Processor::from_transform(&into, TransformDirection::Forward)?, &proc)?;
-        }
-        let key = self.key(names, pre, linear);
+        let proc = pipeline.processor(&self.cfg)?;
+        let key = self.key(names, linear);
         // Absolute light: the view renders into an HDR display colour space (`hdr-video`: PQ is
         // absolute nits, HLG has its reference display). An `edr-video` space is NOT absolute:
         // OCIO defines it as proportional to an SDR signal with values above 1 for brighter than
@@ -472,16 +466,15 @@ impl Ocio {
 
     /// What [`Self::transform`] of these arguments is cached by ([`Transform::key`]): the config
     /// load and everything the processor is built from, so a cache can be asked before building.
-    pub fn key(&self, names: &Names, pre: Option<[[f32; 3]; 3]>, linear: bool) -> String {
+    pub fn key(&self, names: &Names, linear: bool) -> String {
         format!(
-            "{}#{}|{}|{}|{}|{}|{:?}|{}",
+            "{}#{}|{}|{}|{}|{}|{}",
             self.src,
             self.serial,
             names.input,
             names.display,
             names.view,
             names.look,
-            pre,
             if linear { "linear" } else { "encoded" }
         )
     }
@@ -522,10 +515,11 @@ impl Ocio {
         Ok(out)
     }
 
-    /// A CPU processor from the frame's space to the config's `scene_linear` role: what the
-    /// pixel inspector shows next to the stored values.
+    /// Stage 1 of a frame in `space`: the CPU processor from the space (after its pre-matrix) to
+    /// the config's `scene_linear` role, as OCIO builds a `ColorSpaceTransform` (a display space
+    /// goes through the inverse default view transform).
     pub fn to_scene_linear(&self, space: &Space) -> Result<Processor> {
-        let proc = self.cfg.processor(&space.name, "scene_linear")?;
+        let proc = self.cfg.processor(&space.name, SCENE_LINEAR)?;
         match space.pre {
             None => Ok(proc),
             Some(m) => {
@@ -536,6 +530,160 @@ impl Ocio {
                 Ok(Processor::combine(&Processor::from_transform(&into, TransformDirection::Forward)?, &proc)?)
             }
         }
+    }
+}
+
+/// The role stage 1 decodes to and stage 2 starts from.
+const SCENE_LINEAR: &str = "scene_linear";
+
+/// Pixels per stage-1 work unit: small enough for a stack alpha scratch, large enough to keep
+/// the processor's per-call cost out of the profile.
+const DECODE_CHUNK: usize = 1024;
+
+/// Stage 1 of one frame space: stored RGBA -> `scene_linear` RGBA, associated alpha (see the module
+/// docs and `COLOR_PLAN.md`, "The model"). The one function every consumer's pixels come
+/// through: the materialized layer, file-backed bands, effect inputs.
+pub struct Decode {
+    /// What it was built from (a change of it is new pixels for the tile source).
+    pub key: String,
+    kind: DecodeKind,
+    /// The stored alpha is straight: the colour is taken as stored, then multiplied by alpha.
+    straight: bool,
+}
+
+enum DecodeKind {
+    /// The stored values are already scene_linear (an untagged EXR without a config, a data
+    /// space, a processor that is a no-op).
+    Identity,
+    /// No OCIO: the built-in curve and primaries to linear Rec.709 (`transfer::decode`).
+    Builtin(Builtin),
+    /// The config's processor to `scene_linear` (`Ocio::to_scene_linear`).
+    Ocio(Processor),
+}
+
+impl Decode {
+    /// The identity: associated values already in scene_linear.
+    pub fn identity() -> Self {
+        Self { key: "identity".to_owned(), kind: DecodeKind::Identity, straight: false }
+    }
+
+    /// It changes nothing (the half-plane fast path may skip it).
+    pub fn is_identity(&self) -> bool {
+        matches!(self.kind, DecodeKind::Identity) && !self.straight
+    }
+
+    /// Decode `rgba` (whole RGBA pixels) in place: unpremultiply associated colour, convert to
+    /// scene_linear, multiply by alpha again in light (straight colour is multiplied once), alpha
+    /// as stored. No partial coverage (alpha 0 of associated light, 1 or more, NaN) leaves the
+    /// colour unscaled, the rule of `transfer::unpremul`.
+    pub fn apply(&self, rgba: &mut [f32]) {
+        use rayon::prelude::*;
+        if self.is_identity() {
+            return;
+        }
+        let (px, _) = rgba.as_chunks_mut::<4>();
+        px.par_chunks_mut(DECODE_CHUNK).for_each(|chunk| self.chunk(chunk));
+    }
+
+    fn chunk(&self, px: &mut [[f32; 4]]) {
+        use crate::transfer::unpremul;
+        let mut alpha = [0f32; DECODE_CHUNK];
+        for (p, a) in px.iter_mut().zip(alpha.iter_mut()) {
+            *a = p[3];
+            [p[0], p[1], p[2]] = unpremul([p[0], p[1], p[2]], *a, self.straight);
+            // A NaN alpha must not enter the processor's matrices (restored below).
+            p[3] = 1.0;
+        }
+        match &self.kind {
+            DecodeKind::Identity => {}
+            DecodeKind::Builtin(b) => {
+                for p in px.iter_mut() {
+                    [p[0], p[1], p[2]] = crate::transfer::decode(b, [p[0], p[1], p[2]]);
+                }
+            }
+            DecodeKind::Ocio(proc) => proc.apply_rgba(px),
+        }
+        let straight = self.straight;
+        for (p, &a) in px.iter_mut().zip(&alpha) {
+            if a < 1.0 && (straight || a > 0.0) {
+                let k = a.max(0.0);
+                for c in &mut p[..3] {
+                    *c *= k;
+                }
+            }
+            p[3] = a;
+        }
+    }
+}
+
+/// Stage 1 for any frame under one choice: the config (OCIO on and loaded) and the per-file
+/// override, with the decodes built so far by key. Shared with the tile and effect workers, so a
+/// neighbour frame an effect reads is decoded by the same rule as the frame on screen.
+pub struct Decoder {
+    ocio: Option<Arc<Ocio>>,
+    error: Option<String>,
+    over: Option<String>,
+    cache: std::sync::Mutex<HashMap<String, Arc<Decode>>>,
+}
+
+impl Decoder {
+    /// Identity of the policy for every input, including differently tagged neighbours.
+    pub(crate) fn key(&self) -> String {
+        match (&self.ocio, &self.error) {
+            (_, Some(error)) => format!("error:{error}"),
+            (Some(o), None) => format!("{}#{}|{:?}", o.src, o.serial, self.over),
+            (None, None) => "builtin".to_owned(),
+        }
+    }
+    /// The built-in decode only (OCIO off, no config).
+    pub fn builtin_only() -> Self {
+        Self { ocio: None, error: None, over: None, cache: std::sync::Mutex::new(HashMap::new()) }
+    }
+
+    /// Stage 1 of `frame`: through the config to `scene_linear`, with explicit errors for a
+    /// failed config load, unresolved source space, or failed processor. The built-in tag
+    /// decode is selected only with OCIO off.
+    pub fn decode(&self, frame: &DecodedFrame) -> Result<Arc<Decode>, String> {
+        if let Some(error) = &self.error { return Err(error.clone()); }
+        if let Some(o) = &self.ocio {
+            let space = o.space(&frame.tag, &frame.path, self.over.as_deref()).map_err(|e| format!("{e:#}"))?;
+            return self.ocio(o, &space, frame.straight).map_err(|e| format!("{e:#}"));
+        }
+        self.builtin(&frame.tag, frame.straight)
+    }
+
+    /// Stage 1 through the config for a frame in `space`.
+    fn ocio(&self, o: &Ocio, space: &Space, straight: bool) -> Result<Arc<Decode>> {
+        let key = format!("{}#{}|{}|{:?}|{}", o.src, o.serial, space.name, space.pre, straight);
+        self.cached(key, straight, || {
+            if space.data {
+                return Ok(DecodeKind::Identity);
+            }
+            let proc = o.to_scene_linear(space)?;
+            Ok(if proc.is_no_op() { DecodeKind::Identity } else { DecodeKind::Ocio(proc) })
+        })
+    }
+
+    /// Stage 1 by the built-in decode of `tag`.
+    fn builtin(&self, tag: &ColorTag, straight: bool) -> Result<Arc<Decode>, String> {
+        let b = exr_import::builtin(tag).map_err(|e| e.to_string())?;
+        let key = format!("builtin|{b:?}|{straight}");
+        self.cached(key, straight, || {
+            let linear = b.tf == exr_import::Tf::Linear && b.to709 == exr_import::IDENTITY;
+            Ok(if linear { DecodeKind::Identity } else { DecodeKind::Builtin(b) })
+        })
+        .map_err(|e| format!("{e:#}"))
+    }
+
+    fn cached(&self, key: String, straight: bool, build: impl FnOnce() -> Result<DecodeKind>) -> Result<Arc<Decode>> {
+        // A poisoned lock is taken over: the map only ever holds finished decodes.
+        let mut cache = self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(d) = cache.get(&key) {
+            return Ok(d.clone());
+        }
+        let d = Arc::new(Decode { key: key.clone(), kind: build()?, straight });
+        cache.insert(key, d.clone());
+        Ok(d)
     }
 }
 
@@ -622,11 +770,10 @@ impl Transform {
         !self.code.textures().is_empty()
     }
 
-    /// CPU twin of the tile shader's OCIO colour branch over stored RGBA pixels of a frame read
-    /// as `src`: unpremultiply, the transform with its dynamic exposure at `exposure_ev` (in
-    /// `scene_linear`), for a linear transform `src.gain` ([`display_gain`]), the gamma dial and,
-    /// for a linear transform, the canvas encoding, then premultiply in light; alpha stays the
-    /// input's.
+    /// CPU twin of the tile shader's OCIO colour branch over decoded scene-linear RGBA:
+    /// unpremultiply, display processing with dynamic exposure at `exposure_ev`, the output
+    /// gain (`src.gain`, [`display_gain`]) for linear output, then gamma and canvas encoding.
+    /// Premultiply in light and preserve alpha; stage 1 has already decoded and associated it.
     pub fn display(&self, px: &mut [[f32; 4]], src: &Src, exposure_ev: f32, gamma: f32) {
         let mut alpha = vec![0.0; px.len()];
         self.display_kernel(px, &mut alpha, src, exposure_ev, gamma);
@@ -651,7 +798,8 @@ impl Transform {
     fn display_kernel(&self, px: &mut [[f32; 4]], alpha: &mut [f32], src: &Src, exposure_ev: f32, gamma: f32) {
         use crate::transfer::{dial, oetf, premul, unpremul};
         use rayon::prelude::*;
-        let straight = src.straight;
+        // Stage 1 leaves every frame associated.
+        let straight = false;
         px.par_iter_mut().zip(alpha.par_iter_mut()).for_each(|(p, a)| {
             *a = p[3];
             [p[0], p[1], p[2]] = unpremul([p[0], p[1], p[2]], *a, straight);
@@ -689,9 +837,9 @@ pub struct Shown {
     transform: Option<Arc<Transform>>,
     /// Its built-in decode (`exr_import::builtin`), or why there is none.
     pub builtin: Result<Builtin, String>,
-    /// Its space to `scene_linear` for the pixel inspector, built on first use (hovering one
-    /// frame asks every repaint; stepping a sequence never builds it).
-    to_lin: std::sync::OnceLock<Option<Processor>>,
+    /// Its stage 1, matching the stage 2 shown (OCIO's when the OCIO transform is shown, else the
+    /// built-in), or why there is none.
+    pub decode: Result<Arc<Decode>, String>,
 }
 
 /// The Colour panel's state: the choice, the loaded config and the transform shown.
@@ -703,7 +851,9 @@ pub struct State {
     /// The window output is HDR: every display is offered and the transform is linear.
     hdr: bool,
     /// The config of `source(sel.config)`, or why it does not load.
-    cfg: Option<(String, Result<Ocio, String>)>,
+    cfg: Option<(String, Result<Arc<Ocio>, String>)>,
+    /// Stage 1 under the current choice (rebuilt with it), shared with the workers.
+    decoder: Arc<Decoder>,
     /// The input override of the open file or sequence: a colour space of the config used in
     /// place of the frame's tag. Per file (the app clears it on every new open), not persisted.
     pub over: Option<String>,
@@ -726,12 +876,19 @@ impl State {
     /// A state for `sel`, its config loaded (the device is assumed to filter until
     /// [`Self::set_filterable`] says otherwise).
     pub fn new(sel: Sel) -> Self {
+        Self::with_cfg(sel, None)
+    }
+
+    /// [`Self::new`] over an already loaded config (`for_srgb_file` shares it, so its stage 1 is
+    /// the same decode, by key, as the viewport's).
+    fn with_cfg(sel: Sel, cfg: Option<(String, Result<Arc<Ocio>, String>)>) -> Self {
         let field = egui_file_field::FileFieldState::default();
         let mut s = Self {
             sel,
             filterable: true,
             hdr: false,
-            cfg: None,
+            cfg,
+            decoder: Arc::new(Decoder::builtin_only()),
             over: None,
             rev: 0,
             built: HashMap::new(),
@@ -777,54 +934,66 @@ impl State {
         self.shown.as_ref()
     }
 
-    /// Load the config when its source changed and mark the shown frame for resolving again
-    /// (its transform is built by [`Self::frame`]); a config that does not load is kept in
-    /// `err` and the built-in transform shows.
+    /// Load a changed config source, rebuild the worker decoder, and mark the shown frame
+    /// for resolution by [`Self::frame`]. Keep config-load failures in `err`; while OCIO is
+    /// on, resolving the frame blocks display instead of selecting the built-in transform.
     pub fn rebuild(&mut self) {
         self.rev += 1;
         self.err = None;
+        self.decoder = Arc::new(Decoder::builtin_only());
         if !self.sel.on {
             return;
         }
         self.load_config();
-        if let Err(e) = self.config() {
-            log::warn!("OCIO: {e}");
-            self.err = Some(e);
+        match &self.cfg {
+            Some((_, Ok(o))) => {
+                self.decoder = Arc::new(Decoder { ocio: Some(o.clone()), error: None, over: self.over.clone(), cache: Default::default() });
+            }
+            _ => {
+                if let Err(e) = self.config() {
+                    log::warn!("OCIO: {e}");
+                    self.decoder = Arc::new(Decoder { ocio: None, error: Some(e.clone()), over: self.over.clone(), cache: Default::default() });
+                    self.err = Some(e);
+                }
+            }
         }
     }
 
-    /// Resolve `frame` (cached until it or the choice changes) and return how the tile shader
-    /// reads it on `target`: its built-in decode, alpha kind and display gain. With OCIO on,
-    /// [`Self::active`] is then its transform, or `err` says why there is none. `Err` only when
-    /// no transform can show the colour image: OCIO is not shown and the tag has no built-in
-    /// decode.
+    /// Stage 1 under the current choice, for the tile and effect workers.
+    pub fn decoder(&self) -> Arc<Decoder> {
+        self.decoder.clone()
+    }
+
+    /// Stage 1 of the shown frame ([`Self::frame`]).
+    pub fn decode(&self) -> Result<Arc<Decode>, String> {
+        self.shown.as_ref().map_or_else(|| Err("no frame resolved".to_owned()), |s| s.decode.clone())
+    }
+
+    /// Resolve `frame` (cached until it or the choice changes), establish its stage-1 decode,
+    /// and return the stage-2 display gain for `target`. [`Self::active`] holds the OCIO
+    /// display transform when enabled. Config, source-space, view, look, and processor
+    /// failures return `Err`; the built-in path is selected only with OCIO off.
     pub fn frame(&mut self, frame: &DecodedFrame, target: &crate::present::Target) -> Result<Src, String> {
         if self.shown.as_ref().is_none_or(|s| s.id != frame.id || s.rev != self.rev) {
             self.resolve(frame);
         }
         let Some(s) = &self.shown else { return Err("the frame did not resolve".to_owned()) };
+        if let Some(error) = &self.err {
+            return Err(error.clone());
+        }
         match &s.transform {
-            // Under OCIO the built-in decode only tells an isolated channel's code from its
-            // light (the colour image is the processor's). A tag the built-in decode does not
-            // know (an OCIO-only name such as ACEScct) has no code/light distinction to offer, so
-            // its isolated channels follow the data rule: their values are shown as light.
-            Some(t) => Ok(Src {
-                builtin: match &s.builtin {
-                    Ok(b) => *b,
-                    Err(_) => Builtin::LINEAR,
-                },
-                straight: s.straight,
-                gain: display_gain(nits_of(t, &s.tag), target),
-            }),
+            // All channels already passed stage 1; only the output-light gain remains.
+            Some(t) => Ok(Src { gain: display_gain(nits_of(t, &s.tag), target) }),
             None => {
                 let builtin = s.builtin.clone()?;
-                Ok(Src { builtin, straight: s.straight, gain: display_gain(builtin.nits, target) })
+                Ok(Src { gain: display_gain(builtin.nits, target) })
             }
         }
     }
 
-    /// Resolve `frame` into [`Self::shown`]: its colour space, names and transform (OCIO on),
-    /// and its built-in decode; a failure of the OCIO part is kept in `err`.
+    /// Resolve `frame` into [`Self::shown`]: source space and source-class view/look, stage-1
+    /// decode, and stage-2 transform. Keep OCIO failures in `err` and invalidate both stages;
+    /// select the built-in decode only when OCIO is off.
     fn resolve(&mut self, frame: &DecodedFrame) {
         let mut shown = Shown {
             id: frame.id,
@@ -836,7 +1005,7 @@ impl State {
             views: Vec::new(),
             transform: None,
             builtin: exr_import::builtin(&frame.tag).map_err(|e| e.to_string()),
-            to_lin: std::sync::OnceLock::new(),
+            decode: Err(String::new()),
         };
         self.err = None;
         if self.sel.on
@@ -844,6 +1013,12 @@ impl State {
         {
             log::warn!("OCIO {}: {e:#}", frame.path.display());
             self.err = Some(format!("{e:#}"));
+            shown.transform = None;
+            shown.decode = Err(format!("{e:#}"));
+        }
+        // Stage 1 matches the stage 2 shown: the built-in display reads the built-in decode.
+        if !self.sel.on {
+            shown.decode = self.decoder.builtin(&frame.tag, frame.straight);
         }
         self.shown = Some(shown);
     }
@@ -861,12 +1036,13 @@ impl State {
         }
         let names = ocio.resolve(&self.sel, &space, hdr)?;
         shown.names = Some(names.clone());
+        shown.decode = Ok(self.decoder.ocio(ocio, &space, frame.straight)?);
         // The key first: a sequence of frames in one space builds its processor once.
-        let key = ocio.key(&names, space.pre, hdr);
+        let key = ocio.key(&names, hdr);
         let t = match self.built.get(&key) {
             Some(had) => had.clone(),
             None => {
-                let t = Arc::new(ocio.transform(&names, space.pre, hdr)?);
+                let t = Arc::new(ocio.transform(&names, hdr)?);
                 log::info!("OCIO display transform: {}", t.key);
                 self.built.insert(key, t.clone());
                 t
@@ -884,7 +1060,7 @@ impl State {
     fn load_config(&mut self) {
         let src = source(&self.sel.config);
         if self.cfg.as_ref().is_none_or(|(s, _)| *s != src) {
-            let loaded = Ocio::load(&src).map_err(|e| format!("{e:#}"));
+            let loaded = Ocio::load(&src).map(Arc::new).map_err(|e| format!("{e:#}"));
             self.cfg = Some((src, loaded));
             self.built.clear();
         }
@@ -893,7 +1069,7 @@ impl State {
     /// The config [`Self::load_config`] loaded, or why it did not load.
     fn config(&self) -> Result<&Ocio, String> {
         match &self.cfg {
-            Some((_, Ok(o))) => Ok(o),
+            Some((_, Ok(o))) => Ok(&**o),
             Some((_, Err(e))) => Err(e.clone()),
             None => Err("no config".to_owned()),
         }
@@ -933,6 +1109,11 @@ impl State {
             Some(Err(e)) => out.push(("OCIO colour space", e.to_string())),
             None => {}
         }
+        out.push(("Decoded by", match &s.decode {
+            Ok(d) if d.is_identity() => "nothing (already scene_linear)".to_owned(),
+            Ok(d) => d.key.clone(),
+            Err(e) => e.clone(),
+        }));
         if let Some(n) = &s.names {
             out.push(("OCIO view", format!("{} / {}", n.display, n.view)));
         }
@@ -940,19 +1121,6 @@ impl State {
             out.push(("OCIO error", e.clone()));
         }
         out
-    }
-
-    /// The scene-linear values of stored `rgb` of the shown frame (the pixel inspector), `None`
-    /// when OCIO is off or the frame has no colour space in the config.
-    pub fn scene_linear(&self, rgb: [f32; 3]) -> Option<[f32; 3]> {
-        let shown = self.shown.as_ref()?;
-        let proc = shown.to_lin.get_or_init(|| {
-            let space = shown.space.as_ref()?.as_ref().ok()?;
-            self.config().ok()?.to_scene_linear(space).map_err(|e| log::warn!("OCIO scene_linear of {}: {e:#}", space.name)).ok()
-        });
-        let mut px = [[rgb[0], rgb[1], rgb[2], 1.0]];
-        proc.as_ref()?.apply_rgba(&mut px);
-        Some([px[0][0], px[0][1], px[0][2]])
     }
 
     /// The choice as it applies to an sRGB-tagged SDR file (an 8-bit PNG with an sRGB chunk): the
@@ -975,7 +1143,7 @@ impl State {
             }
             sel.display = display;
         }
-        let mut out = State::new(sel);
+        let mut out = State::with_cfg(sel, self.cfg.clone());
         out.over = self.over.clone();
         out.rebuild();
         Ok(out)
@@ -1297,7 +1465,12 @@ mod tests {
 
     /// `sel`'s transform of `space` (encoded unless `linear`).
     fn tr(o: &Ocio, sel: &Sel, space: &Space, linear: bool) -> Transform {
-        o.transform(&o.resolve(sel, space, linear).unwrap(), space.pre, linear).unwrap()
+        o.transform(&o.resolve(sel, space, linear).unwrap(), linear).unwrap()
+    }
+
+    fn decode_space(o: &Ocio, space: &Space, straight: bool, px: &mut [[f32; 4]]) {
+        let decoder = Decoder::builtin_only();
+        decoder.ocio(o, space, straight).unwrap().apply(px.as_flattened_mut());
     }
 
     const SDR: Target = Target { hdr: false, white: 80.0, peak: 1000.0 };
@@ -1378,7 +1551,9 @@ mod tests {
         assert!(s.err.is_none() && s.active().is_some());
         s.set_config("no/such/dir/config.ocio".to_owned());
         assert!(s.err.is_some());
-        s.frame(&f, &SDR).unwrap();
+        assert!(s.frame(&f, &SDR).is_err());
+        assert!(s.decode().is_err());
+        assert!(s.decoder().decode(&f).is_err());
         assert!(s.err.is_some() && s.active().is_none());
         assert_eq!(s.start_dir(), None, "nothing loaded yet, and a missing folder is not offered");
         let (guard, file) = good_config("good");
@@ -1399,9 +1574,9 @@ mod tests {
     fn default_transform_renders_mid_grey() {
         let o = cg();
         let n = o.resolve(&Sel::default(), &o.scene(), false).unwrap();
-        assert_eq!(n.input, "ACEScg");
+        assert_eq!(n.input, "scene_linear");
         assert_eq!((n.display.as_str(), n.view.as_str()), ("sRGB - Display", "ACES 2.0 - SDR 100 nits (Rec.709)"));
-        let t = o.transform(&n, None, false).unwrap();
+        let t = o.transform(&n, false).unwrap();
         let mut px = [[0.18, 0.18, 0.18, 1.0]];
         t.display(&mut px, &Src::LINEAR, 0.0, 1.0);
         for c in &px[0][..3] {
@@ -1434,13 +1609,16 @@ mod tests {
     fn exposure_acts_in_scene_linear_for_a_log_input() {
         let o = cg();
         let lin = tr(&o, &Sel::default(), &o.scene(), false);
-        let log = tr(&o, &Sel::default(), &o.space(&tag("ACEScct"), Path::new("a.exr"), None).unwrap(), false);
+        let log_space = o.space(&tag("ACEScct"), Path::new("a.exr"), None).unwrap();
+        let log = tr(&o, &Sel::default(), &log_space, false);
         let light = [[0.18f32, 0.18, 0.18, 1.0], [0.5, 0.2, 0.05, 1.0], [2.0, 1.0, 0.3, 1.0], [0.01, 0.02, 0.005, 1.0]];
         let mut codes = light;
         o.cfg.processor("scene_linear", "ACEScct").unwrap().apply_rgba(&mut codes);
+        let decode_log = |px: &mut [[f32; 4]]| decode_space(&o, &log_space, false, px);
         let ev = 1.5;
         let (mut a, mut b) = (light, codes);
         lin.display(&mut a, &Src::LINEAR, ev, 1.0);
+        decode_log(&mut b);
         log.display(&mut b, &Src::LINEAR, ev, 1.0);
         for (a, b) in a.iter().zip(&b) {
             for c in 0..3 {
@@ -1449,17 +1627,22 @@ mod tests {
         }
         // A gain on the codes (the old rule) is a different, wrong picture.
         let mut gained = codes.map(|p| [p[0] * 2f32.powf(ev), p[1] * 2f32.powf(ev), p[2] * 2f32.powf(ev), p[3]]);
+        decode_log(&mut gained);
         log.display(&mut gained, &Src::LINEAR, 0.0, 1.0);
         assert!(gained.iter().zip(&b).any(|(g, b)| (g[0] - b[0]).abs() > 0.05), "{gained:?} vs {b:?}");
         // The exposure moves both ways on the one processor: 0 EV, then +1.5 again, then
         // 0 EV gives the first picture back exactly.
         let mut first = codes;
+        decode_log(&mut first);
         log.display(&mut first, &Src::LINEAR, 0.0, 1.0);
         assert_ne!(first, b, "the exposure must change the picture");
         let mut up = codes;
+        decode_log(&mut up);
         log.display(&mut up, &Src::LINEAR, ev, 1.0);
         assert_eq!(up, b);
         let mut back = codes;
+        decode_log(&mut b);
+        decode_log(&mut back);
         log.display(&mut back, &Src::LINEAR, 0.0, 1.0);
         assert_eq!(back, first);
     }
@@ -1508,8 +1691,8 @@ mod tests {
         let o = studio();
         let scene = o.scene();
         let sdr = o.resolve(&Sel::default(), &scene, true).unwrap();
-        let enc = o.transform(&sdr, None, false).unwrap();
-        let lin = o.transform(&sdr, None, true).unwrap();
+        let enc = o.transform(&sdr, false).unwrap();
+        let lin = o.transform(&sdr, true).unwrap();
         assert!(lin.linear() && !enc.linear() && lin.key != enc.key);
         let hdr_out = Target { hdr: true, white: 240.0, peak: 1000.0 };
         for v in [0.02f32, 0.18, 0.7, 3.0] {
@@ -1550,7 +1733,7 @@ mod tests {
         assert!(s.active().is_some(), "{:?}", s.err);
         s.sel.scene_view = "no such view".into();
         s.rebuild();
-        s.frame(&f, &SDR).unwrap();
+        assert!(s.frame(&f, &SDR).is_err());
         assert!(s.active().is_none() && s.err.as_deref().is_some_and(|e| e.contains("no such view")));
         s.set_config("ocio://studio-config-latest".into());
         s.frame(&f, &SDR).unwrap();
@@ -1624,7 +1807,7 @@ mod tests {
         };
         let names = o.resolve(&sel, &space, true).unwrap();
         assert_eq!((names.view.as_str(), names.look.as_str()), ("Video (colorimetric)", ""));
-        let t = o.transform(&names, None, true).unwrap();
+        let t = o.transform(&names, true).unwrap();
         assert!(t.absolute());
         let target = Target { hdr: true, white: 203.0, peak: 1000.0 };
         let src = Src { gain: display_gain(t.absolute().then_some(100.0), &target), ..Src::LINEAR };
@@ -1633,6 +1816,7 @@ mod tests {
         // range f32 carries.
         let codes: Vec<[u16; 3]> = vec![[0, 0, 0], [20000, 30000, 40000], [32768, 32768, 32768], [41000, 38000, 12000], [65535, 52000, 30000], [8000, 9000, 7000]];
         let mut px: Vec<[f32; 4]> = codes.iter().map(|c| [c[0], c[1], c[2]].map(|k| f32::from(k) / 65535.0)).map(|[r, g, b]| [r, g, b, 1.0]).collect();
+        decode_space(&o, &space, false, &mut px);
         t.display(&mut px, &src, 0.0, 1.0);
         for (p, want) in px.iter().zip(&codes) {
             let light = [p[0], p[1], p[2]].map(crate::transfer::eotf);
@@ -1655,10 +1839,11 @@ mod tests {
             assert_eq!(space.class, Class::Video, "{t}");
             let names = o.resolve(&Sel::default(), &space, false).unwrap();
             assert_eq!((names.display.as_str(), names.view.as_str()), ("sRGB - Display", "Video (colorimetric)"), "{t}");
-            let tr = o.transform(&names, None, false).unwrap();
+            let tr = o.transform(&names, false).unwrap();
             for k in [0u8, 1, 17, 64, 128, 200, 254, 255] {
                 let v = f32::from(k) / 255.0;
                 let mut px = [[v, v, v, 1.0]];
+                decode_space(&o, &space, false, &mut px);
                 tr.display(&mut px, &Src::LINEAR, 0.0, 1.0);
                 let got = crate::transfer::code8(px[0][1]);
                 assert!(got.abs_diff(k) <= 1, "{t}: {k} -> {got}");
@@ -1676,10 +1861,11 @@ mod tests {
         assert_eq!(space.class, Class::Scene);
         let names = o.resolve(&Sel::default(), &space, false).unwrap();
         assert!(names.view.starts_with("ACES 2.0"), "{names:?}");
-        let t = o.transform(&names, None, false).unwrap();
+        let t = o.transform(&names, false).unwrap();
         let reference = o.cfg.display_processor("lin_rec709_scene", &names.display, &names.view).unwrap();
         let light = [[0.18f32, 0.18, 0.18, 1.0], [0.9, 0.3, 0.05, 1.0], [4.0, 2.0, 0.5, 1.0]];
         let (mut a, mut b) = (light, light);
+        decode_space(&o, &space, false, &mut a);
         t.display(&mut a, &Src::LINEAR, 0.0, 1.0);
         reference.apply_rgba(&mut b);
         for (a, b) in a.iter().zip(&b) {
@@ -1691,10 +1877,12 @@ mod tests {
         let p3 = exr_import::builtin(&tag("lin_p3d65_scene")).unwrap().to709;
         let odd = ColorTag { space: "lin_rec709_scene".into(), origin: TagOrigin::Chromaticities { to709: Some(p3) } };
         let odd = o.space(&odd, Path::new("a.exr"), None).unwrap();
-        let t = o.transform(&o.resolve(&Sel::default(), &odd, false).unwrap(), odd.pre, false).unwrap();
+        let t = o.transform(&o.resolve(&Sel::default(), &odd, false).unwrap(), false).unwrap();
         let named = o.space(&tag("lin_p3d65_scene"), Path::new("a.exr"), None).unwrap();
-        let reference = o.transform(&o.resolve(&Sel::default(), &named, false).unwrap(), None, false).unwrap();
+        let reference = o.transform(&o.resolve(&Sel::default(), &named, false).unwrap(), false).unwrap();
         let (mut a, mut b) = (light, light);
+        decode_space(&o, &odd, false, &mut a);
+        decode_space(&o, &named, false, &mut b);
         t.display(&mut a, &Src::LINEAR, 0.0, 1.0);
         reference.display(&mut b, &Src::LINEAR, 0.0, 1.0);
         for (a, b) in a.iter().zip(&b) {
@@ -1741,10 +1929,12 @@ mod tests {
         assert!(matches!(&err, SpaceError::Unknown { space, .. } if space == "KodakLog"), "{err}");
         let f = frame(tag("KodakLog"), 7, "a.cin");
         let mut s = State::new(Sel { on: true, config: "ocio://studio-config-latest".into(), ..Sel::default() });
-        let src = s.frame(&f, &SDR).unwrap();
+        assert!(s.frame(&f, &SDR).is_err());
+        assert!(s.decode().is_err());
+        assert!(s.decoder().decode(&f).is_err());
         assert!(s.active().is_none());
         assert!(s.err.as_deref().is_some_and(|e| e.contains("KodakLog")), "{:?}", s.err);
-        assert_eq!(src.builtin.tf, exr_import::Tf::Cineon);
+
         s.set_override(Some("ADX10".into()));
         s.frame(&f, &SDR).unwrap();
         assert!(s.active().is_some() && s.err.is_none(), "{:?}", s.err);
@@ -1819,7 +2009,8 @@ mod tests {
         let mut assoc = [[c[0] * a, c[1] * a, c[2] * a, a]];
         t.display(&mut assoc, &Src::LINEAR, 0.0, 1.0);
         let mut straight = [[c[0], c[1], c[2], a]];
-        t.display(&mut straight, &Src { straight: true, ..Src::LINEAR }, 0.0, 1.0);
+        decode_space(&o, &o.scene(), true, &mut straight);
+        t.display(&mut straight, &Src::LINEAR, 0.0, 1.0);
         for k in 0..3 {
             assert!((assoc[0][k] - want[k]).abs() < 1e-5, "{assoc:?} vs {want:?}");
             assert!((straight[0][k] - want[k]).abs() < 1e-5, "{straight:?} vs {want:?}");
@@ -1879,8 +2070,9 @@ mod tests {
         assert_eq!((space.name.as_str(), space.class), ("CIE XYZ-D65 - Display-referred", Class::Video));
         let names = o.resolve(&Sel::default(), &space, false).unwrap();
         assert_eq!(names.view, "Video (colorimetric)");
-        let t = o.transform(&names, space.pre, false).unwrap();
+        let t = o.transform(&names, false).unwrap();
         let mut px = [[1.0, 1.0, 1.0, 1.0], [0.18, 0.18, 0.18, 1.0]];
+        decode_space(&o, &space, false, &mut px);
         t.display(&mut px, &Src::LINEAR, 0.0, 1.0);
         assert!((px[0][1] - 1.0).abs() < 1e-3, "{px:?}");
         assert!((px[1][1] - crate::transfer::oetf(0.18)).abs() < 1e-3, "{px:?}");
@@ -1890,6 +2082,7 @@ mod tests {
         let hdr = Target { hdr: true, white: 250.0, peak: 1000.0 };
         let src = s.frame(&f, &hdr).unwrap();
         let mut px = [[1.0, 1.0, 1.0, 1.0]];
+        s.decode().unwrap().apply(px.as_flattened_mut());
         s.active().unwrap().display(&mut px, &src, 0.0, 1.0);
         let nits = crate::transfer::eotf(px[0][1]) * hdr.white;
         assert!((nits - 203.0).abs() < 0.5, "{nits}");
@@ -1906,9 +2099,131 @@ mod tests {
         let f = frame(tag("srgb_rec709_scene"), 3, "a.png");
         let mut s = State::new(Sel { on: true, config: "ocio://studio-config-latest".into(), ..Sel::default() });
         s.frame(&f, &SDR).unwrap();
-        let lin = s.scene_linear([0.5, 0.5, 0.5]).unwrap();
+        let mut px = [0.5, 0.5, 0.5, 1.0];
+        s.decode().unwrap().apply(&mut px);
+        let lin = &px[..3];
         // Neutral stays neutral; 0.214 Rec.709 is 0.214 grey in ACEScg (same white after CAT).
         assert!(lin.iter().all(|v| (v - 0.214).abs() < 2e-3), "{lin:?}");
     }
+    #[test]
+    fn invalid_input_override_blocks_view_and_worker_decode() {
+        let f = frame(tag("srgb_rec709_display"), 89, "still.png");
+        let mut state = State::new(Sel { on: true, config: "ocio://studio-config-latest".into(), ..Sel::default() });
+        state.frame(&f, &SDR).unwrap();
+        state.set_override(Some("a space that does not exist".into()));
+        assert!(state.frame(&f, &SDR).is_err());
+        assert!(state.decode().is_err());
+        assert!(state.decoder().decode(&f).is_err());
+        state.set_override(None);
+        state.frame(&f, &SDR).unwrap();
+        assert!(state.decode().is_ok() && state.decoder().decode(&f).is_ok());
+    }
+
+    #[test]
+    fn invalid_display_blocks_the_shown_decode() {
+        let f = frame(tag("srgb_rec709_display"), 90, "still.png");
+        let mut state = State::new(Sel { on: true, config: "ocio://studio-config-latest".into(), display: "absent display".into(), ..Sel::default() });
+        assert!(state.frame(&f, &SDR).is_err());
+        assert!(state.decode().is_err());
+        assert!(state.active().is_none());
+    }
+
+    #[test]
+    fn builtin_pq_round_trips_through_both_stages() {
+        let f = frame(tag("pq_rec2020_display"), 91, "still.pq.png");
+        let mut state = State::new(Sel::default());
+        let target = Target { hdr: true, white: 203.0, peak: 1000.0 };
+        let src = state.frame(&f, &target).unwrap();
+        for codes in [[0.0, 0.0, 0.0], [0.3, 0.4, 0.5], [0.5, 0.5, 0.5], [0.9, 0.8, 0.7]] {
+            let mut rgba = [codes[0], codes[1], codes[2], 1.0];
+            state.decode().unwrap().apply(&mut rgba);
+            let canvas = crate::transfer::display_pixel(rgba, &src, 0.0, 1.0, crate::transfer::mode::RGBA, crate::transfer::tonemap::NONE);
+            let nits = crate::present::rec2020_nits([canvas[0], canvas[1], canvas[2]].map(crate::transfer::eotf), target.white);
+            for c in 0..3 {
+                assert!((crate::present::pq(nits[c]) - codes[c]).abs() <= 1.0 / 65535.0);
+            }
+        }
+    }
+
+    #[test]
+    fn decode_preserves_alpha_bits_across_processing_chunks() {
+        let mut f = frame(tag("srgb_rec709_display"), 92, "still.png");
+        let decoder = Decoder::builtin_only();
+        let alpha_bits = [0x8000_0000, 0x7fc0_1234, 0x3f00_0000, 0x3f80_0000, 0x0000_0000];
+        for straight in [false, true] {
+            f.straight = straight;
+            let decode = decoder.decode(&f).unwrap();
+            let mut pixels: Vec<[f32; 4]> = (0..DECODE_CHUNK * 2 + 3)
+                .map(|i| [0.2, 0.2, 0.2, f32::from_bits(alpha_bits[i % alpha_bits.len()])])
+                .collect();
+            decode.apply(pixels.as_flattened_mut());
+            for (i, pixel) in pixels.iter().enumerate() {
+                let bits = alpha_bits[i % alpha_bits.len()];
+                assert_eq!(pixel[3].to_bits(), bits);
+                if bits == 0 && straight { assert_eq!(pixel[0], 0.0); }
+                if bits == 0 && !straight { assert!(pixel[0] > 0.0); }
+            }
+        }
+    }
+
+    #[test]
+    fn frames_of_one_space_share_the_decode() {
+        let mut state = State::new(Sel { on: true, config: "ocio://studio-config-latest".into(), ..Sel::default() });
+        let first = frame(tag("srgb_rec709_display"), 93, "first.png");
+        let second = frame(tag("srgb_rec709_display"), 94, "second.png");
+        state.frame(&first, &SDR).unwrap();
+        let a = state.decode().unwrap();
+        state.frame(&second, &SDR).unwrap();
+        let b = state.decode().unwrap();
+        assert!(Arc::ptr_eq(&a, &b));
+        assert!(Arc::ptr_eq(&a, &state.decoder().decode(&first).unwrap()));
+        let mut straight = second;
+        straight.straight = true;
+        assert!(!Arc::ptr_eq(&a, &state.decoder().decode(&straight).unwrap()));
+    }
+
+    #[test]
+    fn singular_default_view_bridge_blocks_decode_and_display() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("singular.ocio");
+        std::fs::write(&path, r#"ocio_profile_version: 2
+roles:
+  default: Scene
+  scene_linear: Scene
+displays:
+  Monitor:
+    - !<View> {name: Video, view_transform: Bridge, display_colorspace: Display}
+default_view_transform: Bridge
+view_transforms:
+  - !<ViewTransform>
+    name: Bridge
+    from_scene_reference: !<MatrixTransform> {matrix: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]}
+display_colorspaces:
+  - !<ColorSpace>
+    name: Display
+    isdata: false
+    encoding: sdr-video
+colorspaces:
+  - !<ColorSpace>
+    name: Scene
+    isdata: false
+    encoding: scene-linear
+"#).unwrap();
+        let ocio = Ocio::load(path.to_str().unwrap()).unwrap();
+        let source = ocio.space(&tag("Display"), Path::new("still.png"), None).unwrap();
+        let error = match ocio.to_scene_linear(&source) {
+            Ok(_) => panic!("a singular default view transform cannot decode display light to scene"),
+            Err(error) => error,
+        };
+        assert!(matches!(error.downcast_ref::<vfx_ocio::OcioError>(),
+            Some(vfx_ocio::OcioError::Transform(reason)) if reason.to_lowercase().contains("singular")), "{error:#}");
+        let f = frame(tag("Display"), 95, "still.png");
+        let mut state = State::new(Sel { on: true, config: path.display().to_string(), ..Default::default() });
+        assert!(state.frame(&f, &SDR).is_err());
+        assert!(state.decode().is_err());
+        let worker = state.decoder().decode(&f).err().expect("worker must reject the same bridge");
+        assert!(worker.to_lowercase().contains("singular"), "{worker}");
+    }
+
 }
 
