@@ -132,7 +132,37 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
   as they are (their matrix into `lin_rec709_scene`, Bradford to D65; OCIO pre-matrix and the
   built-in decode); degenerate ones are `ImportError::Attr`. Tests in `exr_tag_rules` and
   `exr_tags_follow_chromaticities_then_file_rules` (a P3 matrix equals the named P3 space).
-- [ ] Pyramid levels and OpenFX inputs on linear light, or a written design.
+- [~] Pyramid levels and OpenFX inputs on linear light: design written (below), not built; it
+  touches the tile production (`tiles::reduce`, `tiles::view`, `tiles::file`, the direct GPU
+  reduction) and the OpenFX input path, a change of its own.
+
+### Design: linear light for the pyramid and for effects
+
+Today a level above 0 is the area average of the STORED values, and OpenFX effects read the
+stored values. For a linear frame that is light; for an encoded frame (sRGB, PQ, HLG, log) it
+averages codes (a 50/50 black/white edge reduces to code 0.5 = 21 % light instead of 50 %) and
+an effect (blur, grade) works on codes.
+
+- Pyramid: one reduction rule in light. `tiles::reduce` takes the frame's `Linear` pair
+  (decode, encode): the built-in curve of `exr_import::builtin` (the same constants as
+  `transfer::decode`, inverted for encode), or for a tag only OCIO knows, the CPU processors
+  space -> scene_linear and back (built once per frame space, cached like the display
+  transforms). A level is `encode(mean(decode(texels)))` over unpremultiplied colour with alpha
+  averaged linearly, then premultiplied again for associated frames, so every level holds values
+  in the frame's own encoding and the tile shader stays as it is. `SourceDesc` gains the tag key,
+  so a re-tag (override, config change for untagged frames) regenerates the levels. The resident
+  GPU reduction (`tiles::direct`, `precision.wgsl`) gets the same decode/encode WGSL
+  (`transfer::decode_wgsl` and its inverse). Linear frames keep the current fast path (identity
+  pair, no extra work: `probe` it).
+- Effects: an OpenFX input image is the frame in its config's `scene_linear` (the frame's
+  processor to `scene_linear`, unpremultiplied colour, premultiplied after), the colour space
+  effects are written for (Nuke and Resolve feed their working space). The effect's output is a
+  frame tagged `scene_linear` (`ColorTag { space: scene_linear, origin: File }`), so the display
+  path converts it like any frame; without a config the built-in decode to linear Rec.709 plays
+  that role. The effect cache key includes the source space.
+- Tests: a black/white checker in sRGB reduces to sRGB(0.5 light) = code 188, not 128; a PQ
+  ramp's level 1 equals the PQ of the mean nits; a blur on an sRGB still equals the blur of its
+  linear light re-encoded; GPU reduction equals the CPU one.
 - [x] LOW: the canvas premul convention documented on `transfer::premul`; the built-in decode
   under OCIO is an explicit match with the reason (data rule for OCIO-only tags); presets are
   offered by the scene_linear role (they set the scene view) and lit by the saved choice, so a
