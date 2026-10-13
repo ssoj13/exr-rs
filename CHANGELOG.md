@@ -61,16 +61,26 @@ All notable changes to **exr-rs** are documented here. The format follows
   0 differences in 492.18s; regenerated goldens remain unchanged. Python pytest reports
   109 passed with 2 warnings (5.76s). Receipts: `bootstrap-initial.log` and
   `bootstrap-clippy.log`. The frozen `exr-gate` worktree is clean after repeat clippy, with
-  `git diff --exit-code` passing; remote release CI and publication remain pending.
-- **Release preparation for a same-version v0.1.0 rebuild (pending).** Nineteen own Git source
+  `git diff --exit-code` passing. Remote release CI also completed successfully (below).
+- **Same-version v0.1.0 replacement published and verified.** Nineteen own Git source
   pins were verified against remote revisions. The inaccessible OFX `fabb` pin was replaced
   manually with `9cf607d`, adding the required `ofx-banner` and `ofx-expiry` packages without
   changing `windows-sys`. Bootstrap's obsolete `u` action was replaced by `r`; it builds the
   exact pinned OpenFX bundle. The local bundle build produced 35 release plug-ins in 4m17s;
   its source hash `03e011bcb9a34e9193a3bb32ea1f9ab71767899c35d9c4bb1c00d60782375a89`
-  matches recomputation. Local gates are complete; main integration, tag/release replacement,
-  remote CI, and published assets are still pending. The completed color plan's decisions and
-  receipts are folded into this entry, and `COLOR_PLAN.md` is removed.
+  matches recomputation. Main/tag commit is `fa8aa3376f78a72794785af347b1a1733d68ff87`.
+  [CI 38382275628](https://github.com/ssoj13/exr-rs/actions/runs/38382275628) completed
+  successfully: 10 jobs succeeded, 0 failed. The public, non-draft
+  [release](https://github.com/ssoj13/exr-rs/releases/tag/v0.1.0) was published at
+  2026-10-13 11:04:59 UTC with exactly 3 ZIPs and 5 `cp38-abi3` wheels (Python 3.8+).
+  Downloaded asset sizes/SHA-256 match GitHub digests; ZIP CRCs and wheel RECORD hashes pass.
+  ELF x86_64, Mach-O arm64, PE amd64, and all five wheel platform tags are verified. The
+  downloaded Windows executable passes version/help/info checks and reads the real PQ PNG
+  as 1920x1080 RGBA (exit 0). Linux/macOS binaries were not executed, wheels were not installed,
+  and no published-artifact GPU headless shot was run. Receipts are retained under
+  `C:/Users/joss1/AppData/Local/Temp/codex-resume-20261013/exr-release-smoke/`:
+  `summary.json`, `integrity.json`, `release.json`, `workflow.json`, `cli-help.json`, and
+  `pq-info.json`. The completed color plan is folded into this entry; `COLOR_PLAN.md` is removed.
 
 ### 2026-10-12
 
