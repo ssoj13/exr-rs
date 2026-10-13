@@ -20,6 +20,21 @@ All notable changes to **exr-rs** are documented here. The format follows
   per-file override. `convert` writes foreign stills as read with `colorInteropID`. This
   supersedes the absolute-light change below and removes `HDR_REFERENCE_WHITE_NITS`,
   `white_nits`, `light_gain`, and global `ocio.input` / `ocio.view` (now per-class views).
+- **Source tags and display light:** reader tags win; EXR `colorInteropID` wins over
+  `whiteLuminance` and `chromaticities`. Untagged paths use non-default OCIO file rules;
+  a default-only match uses the explicit integer sRGB / float linear fallback. Unnamed EXR
+  primaries use a checked pre-matrix into Rec.709, with degenerate primaries rejected.
+  `whiteLuminance` without an interop tag resolves through `cie_xyz_d65_interchange` and a
+  primaries/white-point pre-matrix: RGB 1 remains reference white on relative displays, while
+  an absolute HDR display shows it at the stated nits. Missing roles are typed errors.
+- **Display choices follow source class:** scene and video frames remember separate views
+  and looks; an effect preserves the original source class. Decode uses the inverse default
+  view bridge, and the colorimetric display path crosses forward, preserving PQ/sRGB identity.
+  Data layers/spaces bypass conversion. SDR exports require an sRGB display or typed
+  `NoSrgbDisplay`; HDR and EDR displays require HDR output. EDR light stays relative to SDR
+  white, while HDR display light is absolute. Decode associates alpha in linear light; both
+  display twins process unpremultiplied colour and premultiply the canvas in light. CPU decode
+  precedes layer assembly/reduction, so display needs no extra GPU pass.
 - **Decoded-source changes invalidate cached presentation and temporal inputs.** The primary
   decode key and decoder policy (config load revision and input override) enter source identity
   and OpenFX render stamps. Native file MIPs are reused only with an identity decode. Pixel
@@ -35,15 +50,27 @@ All notable changes to **exr-rs** are documented here. The format follows
   The real WarpBro PQ PNG round-trips with worst and mean code error 0; the visually inspected
   SDR proof shows the Venice environment and blue fractal. The native/GPU effect-disable
   regression also passes (1.84s, explicit ignored-test run). No native HDR viewport screenshot
-  was captured. The six-stage bootstrap gate, integration, and release remain pending.
+  was captured. The final workspace viewer run reports 337 passed, 0 failed, 23 ignored
+  (63.71s); the earlier focused result above is retained separately.
+- **All six local bootstrap stages pass.** Candidate `bbea08c` combines the initial passing
+  parity (13.4s), deflate (45.5s), EXR (520.6s), cargo (526.2s), and Python (57.5s) stages with
+  the corrected clippy repeat (9.5s: workspace 9.1s, openexr-py 337ms). The first clippy run
+  rejected three needless `Src` struct-update literals in tests; `bbea08c` removes exactly
+  those three updates without production behavior changes. Lock normalization is `279bbe9`.
+  The EXR class comparison read 2364 cases (250 corpus files and 144 synthetic fixtures) with
+  0 differences in 492.18s; regenerated goldens remain unchanged. Python pytest reports
+  109 passed with 2 warnings (5.76s). Receipts: `bootstrap-initial.log` and
+  `bootstrap-clippy.log`. The frozen `exr-gate` worktree is clean after repeat clippy, with
+  `git diff --exit-code` passing; remote release CI and publication remain pending.
 - **Release preparation for a same-version v0.1.0 rebuild (pending).** Nineteen own Git source
   pins were verified against remote revisions. The inaccessible OFX `fabb` pin was replaced
   manually with `9cf607d`, adding the required `ofx-banner` and `ofx-expiry` packages without
   changing `windows-sys`. Bootstrap's obsolete `u` action was replaced by `r`; it builds the
   exact pinned OpenFX bundle. The local bundle build produced 35 release plug-ins in 4m17s;
   its source hash `03e011bcb9a34e9193a3bb32ea1f9ab71767899c35d9c4bb1c00d60782375a89`
-  matches recomputation. Final gates, tag/release replacement, CI, and published assets are
-  still pending.
+  matches recomputation. Local gates are complete; main integration, tag/release replacement,
+  remote CI, and published assets are still pending. The completed color plan's decisions and
+  receipts are folded into this entry, and `COLOR_PLAN.md` is removed.
 
 ### 2026-10-12
 
