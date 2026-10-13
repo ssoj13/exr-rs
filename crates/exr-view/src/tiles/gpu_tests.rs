@@ -531,7 +531,7 @@ fn tiles_render_the_ocio_transform_of_every_texel() {
         (&lut, -3.0, 1.2, mode::RGBA, false),
     ] {
         gpu.pipe.set_colour(&device, &queue, Some(t)).unwrap();
-        let src = transfer::Src { gain: gain(t), ..transfer::Src::LINEAR };
+        let src = transfer::Src { gain: gain(t) };
         let look = Look {
             exposure_ev: ev,
             gamma,

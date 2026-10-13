@@ -1699,7 +1699,7 @@ mod tests {
             let (mut a, mut b) = ([[v, v * 0.8, v * 0.5, 1.0]], [[v, v * 0.8, v * 0.5, 1.0]]);
             enc.display(&mut a, &Src::LINEAR, 0.0, 1.0);
             let gain = display_gain(lin.absolute().then_some(100.0), &hdr_out);
-            lin.display(&mut b, &Src { gain, ..Src::LINEAR }, 0.0, 1.0);
+            lin.display(&mut b, &Src { gain }, 0.0, 1.0);
             for c in 0..3 {
                 // `display` returns the canvas encoding: sRGB-encoded both ways.
                 assert!((a[0][c] - b[0][c]).abs() < 2e-3, "{v}: encoded {:?} vs linear {:?}", a[0], b[0]);
@@ -1810,7 +1810,7 @@ mod tests {
         let t = o.transform(&names, true).unwrap();
         assert!(t.absolute());
         let target = Target { hdr: true, white: 203.0, peak: 1000.0 };
-        let src = Src { gain: display_gain(t.absolute().then_some(100.0), &target), ..Src::LINEAR };
+        let src = Src { gain: display_gain(t.absolute().then_some(100.0), &target) };
         // f32 light holds ~7 digits per pixel; PQ's toe turns a component 10^8 below its
         // neighbours (code 1 next to 10000 nits) into noise codes, so the triples stay within a
         // range f32 carries.
