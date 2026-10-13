@@ -1285,4 +1285,50 @@ mod tests {
         write_png(&path, &Shot { w: 1, h: 1, rgb: vec![1, 2, 3], #[cfg(feature = "ofx")] _permit: None }).unwrap();
         assert_eq!(&std::fs::read(&path).unwrap()[..8], b"\x89PNG\r\n\x1a\n");
     }
+
+    /// A real HDR10 PNG (the file `EXR_VIEW_PQ_PNG` names, e.g. a WarpBro render) through the
+    /// headless HDR shot on a PQ display: its colour space is `Rec.2100-PQ - Display`, so the
+    /// viewing rules pick `Video (colorimetric)` even with an ACES view remembered for
+    /// scene-referred frames, and the PQ PNG written back holds the file's codes (within a few
+    /// codes of float noise). Also writes `<out>.sdr.png` through the sRGB display to look at.
+    /// The output folder is `EXR_VIEW_SHOT_DIR`, else a temp folder.
+    #[test]
+    #[ignore = "needs EXR_VIEW_PQ_PNG"]
+    fn real_pq_png_round_trips_through_the_headless_shot() {
+        let Some(input) = std::env::var_os("EXR_VIEW_PQ_PNG").map(std::path::PathBuf::from) else {
+            panic!("set EXR_VIEW_PQ_PNG to an HDR10 PNG");
+        };
+        let tmp = tmp("pq-round-trip");
+        let dir = std::env::var_os("EXR_VIEW_SHOT_DIR").map_or_else(|| tmp.path().to_path_buf(), std::path::PathBuf::from);
+        let sel = crate::ocio::Sel {
+            on: true,
+            display: "Rec.2100-PQ - Display".into(),
+            scene_view: "ACES 2.0 - HDR 1000 nits (P3 D65)".into(),
+            ..crate::ocio::Sel::default()
+        };
+        let out = dir.join("pq_round_trip.png");
+        headless_hdr(&input, &out, HdrPng::Pq, &sel, u64::MAX, 1 << 31, 64 << 20).unwrap();
+        let read = |p: &Path| {
+            let mut r = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(p).unwrap())).read_info().unwrap();
+            let mut buf = vec![0u8; r.output_buffer_size().unwrap()];
+            let info = r.next_frame(&mut buf).unwrap();
+            let ch = info.color_type.samples();
+            let codes: Vec<u16> = buf[..info.buffer_size()].as_chunks::<2>().0.iter().map(|b| u16::from_be_bytes(*b)).collect();
+            (codes, ch)
+        };
+        let ((a, ca), (b, cb)) = (read(&input), read(&out));
+        let (mut worst, mut sum, mut n) = (0u16, 0u64, 0u64);
+        for (pa, pb) in a.chunks(ca).zip(b.chunks(cb)) {
+            for c in 0..3 {
+                let d = pa[c].abs_diff(pb[c]);
+                worst = worst.max(d);
+                sum += u64::from(d);
+                n += 1;
+            }
+        }
+        eprintln!("{}: worst {worst} codes, mean {:.3}", input.display(), sum as f64 / n as f64);
+        assert!(worst <= 4, "worst {worst} codes");
+        let sdr = crate::ocio::Sel { display: "sRGB - Display".into(), ..sel };
+        headless(&input, &dir.join("pq_round_trip.sdr.png"), &sdr, u64::MAX, 1 << 31, 64 << 20).unwrap();
+    }
 }

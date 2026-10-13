@@ -6,6 +6,23 @@ All notable changes to **exr-rs** are documented here. The format follows
 
 ## [Unreleased]
 
+### 2026-10-13
+
+- **Frames keep their own colour space; one OCIO conversion per frame** (`COLOR_PLAN.md`,
+  supersedes the absolute-light change below). A PQ HDR10 PNG showed almost black through an ACES
+  view: every still was linearised at import and every frame fed to OCIO as `scene_linear`, so a
+  finished picture was rendered a second time. Now a frame holds its values as read and a colour
+  tag (reader tag; EXR `colorInteropID`, `whiteLuminance`, `chromaticities`; else the config's file
+  rules), the processor input is that colour space, and the views offered are the ones the
+  config's viewing rules allow for it (`Video (colorimetric)` for display-referred pictures; a PQ
+  PNG round-trips bit-exactly through the HDR10 Save view on a PQ display). The view is remembered
+  per encoding class, Input is a per-file override, an unknown tag is a typed error. Without OCIO
+  the tag drives a built-in decode in the tile shader. Alpha is unpremultiplied before the
+  transform and premultiplied in light after it. Scopes can read display values; Pixel Info shows
+  `scene_linear`. The headless screenshot uses the saved OCIO choice. `convert` writes foreign
+  stills as read with `colorInteropID`. Removed: `HDR_REFERENCE_WHITE_NITS`, `white_nits`,
+  `light_gain`, the persisted `ocio.input` / `ocio.view` (now `scene_view` / `video_view`).
+
 ### 2026-10-12
 
 - **HDR stills show at their real brightness.** A PQ (HDR10) still decoded to `nits / 100` and was

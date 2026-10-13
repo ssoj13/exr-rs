@@ -86,7 +86,12 @@ it is not the application default or a calibration recommendation. Reference whi
 HDR output; its manual range is 80–1000 nits, independent of the OCIO rendering peak.
 The display-peak override shapes HLG output only.
 
-Settings → Colour holds the OCIO controls (config, input, display, view, look). Quick
+Settings → Colour holds the OCIO controls (config, input override, display, view, look). Every
+frame is converted once, from its own colour space (see below) to the display/view: the views
+offered are the ones the config's viewing rules allow for that space, so an HDR10 PNG or an sRGB
+screenshot gets `Video (colorimetric)` (shown as it is) while an EXR gets an ACES rendering; the
+view is remembered separately for scene-referred and display-referred frames. Input overrides
+the open file's colour space (for that file only). Quick
 monitor presets appear before the detailed input/display/view/look choices,
 including HDR 1000 nits when an HDR output and the loaded config support it (it
 selects an ACES HDR rendering, not a 1000-nit UI white). Display and Colour link
@@ -131,19 +136,24 @@ too (`shot.####.png`). EXR keeps its own readers; every other format is decoded 
 work unchanged. The first frame of multi-image files (GIF, ICO, TIFF pages) is shown, and the
 file is always held in RAM (no out-of-core pyramid).
 
-Colour follows OpenImageIO: the format reader's colour-space tag wins (PNG honours its `sRGB`/`gAMA`
-chunks, Radiance HDR is linear, DPX maps its transfer code, PNM is Rec.709 as in OIIO), and an
-untagged file is sRGB when it holds 8/16-bit integers and linear when it holds floats. Cineon and
-DPX log (`KodakLog`) use the Kodak printing-density curve (white 685, black 95, step 0.002,
-gamma 0.6). Any other tag is resolved through the colour-space table of `vfx-io` (Color Interop IDs
-such as `g24_rec709_display`, `lin_ap1_scene`, `pq_rec2020_display`): its curve is applied and
-primaries other than Rec.709 are rotated into linear Rec.709 (Bradford-adapted, out-of-gamut values
-kept). A tag the table does not know, or that is not RGB (`CMYK`, XYZ), is an error, not a guess.
+Frames keep their values as the file holds them and a colour tag. A foreign still takes the
+format reader's colour-space tag (OpenImageIO's rule: PNG honours its `sRGB`/`gAMA`/`cICP` chunks,
+Radiance HDR is linear, DPX maps its transfer code, PNM is Rec.709); an EXR takes
+`colorInteropID`, else `whiteLuminance` (absolute light: shown colorimetrically, as display light),
+else `chromaticities` matched to AP0/AP1/Rec.709/Rec.2020/P3-D65. An untagged file follows the OCIO
+config's file rules (ACES configs: EXR is ACES2065-1); when only their default rule matches, an
+integer still is `srgb_rec709_display`, a float still `lin_rec709_scene` and an EXR `scene_linear`.
+The config resolves the tag by name or alias; a name it does not know is an error shown in the
+status bar and the Metadata panel's Colour section, with the input override offered, never a
+silent substitute. Without OCIO the same tag drives the built-in decode (sRGB, BT.709, gamma,
+Cineon/`KodakLog` printing density, PQ, HLG, primaries into Rec.709); a PQ or HLG frame is absolute
+light (100 nits = 1.0) and shows at its nits on an HDR output. Straight alpha (PNG, TGA, WebP,
+unassociated TIFF) and associated alpha are both kept: the display converts the unpremultiplied
+colour and premultiplies in light. The Metadata panel shows the tag, its origin, the alpha kind
+and the resolved colour space; Pixel Info adds the `scene_linear` values; the scopes have a
+Display values switch (the colour image as displayed instead of the stored values).
 A sequence frame that fails to decode is marked red on the timeline and is not retried until its
-file changes; the viewport and the log say why. The Metadata panel starts with the source format,
-colour space, depth and alpha handling. Straight
-alpha (PNG, TGA, WebP, unassociated TIFF) is premultiplied in linear light; other formats are
-taken as associated, as OIIO does.
+file changes; the viewport and the log say why.
 
 File > Open remembers the last folder and the last format filter across openings and restarts
 (Save view remembers its own folder); the filter list is the format registry.

@@ -39,7 +39,8 @@ exr-rs convert plate.0001.dpx plate.0001.exr
 `info` reads headers for scanline, tiled, deep and multipart files (a non-EXR still gets a
 short format/size/channels summary). `convert` also reads every non-EXR still the viewer opens
 (PNG, JPEG, TIFF, DPX, HDR, TGA, ...; the [colour rule](viewer.md#other-image-formats)) and writes
-it as a scanline EXR of scene-linear, associated-alpha channels. `convert`
+it as a scanline EXR the way `oiiotool` does: the values as read, alpha associated, the colour tag
+as the `colorInteropID` attribute. `convert`
 re-encodes a flat single-part image and keeps its storage shape: scanline or tiled
 (tile size, level mode, rounding), every MIP/RIP level, and subsampled channels at
 their native sampling. Without `--compress`, it keeps the input codec. Deep and
