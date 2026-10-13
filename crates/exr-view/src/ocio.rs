@@ -402,17 +402,7 @@ impl Ocio {
             });
             proc = Processor::combine(&Processor::from_transform(&into, TransformDirection::Forward)?, &proc)?;
         }
-        let key = format!(
-            "{}#{}|{}|{}|{}|{}|{:?}|{}",
-            self.src,
-            self.serial,
-            names.input,
-            names.display,
-            names.view,
-            names.look,
-            pre,
-            if linear { "linear" } else { "encoded" }
-        );
+        let key = self.key(names, pre, linear);
         // Absolute light: the view renders into an HDR display colour space.
         let absolute = linear
             && self
@@ -422,6 +412,22 @@ impl Ocio {
                 .find(|v| v.name() == names.view)
                 .is_some_and(|v| self.encoding(&names.display, v) == Some(Encoding::Hdr));
         Transform::new(proc, key, linear, absolute)
+    }
+
+    /// What [`Self::transform`] of these arguments is cached by ([`Transform::key`]): the config
+    /// load and everything the processor is built from, so a cache can be asked before building.
+    pub fn key(&self, names: &Names, pre: Option<[[f32; 3]; 3]>, linear: bool) -> String {
+        format!(
+            "{}#{}|{}|{}|{}|{}|{:?}|{}",
+            self.src,
+            self.serial,
+            names.input,
+            names.display,
+            names.view,
+            names.look,
+            pre,
+            if linear { "linear" } else { "encoded" }
+        )
     }
 
     /// The transforms that take `display`/`view`'s output to linear Rec.709 light:
@@ -794,19 +800,20 @@ impl State {
         }
         let names = ocio.resolve(&self.sel, &space, hdr)?;
         shown.names = Some(names.clone());
-        let t = ocio.transform(&names, space.pre, hdr)?;
-        if t.has_luts() && !filterable {
-            bail!("this transform samples LUT textures, and this GPU cannot filter 32-bit float textures");
-        }
-        let t = match self.built.get(&t.key) {
+        // The key first: a sequence of frames in one space builds its processor once.
+        let key = ocio.key(&names, space.pre, hdr);
+        let t = match self.built.get(&key) {
             Some(had) => had.clone(),
             None => {
+                let t = Arc::new(ocio.transform(&names, space.pre, hdr)?);
                 log::info!("OCIO display transform: {}", t.key);
-                let t = Arc::new(t);
-                self.built.insert(t.key.clone(), t.clone());
+                self.built.insert(key, t.clone());
                 t
             }
         };
+        if t.has_luts() && !filterable {
+            bail!("this transform samples LUT textures, and this GPU cannot filter 32-bit float textures");
+        }
         shown.transform = Some(t);
         Ok(())
     }
@@ -1600,6 +1607,18 @@ mod tests {
         let space = o.space(&untagged, Path::new("C:/plates/a.png"), None).unwrap();
         assert_eq!(space.name, "sRGB - Display");
         assert_eq!(o.cfg.colorspace_from_filepath("C:/plates/a.png"), Some("sRGB - Display"));
+    }
+
+    /// Frames in one colour space share one transform: the cache is asked by key before
+    /// anything is built (a sequence does not rebuild per frame).
+    #[test]
+    fn frames_of_one_space_share_the_transform() {
+        let mut s = State::new(Sel { on: true, config: "ocio://default".into(), ..Sel::default() });
+        s.frame(&frame(ColorTag::scene_linear(), 1, "a.0001.exr"), &SDR).unwrap();
+        let first = s.active().unwrap().clone();
+        s.frame(&frame(ColorTag::scene_linear(), 2, "a.0002.exr"), &SDR).unwrap();
+        assert!(Arc::ptr_eq(&first, s.active().unwrap()));
+        assert_eq!(s.built.len(), 1);
     }
 
     /// A tag the config lacks is a typed error, not a substitute: the state shows no OCIO

@@ -123,7 +123,8 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
 - [ ] HIGH 2 EDR displays (`Encoding::Edr` from oiio-rs), the SDR screenshot on a matching SDR
   display, `srgbe_p3d65_display` frames get their video view.
 - [ ] MEDIUM 3 whiteLuminance round trip exact on relative displays (203 test).
-- [ ] MEDIUM 4 transform cache key computed before building.
+- [x] MEDIUM 4 `Ocio::key(names, pre, linear)` is asked of the cache before `transform` builds;
+  test `frames_of_one_space_share_the_transform`.
 - [ ] MEDIUM 5 unmatched EXR chromaticities: pre-matrix or typed error, no silent untagged.
 - [ ] Pyramid levels and OpenFX inputs on linear light, or a written design.
 - [ ] LOW: premul convention doc, explicit builtin under OCIO, presets for Video frames,
