@@ -279,7 +279,8 @@ impl Ocio {
                 }
             }
             TagOrigin::Luminance { to_xyz, .. } => self.find(&tag.space, how).map(|s| Space { pre: Some(to_xyz), ..s }),
-            TagOrigin::File | TagOrigin::Chromaticities => self.find(&tag.space, how),
+            TagOrigin::Chromaticities { to709: Some(m) } => self.find(&tag.space, how).map(|s| Space { pre: Some(m), ..s }),
+            TagOrigin::File | TagOrigin::Chromaticities { to709: None } => self.find(&tag.space, how),
         }
     }
 
@@ -1598,7 +1599,7 @@ mod tests {
     #[test]
     fn exr_tags_follow_chromaticities_then_file_rules() {
         let o = studio();
-        let rec709 = ColorTag { space: "lin_rec709_scene".into(), origin: TagOrigin::Chromaticities };
+        let rec709 = ColorTag { space: "lin_rec709_scene".into(), origin: TagOrigin::Chromaticities { to709: None } };
         let space = o.space(&rec709, Path::new("a.exr"), None).unwrap();
         assert_eq!(space.class, Class::Scene);
         let names = o.resolve(&Sel::default(), &space, false).unwrap();
@@ -1612,6 +1613,21 @@ mod tests {
         for (a, b) in a.iter().zip(&b) {
             for c in 0..3 {
                 assert!((a[c] - b[c]).abs() < 1e-4, "{a:?} vs {b:?}");
+            }
+        }
+        // Primaries no ID names: their matrix in front of lin_rec709_scene (P3-D65 by hand here).
+        let p3 = exr_import::builtin(&tag("lin_p3d65_scene")).unwrap().to709;
+        let odd = ColorTag { space: "lin_rec709_scene".into(), origin: TagOrigin::Chromaticities { to709: Some(p3) } };
+        let odd = o.space(&odd, Path::new("a.exr"), None).unwrap();
+        let t = o.transform(&o.resolve(&Sel::default(), &odd, false).unwrap(), odd.pre, false).unwrap();
+        let named = o.space(&tag("lin_p3d65_scene"), Path::new("a.exr"), None).unwrap();
+        let reference = o.transform(&o.resolve(&Sel::default(), &named, false).unwrap(), None, false).unwrap();
+        let (mut a, mut b) = (light, light);
+        t.display(&mut a, &Src::LINEAR, 0.0, 1.0);
+        reference.display(&mut b, &Src::LINEAR, 0.0, 1.0);
+        for (a, b) in a.iter().zip(&b) {
+            for c in 0..3 {
+                assert!((a[c] - b[c]).abs() < 2e-3, "matrix {a:?} vs named P3 {b:?}");
             }
         }
         let untagged = o.space(&ColorTag::scene_linear(), Path::new("/shots/a.0001.exr"), None).unwrap();

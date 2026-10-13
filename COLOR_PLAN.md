@@ -128,7 +128,10 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
   (203 nits: 1.0 = white on sRGB - Display, 203 nits on a PQ display at any SDR white).
 - [x] MEDIUM 4 `Ocio::key(names, pre, linear)` is asked of the cache before `transform` builds;
   test `frames_of_one_space_share_the_transform`.
-- [ ] MEDIUM 5 unmatched EXR chromaticities: pre-matrix or typed error, no silent untagged.
+- [x] MEDIUM 5 `TagOrigin::Chromaticities { to709 }`: primaries no interop ID names are taken
+  as they are (their matrix into `lin_rec709_scene`, Bradford to D65; OCIO pre-matrix and the
+  built-in decode); degenerate ones are `ImportError::Attr`. Tests in `exr_tag_rules` and
+  `exr_tags_follow_chromaticities_then_file_rules` (a P3 matrix equals the named P3 space).
 - [ ] Pyramid levels and OpenFX inputs on linear light, or a written design.
 - [ ] LOW: premul convention doc, explicit builtin under OCIO, presets for Video frames,
   `vec![Vec::with_capacity(n); c]`.

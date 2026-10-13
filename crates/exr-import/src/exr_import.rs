@@ -154,8 +154,10 @@ pub enum TagOrigin {
     /// The file names it: `oiio:ColorSpace` of a foreign still (PNG chunks, DPX transfer, ...) or
     /// the EXR `colorInteropID` attribute (OpenEXR `exrstdattr.rst`).
     File,
-    /// EXR `chromaticities` matched to a `lin_<primaries>_scene` interop ID.
-    Chromaticities,
+    /// EXR `chromaticities`: matched to a `lin_<primaries>_scene` interop ID (`to709` = `None`),
+    /// or primaries no ID names, taken as they are: `space` is `lin_rec709_scene` and `to709`
+    /// carries the pixels there (Bradford to D65). Never a guess, never dropped.
+    Chromaticities { to709: Option<[[f32; 3]; 3]> },
     /// EXR `whiteLuminance` without `colorInteropID`: by OpenEXR's definition the nits of RGB
     /// (1, 1, 1), so with the primaries the pixels are colorimetric CIE XYZ, display light whose
     /// white is `nits`. `space` is the config's `cie_xyz_d65_interchange` role (OCIO's display
@@ -183,7 +185,7 @@ impl TagOrigin {
     pub fn label(&self) -> &'static str {
         match self {
             Self::File => "the file's tag",
-            Self::Chromaticities => "EXR chromaticities",
+            Self::Chromaticities { .. } => "EXR chromaticities",
             Self::Luminance { .. } => "EXR whiteLuminance (absolute light)",
             Self::Untagged => "untagged",
         }
@@ -217,9 +219,9 @@ fn primaries_of_exr(c: &exr_core::Chromaticities) -> vfx_primaries::Primaries {
 }
 
 /// The tag of one EXR part (`exrinfo.rst`: colour attributes are per part): `colorInteropID`
-/// first; else `whiteLuminance` (absolute light, [`TagOrigin::Luminance`]); else `chromaticities`
-/// matched to AP0 / AP1 / Rec.709 / Rec.2020 / P3-D65; else untagged (`scene_linear` after the
-/// file rules).
+/// first; else `whiteLuminance` (display light, [`TagOrigin::Luminance`]); else `chromaticities`
+/// (matched to AP0 / AP1 / Rec.709 / Rec.2020 / P3-D65, or other primaries by their own matrix);
+/// else untagged (`scene_linear` after the file rules).
 pub fn exr_tag(header: &Header) -> Result<ColorTag, ImportError> {
     let attr = |e: exr_core::ExrError| ImportError::Attr(e.to_string());
     if header.has_color_interop_id() {
@@ -249,8 +251,15 @@ pub fn exr_tag(header: &Header) -> Result<ColorTag, ImportError> {
             .iter()
             .find(|(_, p)| near(p.r, c.red) && near(p.g, c.green) && near(p.b, c.blue) && near(p.w, c.white));
         if let Some((tok, _)) = hit {
-            return Ok(ColorTag { space: format!("lin_{tok}_scene"), origin: TagOrigin::Chromaticities });
+            return Ok(ColorTag { space: format!("lin_{tok}_scene"), origin: TagOrigin::Chromaticities { to709: None } });
         }
+        // Primaries no interop ID names: their own matrix into linear Rec.709.
+        let prim = primaries_of_exr(&c);
+        if vfx_primaries::try_rgb_to_xyz_matrix(&prim).is_none() {
+            return Err(ImportError::Attr(format!("chromaticities {c:?} are degenerate")));
+        }
+        let to709 = vfx_primaries::rgb_to_rgb_matrix(&prim, &vfx_primaries::REC709).m;
+        return Ok(ColorTag { space: colorspace::LIN_REC709_SCENE.to_owned(), origin: TagOrigin::Chromaticities { to709: Some(to709) } });
     }
     Ok(ColorTag::scene_linear())
 }
@@ -372,6 +381,9 @@ fn curve_of(name: &str) -> Option<(Tf, &'static vfx_primaries::Primaries)> {
 /// The built-in decode of `tag`: what the viewer shows without an OCIO config. A tag with no
 /// curve here (an OCIO-only name, XYZ, CMYK) is a typed error, never a guess.
 pub fn builtin(tag: &ColorTag) -> Result<Builtin, ImportError> {
+    if let TagOrigin::Chromaticities { to709: Some(to709) } = tag.origin {
+        return Ok(Builtin { tf: Tf::Linear, to709, nits: None });
+    }
     if let TagOrigin::Luminance { to_xyz, nits } = tag.origin {
         let m = vfx_primaries::xyz_to_rgb_matrix(&vfx_primaries::REC709) * vfx_primaries::Mat3 { m: to_xyz };
         return Ok(Builtin { tf: Tf::Linear, to709: m.m, nits: Some(nits) });

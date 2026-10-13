@@ -206,7 +206,7 @@ fn exr_tag_rules() {
     assert_eq!(exr_tag(&h).unwrap(), ColorTag { space: "scene_linear".into(), origin: TagOrigin::Untagged });
 
     h.add_chromaticities(exr_core::Chromaticities::default()).unwrap();
-    assert_eq!(exr_tag(&h).unwrap(), ColorTag { space: "lin_rec709_scene".into(), origin: TagOrigin::Chromaticities });
+    assert_eq!(exr_tag(&h).unwrap(), ColorTag { space: "lin_rec709_scene".into(), origin: TagOrigin::Chromaticities { to709: None } });
     let ap1 = &vfx_primaries::ACES_AP1;
     *h.chromaticities_mut().unwrap() = exr_core::Chromaticities {
         red: [ap1.r.0, ap1.r.1],
@@ -215,9 +215,17 @@ fn exr_tag_rules() {
         white: [ap1.w.0, ap1.w.1],
     };
     assert_eq!(exr_tag(&h).unwrap().space, "lin_ap1_scene");
-    // An unknown gamut is not guessed at: the file rules decide.
+    // Primaries no ID names are taken as they are: linear Rec.709 after their own matrix.
     h.chromaticities_mut().unwrap().red = [0.7, 0.29];
-    assert_eq!(exr_tag(&h).unwrap().origin, TagOrigin::Untagged);
+    let odd = exr_tag(&h).unwrap();
+    let TagOrigin::Chromaticities { to709: Some(m) } = odd.origin else { panic!("{odd:?}") };
+    assert_eq!(odd.space, "lin_rec709_scene");
+    assert_eq!(builtin(&odd).unwrap().to709, m);
+    for row in m {
+        assert!((row.iter().sum::<f32>() - 1.0).abs() < 2e-3, "white stays white: {m:?}");
+    }
+    h.chromaticities_mut().unwrap().green = [0.7, 0.29];
+    assert!(matches!(exr_tag(&h), Err(ImportError::Attr(_))), "two equal primaries are degenerate");
 
     let mut l = header();
     l.add_white_luminance(203.0).unwrap();

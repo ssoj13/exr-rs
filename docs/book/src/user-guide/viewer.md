@@ -140,7 +140,8 @@ Frames keep their values as the file holds them and a colour tag. A foreign stil
 format reader's colour-space tag (OpenImageIO's rule: PNG honours its `sRGB`/`gAMA`/`cICP` chunks,
 Radiance HDR is linear, DPX maps its transfer code, PNM is Rec.709); an EXR takes
 `colorInteropID`, else `whiteLuminance` (absolute light: shown colorimetrically, as display light),
-else `chromaticities` matched to AP0/AP1/Rec.709/Rec.2020/P3-D65. An untagged file follows the OCIO
+else `chromaticities` (matched to AP0/AP1/Rec.709/Rec.2020/P3-D65, other primaries taken by their own
+matrix into linear Rec.709). An untagged file follows the OCIO
 config's file rules (ACES configs: EXR is ACES2065-1); when only their default rule matches, an
 integer still is `srgb_rec709_display`, a float still `lin_rec709_scene` and an EXR `scene_linear`.
 The config resolves the tag by name or alias; a name it does not know is an error shown in the
