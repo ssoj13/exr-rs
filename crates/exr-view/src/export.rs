@@ -639,6 +639,11 @@ fn grab_wait(input: &Path, backing: u64, ram_budget: usize, upload: usize) -> Re
 /// colour space the config lacks) is an error, not a silent built-in shot.
 fn headless_look(frame: &DecodedFrame, sel: &crate::ocio::Sel, target: &crate::present::Target) -> Result<Look> {
     let mut colour = crate::ocio::State::new(sel.clone());
+    // The SDR shot is an sRGB-tagged 8-bit PNG: rendered for the config's sRGB display, whatever
+    // display the choice names (`State::for_srgb_file`).
+    if !target.hdr {
+        colour = colour.for_srgb_file()?;
+    }
     colour.set_hdr(target.hdr);
     let src = colour.frame(frame, target).map_err(anyhow::Error::msg)?;
     if let Some(e) = &colour.err {

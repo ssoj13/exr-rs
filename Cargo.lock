@@ -8413,7 +8413,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vfx-compute"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#d6d5c95a6fc33f9d6a62ebc50255507585cf8bcb"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
 dependencies = [
  "bytemuck",
  "gpu-info-rs",
@@ -8431,7 +8431,7 @@ dependencies = [
 [[package]]
 name = "vfx-core"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#d6d5c95a6fc33f9d6a62ebc50255507585cf8bcb"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
 dependencies = [
  "half",
  "thiserror 2.0.21",
@@ -8440,7 +8440,7 @@ dependencies = [
 [[package]]
 name = "vfx-icc"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#d6d5c95a6fc33f9d6a62ebc50255507585cf8bcb"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
 dependencies = [
  "bytemuck",
  "lcms-rs",
@@ -8450,7 +8450,7 @@ dependencies = [
 [[package]]
 name = "vfx-io"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#d6d5c95a6fc33f9d6a62ebc50255507585cf8bcb"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
 dependencies = [
  "byteorder",
  "crc32fast",
@@ -8484,7 +8484,7 @@ dependencies = [
 [[package]]
 name = "vfx-lut"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#d6d5c95a6fc33f9d6a62ebc50255507585cf8bcb"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
 dependencies = [
  "quick-xml 0.42.0",
  "thiserror 2.0.21",
@@ -8495,7 +8495,7 @@ dependencies = [
 [[package]]
 name = "vfx-math"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#d6d5c95a6fc33f9d6a62ebc50255507585cf8bcb"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
 dependencies = [
  "glam",
  "vfx-core",
@@ -8505,7 +8505,7 @@ dependencies = [
 [[package]]
 name = "vfx-ocio"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#d6d5c95a6fc33f9d6a62ebc50255507585cf8bcb"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
 dependencies = [
  "bytemuck",
  "glam",
@@ -8530,7 +8530,7 @@ dependencies = [
 [[package]]
 name = "vfx-primaries"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#d6d5c95a6fc33f9d6a62ebc50255507585cf8bcb"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
 dependencies = [
  "vfx-core",
  "vfx-math",
@@ -8539,7 +8539,7 @@ dependencies = [
 [[package]]
 name = "vfx-stmap"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#d6d5c95a6fc33f9d6a62ebc50255507585cf8bcb"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
 dependencies = [
  "thiserror 2.0.21",
  "vfx-core",
@@ -8548,7 +8548,7 @@ dependencies = [
 [[package]]
 name = "vfx-transfer"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#d6d5c95a6fc33f9d6a62ebc50255507585cf8bcb"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
 dependencies = [
  "vfx-core",
 ]

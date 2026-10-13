@@ -1440,7 +1440,7 @@ impl AppState {
         });
         let look = if self.config.scope_display {
             let target = self.controls.target;
-            match Self::display_look(&mut self.controls, &img.frame, &target) {
+            match Self::display_look(&mut self.controls, &img.frame, &target, false) {
                 Ok(look) => Some(look),
                 Err(e) => {
                     ui.colored_label(ui.visuals().error_fg_color, e);
@@ -1636,14 +1636,27 @@ impl AppState {
     /// frame's colour resolution, the OCIO transform): what Save view and the scopes' display
     /// values run (`export::shade`). `Err` when the colour image cannot be shown (no OCIO and no
     /// built-in decode for the frame's tag).
-    fn display_look(controls: &mut ViewControls, frame: &DecodedFrame, target: &crate::present::Target) -> Result<crate::export::Look, String> {
-        let src = controls.colour.frame(frame, target)?;
+    ///
+    /// `srgb_file`: the look is for an sRGB-tagged SDR file (the 8-bit Save view PNG), rendered on
+    /// the config's sRGB display whatever display the viewport uses (`ocio::State::for_srgb_file`).
+    fn display_look(
+        controls: &mut ViewControls,
+        frame: &DecodedFrame,
+        target: &crate::present::Target,
+        srgb_file: bool,
+    ) -> Result<crate::export::Look, String> {
+        let mut sdr = if srgb_file { Some(controls.colour.for_srgb_file().map_err(|e| e.to_string())?) } else { None };
+        let colour = sdr.as_mut().unwrap_or(&mut controls.colour);
+        let src = colour.frame(frame, target)?;
+        if let (Some(e), true) = (&colour.err, srgb_file) {
+            return Err(format!("OCIO: {e}"));
+        }
         Ok(crate::export::Look {
             exposure: controls.exposure,
             gamma: controls.gamma,
             mode: controls.channel.to_channel_mode(),
             tonemap: controls.tonemap,
-            ocio: controls.colour.active().cloned(),
+            ocio: colour.active().cloned(),
             src,
             white: target.white,
             peak: target.peak,
@@ -1670,7 +1683,7 @@ impl AppState {
         // The same per-frame resolution as the viewport (`ocio::State::frame`); the gain is the
         // saved encoding's: HDR at the display's SDR white, SDR as on an SDR output.
         let target = crate::present::Target { hdr: hdr.is_some(), ..self.controls.target };
-        let look = match Self::display_look(&mut self.controls, &img.frame, &target) {
+        let look = match Self::display_look(&mut self.controls, &img.frame, &target, hdr.is_none()) {
             Ok(look) => look,
             Err(e) => {
                 self.status = format!("Save view failed: {e}");

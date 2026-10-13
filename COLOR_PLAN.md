@@ -120,8 +120,17 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
 
 - [x] HIGH 1 Looks follow the frame class: `Sel::{scene_look, video_look}` (`Sel::look(class)`),
   video default none; test: the PQ PNG with a saved scene LMT keeps no look and stays an identity.
-- [ ] HIGH 2 EDR displays (`Encoding::Edr` from oiio-rs), the SDR screenshot on a matching SDR
-  display, `srgbe_p3d65_display` frames get their video view.
+- [x] HIGH 2 oiio-rs bumped by hand in Cargo.lock to fcad4c0 (`Encoding::Edr`; only the rev
+  strings change, built with `--locked`). (a) `ocio::extended`: `hdr-video` and `edr-video`
+  displays/views are offered on HDR outputs only; EDR light is RELATIVE (OCIO: proportional to an
+  SDR signal, values above 1 brighter than SDR white), so its gain is 1 and only `hdr-video` is
+  absolute. Consequence: a PQ still viewed on Display P3 HDR on an HDR output shows 100 nits at
+  SDR white (2.03x brighter than on a PQ display at a 203-nit white), as that display defines.
+  (b) `Ocio::srgb_display` + `State::for_srgb_file`: the 8-bit sRGB PNG (Save view, headless SDR
+  shot) is rendered on the config's sRGB display whatever display is saved, HDR views dropped;
+  a config without one is the typed `NoSrgbDisplay`. (c) EDR frames (`srgbe_p3d65_display`) are
+  display-referred and get `Video (colorimetric)`. Tests `edr_displays_are_extended_and_relative`,
+  `edr_frames_get_their_video_view`, `srgb_files_render_on_the_srgb_display`.
 - [x] MEDIUM 3 `TagOrigin::Luminance { to_xyz, nits }`: RGB 1 is the display reference's 1.0
   (the white of a relative display), `nits` only sets where an absolute (HDR) output shows it
   (`Builtin::nits`, `ocio::display_gain(nits, target)`); test `white_luminance_exr_is_display_light`

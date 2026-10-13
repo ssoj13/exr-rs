@@ -40,8 +40,8 @@
 //! - **SDR output: encoded.** The display's own code values go to the canvas as
 //!   they are (the user picks the display that matches the monitor, as in any OCIO
 //!   viewer). Only SDR displays are offered: a view is hidden when its display
-//!   colour space says `encoding: hdr-video` (one without an encoding, OCIO v1, is
-//!   offered), and a display needs a non-data SDR view (in OCIO v2 a shared view
+//!   colour space says `encoding: hdr-video` or `edr-video` (one without an encoding,
+//!   OCIO v1, is offered), and a display needs a non-data SDR view (in OCIO v2 a shared view
 //!   renders into the DISPLAY's space, so a PQ display's "SDR" views are PQ too).
 //! - **HDR output: linear.** Every display is offered. One processor runs the
 //!   display/view transform, then the display colour space back to OCIO's display
@@ -160,6 +160,13 @@ pub fn source(sel_config: &str) -> String {
         .unwrap_or_else(|| "ocio://default".to_owned())
 }
 
+/// A display colour space of this encoding needs an extended-range (HDR) output: `hdr-video`
+/// (PQ, HLG) and `edr-video` (values above SDR white). An SDR surface would clip them, so they
+/// are offered on HDR outputs only.
+fn extended(enc: Option<Encoding>) -> bool {
+    matches!(enc, Some(Encoding::Hdr | Encoding::Edr))
+}
+
 /// The gain from a transform's display light to the canvas (1.0 = SDR white of `target.white`
 /// nits). Light is relative to SDR white for SDR displays (its 1.0 IS SDR white, as the OS
 /// shows SDR content on an HDR display): 1. It is ABSOLUTE for an HDR display colour space or
@@ -202,6 +209,23 @@ pub struct Space {
     /// CIE XYZ D65, `TagOrigin::Luminance`); row-major.
     pub pre: Option<[[f32; 3]; 3]>,
 }
+
+/// Why an sRGB-tagged SDR file cannot be rendered with the OCIO choice: the config (or its load)
+/// offers no display that encodes sRGB, and writing another display's codes under an sRGB tag
+/// would be a wrong file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoSrgbDisplay {
+    /// The config source.
+    pub config: String,
+}
+
+impl std::fmt::Display for NoSrgbDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the OCIO config {} has no sRGB display to render an sRGB PNG for", self.config)
+    }
+}
+
+impl std::error::Error for NoSrgbDisplay {}
 
 /// Why a frame has no colour space in the config.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -289,7 +313,7 @@ impl Ocio {
         let cs = self.cfg.colorspace(name).ok_or_else(|| SpaceError::Unknown { space: name.to_owned(), how: how.clone() })?;
         let class = match cs.encoding() {
             Encoding::SceneLinear | Encoding::Log => Class::Scene,
-            Encoding::Sdr | Encoding::Hdr | Encoding::DisplayLinear => Class::Video,
+            Encoding::Sdr | Encoding::Hdr | Encoding::Edr | Encoding::DisplayLinear => Class::Video,
             // No encoding (OCIO v1, data, `edr-video`): the reference space says which.
             _ if cs.reference_space_type() == ReferenceSpaceType::Display => Class::Video,
             _ => Class::Scene,
@@ -307,7 +331,7 @@ impl Ocio {
             .filter(|d| {
                 self.cfg.get_views(d).into_iter().any(|v| {
                     let enc = self.encoding(d, v);
-                    enc != Some(Encoding::Data) && (hdr || enc != Some(Encoding::Hdr))
+                    enc != Some(Encoding::Data) && (hdr || !extended(enc))
                 })
             })
             .collect()
@@ -320,7 +344,7 @@ impl Ocio {
         self.cfg
             .get_views_for_colorspace(display, space)
             .into_iter()
-            .filter(|v| hdr || self.encoding(display, v) != Some(Encoding::Hdr))
+            .filter(|v| hdr || !extended(self.encoding(display, v)))
             .map(|v| v.name())
             .collect()
     }
@@ -330,6 +354,16 @@ impl Ocio {
     fn encoding(&self, display: &str, view: &vfx_ocio::View) -> Option<Encoding> {
         let enc = self.cfg.colorspace(view.effective_colorspace(display))?.encoding();
         (enc != Encoding::Unknown).then_some(enc)
+    }
+
+    /// The SDR display whose views render into the config's sRGB display colour space (the one
+    /// `srgb_rec709_display` names): what an 8-bit PNG tagged sRGB must be rendered for. `None`
+    /// when the config has no such space or no display renders into it.
+    pub fn srgb_display(&self) -> Option<&str> {
+        let srgb = self.cfg.colorspace("srgb_rec709_display")?.name();
+        self.displays(false).into_iter().find(|d| {
+            self.cfg.get_views(d).into_iter().any(|v| self.cfg.colorspace(v.effective_colorspace(d)).is_some_and(|cs| cs.name() == srgb))
+        })
     }
 
     /// Every look.
@@ -422,7 +456,10 @@ impl Ocio {
             proc = Processor::combine(&Processor::from_transform(&into, TransformDirection::Forward)?, &proc)?;
         }
         let key = self.key(names, pre, linear);
-        // Absolute light: the view renders into an HDR display colour space.
+        // Absolute light: the view renders into an HDR display colour space (`hdr-video`: PQ is
+        // absolute nits, HLG has its reference display). An `edr-video` space is NOT absolute:
+        // OCIO defines it as proportional to an SDR signal with values above 1 for brighter than
+        // SDR white (Display P3 HDR, Apple EDR), so its 1.0 is SDR white like an SDR display's.
         let absolute = linear
             && self
                 .cfg
@@ -916,6 +953,32 @@ impl State {
         let mut px = [[rgb[0], rgb[1], rgb[2], 1.0]];
         proc.as_ref()?.apply_rgba(&mut px);
         Some([px[0][0], px[0][1], px[0][2]])
+    }
+
+    /// The choice as it applies to an sRGB-tagged SDR file (an 8-bit PNG with an sRGB chunk): the
+    /// same config, views and looks on the config's sRGB display ([`Ocio::srgb_display`]), on an
+    /// SDR output, so the file's codes are the sRGB encoding it declares (never P3, EDR or PQ code
+    /// values under an sRGB tag). Remembered views the sRGB display lacks fall back to its
+    /// defaults. OCIO off: the choice as it is (the built-in path encodes sRGB).
+    pub fn for_srgb_file(&mut self) -> Result<State, NoSrgbDisplay> {
+        let mut sel = self.sel.clone();
+        if sel.on {
+            self.load_config();
+            let src = source(&sel.config);
+            let ocio = self.config().map_err(|_| NoSrgbDisplay { config: src.clone() })?;
+            let display = ocio.srgb_display().ok_or(NoSrgbDisplay { config: src })?.to_owned();
+            let offered = ocio.views(&display, "", false);
+            for view in [&mut sel.scene_view, &mut sel.video_view] {
+                if !offered.contains(&view.as_str()) {
+                    view.clear();
+                }
+            }
+            sel.display = display;
+        }
+        let mut out = State::new(sel);
+        out.over = self.over.clone();
+        out.rebuild();
+        Ok(out)
     }
 
     /// Use another config: the names of the old one mean nothing there, so they go
@@ -1686,6 +1749,58 @@ mod tests {
         s.frame(&f, &SDR).unwrap();
         assert!(s.active().is_some() && s.err.is_none(), "{:?}", s.err);
         assert!(s.shown().and_then(|x| x.space.clone()).is_some_and(|x| x.is_ok_and(|x| x.how == "override")));
+    }
+
+    /// EDR displays (`edr-video`, Display P3 HDR) need an HDR output and their light is relative
+    /// (1.0 = SDR white, gain 1), unlike PQ's absolute nits.
+    #[test]
+    fn edr_displays_are_extended_and_relative() {
+        let o = studio();
+        assert!(!o.displays(false).contains(&"Display P3 HDR - Display"));
+        assert!(o.displays(true).contains(&"Display P3 HDR - Display"));
+        let sel = Sel { display: "Display P3 HDR - Display".into(), ..Sel::default() };
+        let t = tr(&o, &sel, &o.scene(), true);
+        assert!(t.linear() && !t.absolute());
+        let hdr = Target { hdr: true, white: 240.0, peak: 1000.0 };
+        assert_eq!(display_gain(t.absolute().then_some(100.0), &hdr), 1.0);
+    }
+
+    /// A frame tagged `srgbe_p3d65_display` (an EDR picture) is display-referred: the viewing rules
+    /// give it its video view, not an ACES rendering.
+    #[test]
+    fn edr_frames_get_their_video_view() {
+        let o = studio();
+        let space = o.space(&tag("srgbe_p3d65_display"), Path::new("a.png"), None).unwrap();
+        assert_eq!((space.name.as_str(), space.class), ("Display P3 HDR - Display", Class::Video));
+        let n = o.resolve(&Sel::default(), &space, false).unwrap();
+        assert_eq!(n.view, "Video (colorimetric)");
+        let n = o.resolve(&Sel { display: "Display P3 HDR - Display".into(), ..Sel::default() }, &space, true).unwrap();
+        assert_eq!(n.view, "Video (colorimetric)");
+    }
+
+    /// An sRGB-tagged SDR file is rendered on the config's sRGB display whatever display is saved
+    /// (PQ, EDR P3); a config without one is a typed error, not P3/PQ codes under an sRGB tag.
+    #[test]
+    fn srgb_files_render_on_the_srgb_display() {
+        for display in ["Rec.2100-PQ - Display", "Display P3 HDR - Display", "Display P3 - Display", ""] {
+            let mut s = State::new(Sel {
+                on: true,
+                config: "ocio://studio-config-latest".into(),
+                display: display.into(),
+                scene_view: "ACES 2.0 - HDR 1000 nits (P3 D65)".into(),
+                ..Sel::default()
+            });
+            let mut sdr = s.for_srgb_file().unwrap();
+            assert_eq!(sdr.sel.display, "sRGB - Display", "{display}");
+            assert!(sdr.sel.scene_view.is_empty(), "the HDR view is not the sRGB display's");
+            sdr.frame(&frame(ColorTag::scene_linear(), 1, "a.exr"), &SDR).unwrap();
+            assert!(sdr.active().is_some() && sdr.err.is_none(), "{:?}", sdr.err);
+        }
+        let (_guard, file) = good_config("nosrgb");
+        let mut s = State::new(Sel { on: true, config: file.display().to_string(), ..Sel::default() });
+        assert!(matches!(s.for_srgb_file(), Err(NoSrgbDisplay { .. })));
+        let mut off = State::new(Sel::default());
+        assert!(off.for_srgb_file().is_ok(), "the built-in path encodes sRGB");
     }
 
     /// Associated alpha: the OCIO twin's canvas pixel is the transform of the unpremultiplied
