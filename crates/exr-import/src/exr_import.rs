@@ -402,7 +402,9 @@ fn is_straight(img: &ImageData) -> bool {
 fn planes(img: &ImageData) -> Vec<Vec<f32>> {
     let c = img.channels as usize;
     let n = img.pixel_count();
-    let mut out = vec![Vec::with_capacity(n); c];
+    // One reserved plane per channel (`vec![v; c]` clones `v`, and a clone of an empty `Vec`
+    // does not keep its capacity).
+    let mut out: Vec<Vec<f32>> = (0..c).map(|_| Vec::with_capacity(n)).collect();
     for p in 0..n {
         for (ch, plane) in out.iter_mut().enumerate() {
             plane.push(img.sample_f32(p * c + ch));

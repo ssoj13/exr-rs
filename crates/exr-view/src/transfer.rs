@@ -360,9 +360,16 @@ pub fn unpremul(rgb: [f32; 3], a: f32, straight: bool) -> [f32; 3] {
 }
 
 /// The canvas value of a canvas-encoded colour `d` under alpha `a`: premultiplied in linear
-/// light (`oetf(eotf(d) * a)`), which is what the present pass's OVER (`eotf(rgb) + backdrop *
-/// (1 - a)`) and egui's premultiplied blend expect. Associated colour under alpha 0 stays as it
-/// is (additive light, see [`unpremul`]). CPU twin of the shader's `premul`.
+/// light (`oetf(eotf(d) * a)`). Associated colour under alpha 0 stays as it is (additive light,
+/// see [`unpremul`]). CPU twin of the shader's `premul`.
+///
+/// The canvas convention: a canvas texel is `(oetf(L * a), a)` for display light `L` (linear
+/// Rec.709, 1.0 = SDR white), i.e. ASSOCIATED light stored in the canvas encoding. The present
+/// pass decodes it and composites the backdrop in light, `eotf(rgb) + backdrop * (1 - a)`, which
+/// is OVER exactly. Premultiplying the encoded value instead (`oetf(L) * a`) would put the
+/// partial-alpha edge at the wrong brightness under that composite (and under PQ/HLG outputs),
+/// so the multiply happens in light; egui's own premultiplied blend of overlapping draws is an
+/// approximation in the encoded domain that only UI drawn over the image is subject to.
 pub fn premul(d: [f32; 3], a: f32, straight: bool) -> [f32; 3] {
     if a < 1.0 && (straight || a > 0.0) { d.map(|c| oetf(eotf(c) * a.max(0.0))) } else { d }
 }

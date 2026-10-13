@@ -133,8 +133,10 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
   built-in decode); degenerate ones are `ImportError::Attr`. Tests in `exr_tag_rules` and
   `exr_tags_follow_chromaticities_then_file_rules` (a P3 matrix equals the named P3 space).
 - [ ] Pyramid levels and OpenFX inputs on linear light, or a written design.
-- [ ] LOW: premul convention doc, explicit builtin under OCIO, presets for Video frames,
-  `vec![Vec::with_capacity(n); c]`.
+- [x] LOW: the canvas premul convention documented on `transfer::premul`; the built-in decode
+  under OCIO is an explicit match with the reason (data rule for OCIO-only tags); presets are
+  offered by the scene_linear role (they set the scene view) and lit by the saved choice, so a
+  Video frame does not disable them; one reserved plane per channel in exr-import.
 
 ## Tests
 

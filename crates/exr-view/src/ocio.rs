@@ -768,9 +768,14 @@ impl State {
         let Some(s) = &self.shown else { return Err("the frame did not resolve".to_owned()) };
         match &s.transform {
             // Under OCIO the built-in decode only tells an isolated channel's code from its
-            // light; a tag without one shows its channels as light (the data rule).
+            // light (the colour image is the processor's). A tag the built-in decode does not
+            // know (an OCIO-only name such as ACEScct) has no code/light distinction to offer, so
+            // its isolated channels follow the data rule: their values are shown as light.
             Some(t) => Ok(Src {
-                builtin: s.builtin.clone().unwrap_or(Builtin::LINEAR),
+                builtin: match &s.builtin {
+                    Ok(b) => *b,
+                    Err(_) => Builtin::LINEAR,
+                },
                 straight: s.straight,
                 gain: display_gain(nits_of(t, &s.tag), target),
             }),
@@ -988,20 +993,24 @@ impl State {
             let space = shown.and_then(|s| s.space.as_ref()).and_then(|s| s.as_ref().ok());
             let names = shown.and_then(|s| s.names.as_ref());
             let views = shown.map(|s| s.views.clone()).unwrap_or_default();
+            let scene = ocio.find("scene_linear", String::new()).ok();
             let presets: Vec<_> = PRESETS
                 .iter()
                 .filter(|p| hdr || !p.hdr)
                 .map(|p| {
+                    // A preset is a rendering of scene-referred frames (it sets the scene view):
+                    // offered by what the viewing rules allow for the scene_linear role, whatever
+                    // class the frame on screen is.
                     let ok = displays.iter().any(|d| d == p.display)
-                        && space.is_none_or(|s| ocio.views(p.display, &s.name, hdr).contains(&p.view));
-                    let on = names.is_some_and(|n| n.display == p.display && n.view == p.view);
+                        && scene.as_ref().is_some_and(|s| ocio.views(p.display, &s.name, hdr).contains(&p.view));
+                    let on = self.sel.display == p.display && self.sel.scene_view == p.view;
                     (p, ok, on)
                 })
                 .collect();
 
             // Keep the quick choices above the advanced controls, including in a
             // short Settings dock. Both entry points use this same preset table.
-            ui.label("Monitor preset").on_hover_text("Choose the image rendering of scene-referred frames; this does not change UI reference white.");
+            ui.label("Monitor preset").on_hover_text("Choose the image rendering of scene-referred frames (display-referred ones keep their own view); this does not change UI reference white.");
             ui.horizontal_wrapped(|ui| {
                 for (p, ok, on) in presets {
                     let tip = if ok {
