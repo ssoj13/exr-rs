@@ -29,15 +29,36 @@ transform, `from_display_reference: MatrixTransform {}`) to `[sdr-video, hdr-vid
 display-linear]` (studio-config-v4.0.0_aces-v2.0_ocio-v2.5.ocio:31-48, 99, 106-108). A PQ
 source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an identity.
 
-## The model
+## The model (two stages, revised 2026-10-13 by the operator)
 
 - A frame stores its pixels **as read** (integers normalised to 0..1, floats as they are) and a
-  **colour tag**: the colour space and where it came from.
-- The screen gets **one** OCIO processor per frame: frame space -> display / view (+ look).
-  The view is chosen among the views the config's viewing rules allow for that space.
-- No working space in storage. Not ACEScg, not linear Rec.709: converting into one on load is a
-  compositor's model (Nuke Read -> working space); for a viewer it loses the source and forces a
-  second rendering of display-referred pictures.
+  **colour tag**: the colour space and where it came from. Nothing is converted at import.
+- **Stage 1, DECODE (one, for everything):** frame space -> `scene_linear`. With OCIO the
+  config's processor `space -> scene_linear` (a `ColorSpaceTransform` to the role; a display
+  space goes through the inverse default view transform, as OCIO does), with the tag's
+  pre-matrix in front (EXR `whiteLuminance`, unnamed `chromaticities`); without OCIO the built-in
+  curve and primaries (`exr_import::builtin`, `transfer::decode`) to linear Rec.709, the
+  built-in scene_linear. Alpha leaves stage 1 associated in linear light (associated colour is
+  unpremultiplied before the conversion, straight colour taken as stored; both multiplied by
+  alpha after). Its output is the ONLY thing every consumer works on: the pyramid levels (built
+  from it, so levels average light), OpenFX effects, scopes, the pixel readout, Save view.
+  Stage 1 runs where a layer's RGBA is assembled from the stored channels (`ImageBackend`
+  materialize, file-backed bands, effect inputs): one function, `ocio::Decode::apply`.
+  Data layers (normals, depth, ids) and data colour spaces are not converted.
+- **Stage 2, DISPLAY (one):** `scene_linear` -> display / view (+ look), the exposure as OCIO's
+  `linearCC` in `scene_linear`; without OCIO the built-in exposure, tone operator and sRGB encode.
+  The view and look are chosen by the SOURCE class (scene-referred vs display-referred, the
+  config's viewing rules for the frame's own space), remembered per class; an effect does not
+  change the class. The tile shader runs stage 2 only (its input, the pyramid, is already
+  scene_linear), so there is no second texture pass and no decode on the GPU.
+- Why display-referred stills stay an identity: stage 1 takes a PQ or sRGB picture to scene
+  through the inverse default view transform (studio / cg configs: Un-tone-mapped, a matrix),
+  stage 2's `Video (colorimetric)` comes back through the same default view transform forward
+  (`ColorSpaceTransform.cpp:348-392`, `DisplayViewTransform.cpp` BuildSourceToDisplay). Measured
+  with vfx-ocio before coding: sRGB 1.6e-6, P3 EDR 6.4e-7, PQ exact except 10^4-nit primaries next
+  to zero components (f32 noise through PQ's toe, 2.7e-3 of a code range). Tested below.
+- Both halves are cached by key (stage 1 per frame space + pre-matrix, stage 2 per display, view,
+  look, output form), asked before anything is built.
 
 ## Work
 
@@ -141,41 +162,17 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
   as they are (their matrix into `lin_rec709_scene`, Bradford to D65; OCIO pre-matrix and the
   built-in decode); degenerate ones are `ImportError::Attr`. Tests in `exr_tag_rules` and
   `exr_tags_follow_chromaticities_then_file_rules` (a P3 matrix equals the named P3 space).
-- [~] Pyramid levels and OpenFX inputs on linear light: design written (below), not built; it
-  touches the tile production (`tiles::reduce`, `tiles::view`, `tiles::file`, the direct GPU
-  reduction) and the OpenFX input path, a change of its own.
-
-### Design: linear light for the pyramid and for effects
-
-Today a level above 0 is the area average of the STORED values, and OpenFX effects read the
-stored values. For a linear frame that is light; for an encoded frame (sRGB, PQ, HLG, log) it
-averages codes (a 50/50 black/white edge reduces to code 0.5 = 21 % light instead of 50 %) and
-an effect (blur, grade) works on codes.
-
-- Pyramid: one reduction rule in light. `tiles::reduce` takes the frame's `Linear` pair
-  (decode, encode): the built-in curve of `exr_import::builtin` (the same constants as
-  `transfer::decode`, inverted for encode), or for a tag only OCIO knows, the CPU processors
-  space -> scene_linear and back (built once per frame space, cached like the display
-  transforms). A level is `encode(mean(decode(texels)))` over unpremultiplied colour with alpha
-  averaged linearly, then premultiplied again for associated frames, so every level holds values
-  in the frame's own encoding and the tile shader stays as it is. `SourceDesc` gains the tag key,
-  so a re-tag (override, config change for untagged frames) regenerates the levels. The resident
-  GPU reduction (`tiles::direct`, `precision.wgsl`) gets the same decode/encode WGSL
-  (`transfer::decode_wgsl` and its inverse). Linear frames keep the current fast path (identity
-  pair, no extra work: `probe` it).
-- Effects: an OpenFX input image is the frame in its config's `scene_linear` (the frame's
-  processor to `scene_linear`, unpremultiplied colour, premultiplied after), the colour space
-  effects are written for (Nuke and Resolve feed their working space). The effect's output is a
-  frame tagged `scene_linear` (`ColorTag { space: scene_linear, origin: File }`), so the display
-  path converts it like any frame; without a config the built-in decode to linear Rec.709 plays
-  that role. The effect cache key includes the source space.
-- Tests: a black/white checker in sRGB reduces to sRGB(0.5 light) = code 188, not 128; a PQ
-  ramp's level 1 equals the PQ of the mean nits; a blur on an sRGB still equals the blur of its
-  linear light re-encoded; GPU reduction equals the CPU one.
-- [x] LOW: the canvas premul convention documented on `transfer::premul`; the built-in decode
-  under OCIO is an explicit match with the reason (data rule for OCIO-only tags); presets are
-  offered by the scene_linear role (they set the scene view) and lit by the saved choice, so a
-  Video frame does not disable them; one reserved plane per channel in exr-import.
+- [ ] BLOCKER (operator): the two-stage model above replaces the single frame -> display
+  processor. Steps, a checkpoint commit after each:
+  - [ ] A `ocio::Decode` (stage 1, CPU, `apply` over RGBA rows) and its resolver per frame.
+  - [ ] B stage 2 transforms from `scene_linear` (view / look by the source class), pre-matrix
+    moved to stage 1, cache keys per half.
+  - [ ] C stage 1 applied where layers are assembled (materialize, file bands, effect inputs);
+    half planes only for an identity decode; tile identity follows the decode key.
+  - [ ] D the tile shader is stage 2 only (built-in decode, curve / matrix / straight uniforms
+    and `decode_wgsl` removed); Save view, scopes and readout on the stage-1 output.
+  - [ ] E tests: PQ and sRGB PNG identity through both stages with and without an identity
+    effect; a 2x2 black/white sRGB checker's level 1 is 0.5 linear.
 
 ## Tests
 
