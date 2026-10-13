@@ -1304,6 +1304,7 @@ mod tests {
             on: true,
             display: "Rec.2100-PQ - Display".into(),
             scene_view: "ACES 2.0 - HDR 1000 nits (P3 D65)".into(),
+            scene_look: "ACES 1.3 Reference Gamut Compression".into(),
             ..crate::ocio::Sel::default()
         };
         let out = dir.join("pq_round_trip.png");

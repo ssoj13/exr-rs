@@ -563,7 +563,7 @@ mod tests {
             tonemap: 2,
             scope_display: true,
             backdrop: egui_display::Backdrop { kind: egui_display::BackdropKind::Color, color: [0.2, 0.4, 0.6, 1.0], ..Default::default() },
-            ocio: crate::ocio::Sel { on: true, config: "x.ocio".into(), display: "d".into(), scene_view: "v".into(), video_view: "w".into(), look: "l".into() },
+            ocio: crate::ocio::Sel { on: true, config: "x.ocio".into(), display: "d".into(), scene_view: "v".into(), video_view: "w".into(), scene_look: "l".into(), video_look: "m".into() },
             display: DisplayPrefs { output: crate::present::Output::Hlg, white: Some(250.0), peak: Some(1200.0) },
             fonts: Fonts { heading: 12.0, body: 13.0, monospace: 11.0, button: 12.5, small: 8.0, dock_tab: 30.0, sidebar: 14.0 },
         }

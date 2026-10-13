@@ -116,6 +116,19 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
   "tagged", never "untagged" (the file-rule path serves formats that never tag: TIFF without
   EXIF, SGI, IFF, ICO, ...); telling an assumed tag from a stated one needs a vfx-io fact.
 
+## Review fixes (2026-10-13)
+
+- [x] HIGH 1 Looks follow the frame class: `Sel::{scene_look, video_look}` (`Sel::look(class)`),
+  video default none; test: the PQ PNG with a saved scene LMT keeps no look and stays an identity.
+- [ ] HIGH 2 EDR displays (`Encoding::Edr` from oiio-rs), the SDR screenshot on a matching SDR
+  display, `srgbe_p3d65_display` frames get their video view.
+- [ ] MEDIUM 3 whiteLuminance round trip exact on relative displays (203 test).
+- [ ] MEDIUM 4 transform cache key computed before building.
+- [ ] MEDIUM 5 unmatched EXR chromaticities: pre-matrix or typed error, no silent untagged.
+- [ ] Pyramid levels and OpenFX inputs on linear light, or a written design.
+- [ ] LOW: premul convention doc, explicit builtin under OCIO, presets for Video frames,
+  `vec![Vec::with_capacity(n); c]`.
+
 ## Tests
 
 All in place and passing (2026-10-13): `ocio::tests::{pq_png_is_an_identity_on_a_pq_display,

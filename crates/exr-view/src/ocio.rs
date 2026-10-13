@@ -86,11 +86,32 @@ pub struct Sel {
     pub scene_view: String,
     /// The view of display-referred frames (video, display-linear); empty = the first allowed.
     pub video_view: String,
-    /// Look applied instead of the view's own looks; empty = the view's looks.
-    pub look: String,
+    /// Look of scene-referred frames, applied instead of the view's own looks; empty = the view's
+    /// looks. A look is an LMT in a scene-referred process space: it belongs to the class, like
+    /// the view.
+    pub scene_look: String,
+    /// Look of display-referred frames (default none: running a scene LMT on a finished picture
+    /// would take it to the scene reference and back, compressing its colours).
+    pub video_look: String,
 }
 
 impl Sel {
+    /// The remembered look of `class` (empty = the view's looks).
+    pub fn look(&self, class: Class) -> &str {
+        match class {
+            Class::Scene => &self.scene_look,
+            Class::Video => &self.video_look,
+        }
+    }
+
+    /// The remembered look of `class`, to change.
+    pub fn look_mut(&mut self, class: Class) -> &mut String {
+        match class {
+            Class::Scene => &mut self.scene_look,
+            Class::Video => &mut self.video_look,
+        }
+    }
+
     /// The remembered view of `class` (empty = the default).
     pub fn view(&self, class: Class) -> &str {
         match class {
@@ -327,10 +348,11 @@ impl Ocio {
         } else {
             bail!("\"{display}\" has no {kind}view \"{want}\" for \"{}\" (its viewing rules)", space.name);
         };
-        if !sel.look.is_empty() && self.cfg.looks().get(&sel.look).is_none() {
-            bail!("the config has no look \"{}\"", sel.look);
+        let look = sel.look(space.class);
+        if !look.is_empty() && self.cfg.looks().get(look).is_none() {
+            bail!("the config has no look \"{look}\"");
         }
-        Ok(Names { input: space.name.clone(), display: display.to_owned(), view: view.to_owned(), look: sel.look.clone() })
+        Ok(Names { input: space.name.clone(), display: display.to_owned(), view: view.to_owned(), look: look.to_owned() })
     }
 
     /// The viewer transform of `names` for stored values `pre` takes into `names.input` (none:
@@ -999,8 +1021,8 @@ impl State {
             ));
             combo(ui, "ocio.view", self.sel.view_mut(class), &views, names.map_or("", |n| n.view.as_str()));
             ui.end_row();
-            ui.label("Look").on_hover_text("A look applied instead of the view's own looks.");
-            combo(ui, "ocio.look", &mut self.sel.look, &looks, "(the view's looks)");
+            ui.label("Look").on_hover_text(format!("A look applied instead of the view's own looks. Remembered for {} frames.", class.label()));
+            combo(ui, "ocio.look", self.sel.look_mut(class), &looks, "(the view's looks)");
             ui.end_row();
         });
 
@@ -1368,7 +1390,7 @@ mod tests {
         let looks = o.looks();
         let look = *looks.first().expect("the Studio config has looks");
         let plain = tr(&o, &Sel::default(), &o.scene(), false);
-        let looked = tr(&o, &Sel { look: look.into(), ..Sel::default() }, &o.scene(), false);
+        let looked = tr(&o, &Sel { scene_look: look.into(), ..Sel::default() }, &o.scene(), false);
         let (mut a, mut b) = ([[0.9, 0.2, 0.05, 1.0]], [[0.9, 0.2, 0.05, 1.0]]);
         plain.display(&mut a, &Src::LINEAR, 0.0, 1.0);
         looked.display(&mut b, &Src::LINEAR, 0.0, 1.0);
@@ -1492,9 +1514,14 @@ mod tests {
         assert_eq!((space.name.as_str(), space.class), ("Rec.2100-PQ - Display", Class::Video));
         let views = o.views("Rec.2100-PQ - Display", &space.name, true);
         assert!(!views.iter().any(|v| v.starts_with("ACES")), "{views:?}");
-        let sel = Sel { display: "Rec.2100-PQ - Display".into(), ..Sel::default() };
+        // A scene look saved for EXRs (an LMT in ACES2065-1) is not the PQ frame's.
+        let sel = Sel {
+            display: "Rec.2100-PQ - Display".into(),
+            scene_look: "ACES 1.3 Reference Gamut Compression".into(),
+            ..Sel::default()
+        };
         let names = o.resolve(&sel, &space, true).unwrap();
-        assert_eq!(names.view, "Video (colorimetric)");
+        assert_eq!((names.view.as_str(), names.look.as_str()), ("Video (colorimetric)", ""));
         let t = o.transform(&names, None, true).unwrap();
         assert!(t.absolute());
         let target = Target { hdr: true, white: 203.0, peak: 1000.0 };
