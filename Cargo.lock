@@ -5589,6 +5589,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "ofx-expiry"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
+
+[[package]]
 name = "ofx-finish"
 version = "0.1.0"
 source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
@@ -5608,11 +5613,6 @@ dependencies = [
  "ofx-gen",
  "rustfft",
 ]
-
-[[package]]
-name = "ofx-expiry"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#9cf607d077e5410118cbbe5206b820f5b6e2d441"
 
 [[package]]
 name = "ofx-format"

@@ -275,16 +275,17 @@ pq_png_keeps_codes_and_cicp_tag, ...}`, GPU `tiles_render_the_display_transform_
 - WarpBro writes HDR10 PNGs from OCIO's HDR views with 1.0 = 100 nits (`render_service::hdr_scale`),
   the same unit as the config's PQ display space, so its files round-trip unchanged.
 
-## Decision (operator + lead, 2026-10-13): two stages, supersedes the pyramid / OpenFX design above
+## Decision (operator + lead, 2026-10-13): two stages, implemented model
 
 One DECODE stage and one DISPLAY stage for every frame; no per-level decode/encode pairs.
 
 1. Storage: pixels as read + tag (inspector "source values", export as is).
-2. On GPU tile upload: one decode pass frame space -> `scene_linear` (OCIO ColorSpaceTransform to
-   the `scene_linear` role; without OCIO the built-in curves), stored f16 (same memory as today).
+2. Before layer assembly and reduction: one CPU decode frame space -> `scene_linear` (OCIO
+   ColorSpaceTransform to the role; without OCIO the built-in curves). Tile storage remains f16.
 3. Pyramid levels, OpenFX effects, scopes, inspector, exposure: all from these linear tiles only.
 4. Display shader: `scene_linear` -> display / view (+look); view and look by the SOURCE class
-   (scene / video, remembered per class). An effect's output is scene_linear (class scene).
+   (scene / video, remembered per class). An effect's output is scene_linear; its display
+   choice retains the original SOURCE class.
 5. Display-referred stills stay an identity: display -> scene uses the inverse default view
    transform (studio: Un-tone-mapped, a matrix) and the Video view's scene -> display bridge uses
    it forward (OCIO ColorSpaceTransform.cpp:348-392). Prove with tests (PQ PNG, sRGB PNG, with and
@@ -292,4 +293,5 @@ One DECODE stage and one DISPLAY stage for every frame; no per-level decode/enco
 6. Tests: identity tests above; a 2x2 black/white sRGB checker's level 1 = 0.5 linear; an identity
    OFX effect leaves every displayed pixel unchanged.
 Why: one place knows the frame's encoding (SSOT), no repeated decode/encode rounding, the display
-shader does not care where a frame came from. Cost: one GPU pass per tile upload.
+shader does not care where a frame came from. Decode runs on the CPU; display needs no extra
+GPU pass.
