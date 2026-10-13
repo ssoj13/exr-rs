@@ -52,7 +52,7 @@ fn image(w: u32, h: u32) -> Vec<f32> {
 /// arrive before the assertion. Drop releases workers even after an assertion.
 struct WorkerGate(Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>);
 fn test_look() -> Look {
-    Look { exposure_ev: 0.0, gamma: 1.0, channel_mode: mode::RGBA, tonemap: 0, nearest: true, hdr: false, ocio_gain: 1.0, light_gain: 1.0 }
+    Look { exposure_ev: 0.0, gamma: 1.0, channel_mode: mode::RGBA, tonemap: 0, nearest: true, hdr: false, src: transfer::Src::LINEAR }
 }
 impl WorkerGate {
     fn new() -> Self { Self(Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()))) }
@@ -294,10 +294,7 @@ fn render(
 /// Compare a render with the built-in CPU twin over the level-`k` `f16` texels.
 fn check(got: &[f32], level: &[f32], w: u32, h: u32, look: Look, what: &str) {
     let twin = |t: [f32; 4]| {
-        // `lit`: the colour image's light gain; an isolated channel is data.
-        let g = if look.channel_mode == mode::RGBA { look.light_gain } else { 1.0 };
-        let t = [t[0] * g, t[1] * g, t[2] * g, t[3]];
-        transfer::canvas(transfer::display_pixel(t, look.exposure_ev, look.gamma, look.channel_mode, look.tonemap), look.hdr)
+        transfer::canvas(transfer::display_pixel(t, &look.src, look.exposure_ev, look.gamma, look.channel_mode, look.tonemap), look.hdr)
     };
     check_with(got, level, w, h, what, twin);
 }
@@ -326,6 +323,30 @@ fn check_with(got: &[f32], level: &[f32], w: u32, h: u32, what: &str, twin: impl
         }
     }
     eprintln!("{what}: worst difference {worst:e}");
+}
+
+/// [`check`] in linear light for the absolute curves (PQ, HLG): their toe subtracts two numbers
+/// near `c1` (PQ) before a power of 6.3, so the GPU's `pow` (~1e-6 relative) leaves ~1e-3 of the
+/// light near black, which the canvas's sRGB slope (12.92) and a gamut matrix that cancels
+/// components magnify past one 8-bit code. Within 3e-3 of the light, relative above 1 (the
+/// `f16` canvas alone rounds by 2^-10, ~2.4e-3 once decoded to light).
+fn check_light(got: &[f32], level: &[f32], w: u32, h: u32, look: Look, what: &str) {
+    let mut worst = 0f32;
+    for y in 0..h {
+        for x in 0..w {
+            let i = ((y * w + x) * 4) as usize;
+            let texel = [0, 1, 2, 3].map(|c| f32::from(Half::from(level[i + c])));
+            let want = transfer::canvas(transfer::display_pixel(texel, &look.src, look.exposure_ev, look.gamma, look.channel_mode, look.tonemap), look.hdr);
+            for c in 0..3 {
+                let (g, w) = (transfer::eotf(got[i + c]), transfer::eotf(want[c]));
+                let d = (g - w).abs();
+                worst = worst.max(d);
+                assert!(d <= 3e-3 * w.abs().max(1.0), "{what}: pixel {x},{y} channel {c}: light {g} want {w}");
+            }
+            assert!((got[i + 3] - want[3]).abs() <= 1.0 / 255.0, "{what}: alpha at {x},{y}");
+        }
+    }
+    eprintln!("{what}: worst light difference {worst:e}");
 }
 
 #[test]
@@ -364,23 +385,53 @@ fn tiles_render_the_display_transform_of_every_texel() {
         (2.0, 1.0, mode::RGBA, tonemap::AGX, false),
         (-3.0, 1.1, mode::RGBA, tonemap::AGX, false),
     ] {
-        let look = Look { exposure_ev: ev, gamma, channel_mode, tonemap, nearest: true, hdr, ocio_gain: 1.0, light_gain: 1.0 };
+        let look = Look { exposure_ev: ev, gamma, channel_mode, tonemap, nearest: true, hdr, src: transfer::Src::LINEAR };
         let got = render(&device, &queue, &mut gpu, &mut state, 1.0, look, w, h);
         let what = format!("level 0 ev={ev} gamma={gamma} mode={channel_mode} tone={tonemap} hdr={hdr}");
         check(&got, &rgba, w, h, look, &what);
     }
-    // An absolute-light frame's gain scales the colour image only.
-    for (channel_mode, hdr) in [(mode::RGBA, true), (mode::RGBA, false), (mode::R, true)] {
-        let look = Look { exposure_ev: 0.0, gamma: 1.0, channel_mode, tonemap: tonemap::NONE, nearest: true, hdr, ocio_gain: 1.0, light_gain: 2.5 };
+    // A frame read through its own tag (`transfer::decode`) and alpha kind: the built-in decode
+    // of sRGB (straight and associated alpha), PQ and HLG (absolute, scaled to a 203-nit SDR
+    // white), Display P3, Cineon; an isolated channel of an encoded frame is shown as its code.
+    // The curves past sRGB read straight texels: their codes stay in 0..1, the domain they are
+    // defined on (an associated code over a 0.2 alpha is 5, past PQ's 1.0 and Cineon's f16 range).
+    let codes: Vec<f32> = rgba.iter().map(|v| v.rem_euclid(1.0)).collect();
+    state.set_source(
+        SourceDesc { frame: 2, view: crate::image::Selection::default(), pixels_gen: 0, stage: 0 },
+        Arc::new(FrameSource { rgba: Arc::new(codes.clone()), w, h }),
+    );
+    let read = |space: &str, straight: bool, gain: f32| {
+        let tag = exr_import::ColorTag { space: space.to_owned(), origin: exr_import::TagOrigin::File };
+        transfer::Src { builtin: exr_import::builtin(&tag).unwrap(), straight, gain }
+    };
+    for (src, channel_mode, hdr, what) in [
+        (read("srgb_rec709_scene", true, 1.0), mode::RGBA, false, "sRGB straight"),
+        (read("srgb_rec709_scene", false, 1.0), mode::RGBA, false, "sRGB associated"),
+        (read("srgb_rec709_scene", true, 1.0), mode::R, false, "sRGB isolate"),
+        (read("pq_rec2020_display", true, 100.0 / 203.0), mode::RGBA, true, "PQ"),
+        (read("hlg_rec2020_display", true, 100.0 / 203.0), mode::RGBA, true, "HLG"),
+        (read("srgb_p3d65_display", true, 1.0), mode::RGBA, true, "Display P3"),
+        (read("KodakLog", true, 1.0), mode::RGBA, false, "Cineon"),
+    ] {
+        let look = Look { exposure_ev: 0.5, gamma: 1.1, channel_mode, tonemap: tonemap::NONE, nearest: true, hdr, src };
         let got = render(&device, &queue, &mut gpu, &mut state, 1.0, look, w, h);
-        check(&got, &rgba, w, h, look, &format!("light gain 2.5 mode={channel_mode} hdr={hdr}"));
+        let what = format!("decode {what} mode={channel_mode} hdr={hdr}");
+        if src.builtin.absolute {
+            check_light(&got, &codes, w, h, look, &what);
+        } else {
+            check(&got, &codes, w, h, look, &what);
+        }
     }
+    state.set_source(
+        SourceDesc { frame: 1, view: crate::image::Selection::default(), pixels_gen: 0, stage: 0 },
+        Arc::new(FrameSource { rgba: Arc::new(rgba.clone()), w, h }),
+    );
 
     // Zoom 0.5: level 1, one level texel per target pixel.
     let grid = Grid::new(w, h);
     let (lw, lh) = grid.level_size(1);
     let level1 = level_from_rgba(&rgba, &grid, 1).unwrap();
-    let look = Look { exposure_ev: 0.0, gamma: 1.0, channel_mode: mode::RGBA, tonemap: 0, nearest: false, hdr: false, ocio_gain: 1.0, light_gain: 1.0 };
+    let look = Look { exposure_ev: 0.0, gamma: 1.0, channel_mode: mode::RGBA, tonemap: 0, nearest: false, hdr: false, src: transfer::Src::LINEAR };
     let got = render(&device, &queue, &mut gpu, &mut state, 0.5, look, lw, lh);
     check(&got, &level1, lw, lh, look, "level 1 at zoom 0.5");
 }
@@ -442,15 +493,16 @@ fn tiles_render_the_ocio_transform_of_every_texel() {
     );
 
     let o = crate::ocio::Ocio::load("ocio://studio-config-latest").unwrap();
-    let aces = o.transform(&o.resolve(&crate::ocio::Sel::default(), false).unwrap(), false).unwrap();
+    let scene = o.scene();
+    let aces = o.transform(&o.resolve(&crate::ocio::Sel::default(), &scene, false).unwrap(), None, false).unwrap();
     assert!(!aces.has_luts(), "the ACES 2.0 view is fixed function; the LUT case below covers group 2");
     // The HDR (linear) form of a 1000-nit view: canvas values well above 1.0.
     let hdr_sel = crate::ocio::Sel {
         display: "Rec.2100-PQ - Display".into(),
-        view: "ACES 2.0 - HDR 1000 nits (P3 D65)".into(),
+        scene_view: "ACES 2.0 - HDR 1000 nits (P3 D65)".into(),
         ..Default::default()
     };
-    let hdr = o.transform(&o.resolve(&hdr_sel, true).unwrap(), true).unwrap();
+    let hdr = o.transform(&o.resolve(&hdr_sel, &scene, true).unwrap(), None, true).unwrap();
     assert!(hdr.linear());
     let lut = lut_transform();
     assert!(lut.has_luts());
@@ -460,8 +512,9 @@ fn tiles_render_the_ocio_transform_of_every_texel() {
     );
 
     // SDR white of the HDR cases: the absolute 1000-nit view scales by 100/203.
-    let white = 203.0;
-    assert!((hdr.gain(white) - 100.0 / 203.0).abs() < 1e-6 && aces.gain(white) == 1.0);
+    let white = crate::present::Target { hdr: true, white: 203.0, peak: 1000.0 };
+    let gain = |t: &crate::ocio::Transform| crate::ocio::display_gain(t.absolute(), &white);
+    assert!((gain(&hdr) - 100.0 / 203.0).abs() < 1e-6 && gain(&aces) == 1.0);
     for (t, ev, gamma, channel_mode, out_hdr) in [
         (&aces, 0.0, 1.0, mode::RGBA, false),
         (&aces, 1.5, 1.3, mode::RGBA, false),
@@ -474,7 +527,7 @@ fn tiles_render_the_ocio_transform_of_every_texel() {
         (&lut, -3.0, 1.2, mode::RGBA, false),
     ] {
         gpu.pipe.set_colour(&device, &queue, Some(t)).unwrap();
-        let gain = t.gain(white);
+        let src = transfer::Src { gain: gain(t), ..transfer::Src::LINEAR };
         let look = Look {
             exposure_ev: ev,
             gamma,
@@ -482,19 +535,18 @@ fn tiles_render_the_ocio_transform_of_every_texel() {
             tonemap: transfer::tonemap::AGX,
             nearest: true,
             hdr: out_hdr,
-            ocio_gain: gain,
-            light_gain: 1.0,
+            src,
         };
         let got = render(&device, &queue, &mut gpu, &mut state, 1.0, look, w, h);
         let what = format!("{} ev={ev} gamma={gamma} mode={channel_mode} hdr={out_hdr}", t.key);
         check_with(&got, &rgba, w, h, &what, |texel| {
             if channel_mode != mode::RGBA {
                 // Isolated channels are data: the built-in path, tone operator ignored.
-                let d = transfer::display_pixel(texel, ev, gamma, channel_mode, transfer::tonemap::NONE);
+                let d = transfer::display_pixel(texel, &src, ev, gamma, channel_mode, transfer::tonemap::NONE);
                 return transfer::canvas(d, out_hdr);
             }
             let mut px = [texel];
-            t.display(&mut px, ev, gamma, gain);
+            t.display(&mut px, &src, ev, gamma);
             transfer::canvas(px[0], out_hdr)
         });
     }
@@ -508,8 +560,7 @@ fn tiles_render_the_ocio_transform_of_every_texel() {
         tonemap: transfer::tonemap::AGX,
         nearest: true,
         hdr: false,
-        ocio_gain: 1.0,
-        light_gain: 1.0,
+        src: transfer::Src::LINEAR,
     };
     let got = render(&device, &queue, &mut gpu, &mut state, 1.0, look, w, h);
     check(&got, &rgba, w, h, look, "built-in again");

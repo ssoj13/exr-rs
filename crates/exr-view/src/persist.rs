@@ -127,6 +127,10 @@ pub struct Config {
     /// Tone operator (`transfer::tonemap::*`), 0 = none.
     #[serde(default)]
     pub tonemap: u32,
+    /// The scopes read the display values (the colour image through the shown display transform)
+    /// instead of the stored ones.
+    #[serde(default)]
+    pub scope_display: bool,
     /// What shows under the image's alpha (toolbar drop-up): the shared viewer backdrop,
     /// composited in the present pass so it is right on every output.
     #[serde(default)]
@@ -283,6 +287,7 @@ impl Default for Config {
             layouts: egui_dock_layout::LayoutStore::default(),
             budgets: Budgets::default(),
             tonemap: 0,
+            scope_display: false,
             backdrop: egui_display::Backdrop::default(),
             ocio: crate::ocio::Sel::default(),
             display: DisplayPrefs::default(),
@@ -556,8 +561,9 @@ mod tests {
             layouts,
             budgets: Budgets { ram: 0.5, vram: 0.25, upload_mib: 128 },
             tonemap: 2,
+            scope_display: true,
             backdrop: egui_display::Backdrop { kind: egui_display::BackdropKind::Color, color: [0.2, 0.4, 0.6, 1.0], ..Default::default() },
-            ocio: crate::ocio::Sel { on: true, config: "x.ocio".into(), input: "i".into(), display: "d".into(), view: "v".into(), look: "l".into() },
+            ocio: crate::ocio::Sel { on: true, config: "x.ocio".into(), display: "d".into(), scene_view: "v".into(), video_view: "w".into(), look: "l".into() },
             display: DisplayPrefs { output: crate::present::Output::Hlg, white: Some(250.0), peak: Some(1200.0) },
             fonts: Fonts { heading: 12.0, body: 13.0, monospace: 11.0, button: 12.5, small: 8.0, dock_tab: 30.0, sidebar: 14.0 },
         }

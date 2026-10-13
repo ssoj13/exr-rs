@@ -1,11 +1,28 @@
 //! The OCIO display transform of the colour image: the config, the user's choice
-//! (input colour space, display, view, look), the transform the tile shader and the
-//! CPU twin both run, and the Colour panel.
+//! (display, the view per encoding class, look, a per-file input override), the frame's
+//! colour space, the transform the tile shader and the CPU twin both run, and the Colour panel.
 //!
 //! Everything comes from `vfx-ocio` (the OpenColorIO 2.5 port Playa and vfx-view use):
-//! ONE `Processor` gives the WGSL spliced into the tile shader (`wgsl_prelude`, bound
-//! through `GpuOcioResources::build_for(.., FRAGMENT)` in `tiles::render`) and the
-//! exact CPU twin (`apply_rgba`) that Save view and the GPU test use.
+//! ONE `Processor` per frame gives the WGSL spliced into the tile shader (`wgsl_prelude`,
+//! bound through `GpuOcioResources::build_for(.., FRAGMENT)` in `tiles::render`) and the
+//! exact CPU twin ([`Transform::display`]) that Save view, the headless screenshot and the
+//! GPU test use.
+//!
+//! # One conversion per frame (`COLOR_PLAN.md`)
+//!
+//! A frame keeps its pixels as read and a colour tag (`exr_import::ColorTag`). [`Ocio::space`]
+//! is THE mapping of a tag to a colour space of the config: the tag by name, alias or role
+//! (`Config::colorspace`, case-insensitive; interop IDs are aliases in the ACES configs), the
+//! config's file rules for an untagged frame (unless the path only matches their default rule,
+//! then the tag's explicit fallback), or the user's per-file override. A name the config does
+//! not know is a typed [`SpaceError`], shown with the override offered, never a substitute.
+//!
+//! The processor input is that space; the views offered are the ones the config's viewing
+//! rules allow for it (`Config::get_views_for_colorspace`, OCIO `getNumViews(display,
+//! colorspace)`), the default the first of them (OCIO `getDefaultView(display, colorspace)`):
+//! a PQ HDR10 still gets `Video (colorimetric)` (PQ -> XYZ -> PQ, an identity on a PQ display)
+//! instead of a second ACES rendering. The user's view is remembered per encoding class
+//! ([`Class`]), so EXRs and a PQ PNG each keep theirs.
 //!
 //! The chain in colour mode (`channel_mode == RGBA`) is OCIO's `LegacyViewingPipeline`,
 //! as `ociodisplay` builds it: the input to `scene_linear` and the exposure there (the
@@ -15,6 +32,8 @@
 //! display-encoded result (where `ociodisplay` applies its display gamma: an
 //! `ExponentTransform` after the display/view transform). No sRGB OETF: the display
 //! colour space already encodes. Isolated channels are data and keep the built-in path.
+//! Associated colour is unpremultiplied before the processor and premultiplied after it
+//! (`transfer::unpremul` / `transfer::premul`).
 //!
 //! What the transform ends with follows the window's output (`present::Output`):
 //!
@@ -32,10 +51,13 @@
 //!   shader encodes like the built-in chain and the present pass maps to the
 //!   surface. A data view (`Raw`) passes its values through as that light.
 
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context as _, Result, anyhow, bail};
+use exr_import::{Builtin, ColorTag, TagOrigin};
 use serde::{Deserialize, Serialize};
 use vfx_ocio::builtin::embedded;
 use vfx_ocio::color_matrix::{Adaptation, REC709, conversion_matrix_from_xyz_d65};
@@ -44,6 +66,9 @@ use vfx_ocio::{
     GpuProcessor, GpuShaderCode, GroupTransform, LegacyViewingPipeline, MatrixTransform, Processor,
     ReferenceSpaceType, TransformDirection,
 };
+
+use crate::image::DecodedFrame;
+use crate::transfer::Src;
 
 /// What the user picked; persisted (`persist::Config::ocio`). Empty names mean the
 /// config's defaults ([`Ocio::resolve`]).
@@ -54,14 +79,52 @@ pub struct Sel {
     pub on: bool,
     /// A config file or an `ocio://` URI; empty = `$OCIO`, else `ocio://default`.
     pub config: String,
-    /// Input colour space; empty = the `scene_linear` role.
-    pub input: String,
     /// Display; empty = the first one offered.
     pub display: String,
-    /// View; empty = the display's first one offered.
-    pub view: String,
+    /// The view of scene-referred frames (scene-linear, log); empty = the first one the
+    /// viewing rules allow for the frame's colour space.
+    pub scene_view: String,
+    /// The view of display-referred frames (video, display-linear); empty = the first allowed.
+    pub video_view: String,
     /// Look applied instead of the view's own looks; empty = the view's looks.
     pub look: String,
+}
+
+impl Sel {
+    /// The remembered view of `class` (empty = the default).
+    pub fn view(&self, class: Class) -> &str {
+        match class {
+            Class::Scene => &self.scene_view,
+            Class::Video => &self.video_view,
+        }
+    }
+
+    /// The remembered view of `class`, to change.
+    pub fn view_mut(&mut self, class: Class) -> &mut String {
+        match class {
+            Class::Scene => &mut self.scene_view,
+            Class::Video => &mut self.video_view,
+        }
+    }
+}
+
+/// The encoding class a view choice is remembered for: scene-referred light (scene-linear,
+/// log) wants a rendering (an ACES view), a finished picture (SDR / HDR video, display-linear)
+/// wants none (`Video (colorimetric)`), as the configs' viewing rules split them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Class {
+    Scene,
+    Video,
+}
+
+impl Class {
+    /// How the Colour panel names it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Scene => "scene-referred",
+            Self::Video => "display-referred",
+        }
+    }
 }
 
 /// The config `sel_config` stands for: itself, else `$OCIO` (the standard OCIO
@@ -76,9 +139,54 @@ pub fn source(sel_config: &str) -> String {
         .unwrap_or_else(|| "ocio://default".to_owned())
 }
 
-/// Names a [`Sel`] resolves to in one config.
+/// The gain from a transform's display light to the canvas (1.0 = SDR white of `target.white`
+/// nits). Light is relative to SDR white for SDR displays (its 1.0 IS SDR white, as the OS
+/// shows SDR content on an HDR display): 1. It is ABSOLUTE for an HDR display colour space or
+/// an absolute source of the built-in decode (OCIO's display reference, 1.0 = 100 nits; a
+/// 1000-nit view peaks at 10): 100/white on an HDR output, so the present pass, which scales
+/// canvas 1.0 to `white` nits, lands on the nits meant. An SDR output shows 100 nits at white.
+pub fn display_gain(absolute: bool, target: &crate::present::Target) -> f32 {
+    if absolute && target.hdr { 100.0 / target.white.max(1.0) } else { 1.0 }
+}
+
+/// A frame's colour space in a config ([`Ocio::space`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Space {
+    /// The config's own name of it.
+    pub name: String,
+    /// How it was found: the tag and its origin, a file rule, the untagged fallback, the
+    /// override.
+    pub how: String,
+    /// Which remembered view it takes.
+    pub class: Class,
+    /// A matrix from the stored values into the space first (EXR `whiteLuminance`: absolute
+    /// CIE XYZ D65, `TagOrigin::Luminance`); row-major.
+    pub pre: Option<[[f32; 3]; 3]>,
+}
+
+/// Why a frame has no colour space in the config.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SpaceError {
+    /// The config has no colour space, alias or role of that name.
+    Unknown { space: String, how: String },
+}
+
+impl std::fmt::Display for SpaceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unknown { space, how } => {
+                write!(f, "the config has no colour space \"{space}\" ({how}): pick an input override in Settings > Colour")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SpaceError {}
+
+/// Names a [`Sel`] resolves to in one config for one frame's colour space.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Names {
+    /// The frame's colour space (the processor input).
     pub input: String,
     pub display: String,
     pub view: String,
@@ -106,9 +214,47 @@ impl Ocio {
         Ok(Self { src: src.to_owned(), serial: LOADS.fetch_add(1, Ordering::Relaxed), cfg })
     }
 
-    /// Every colour space, config order.
+    /// Every colour space, config order (the override list).
     pub fn inputs(&self) -> Vec<&str> {
         self.cfg.colorspace_names().collect()
+    }
+
+    /// The colour space of a frame tagged `tag` at `path`, or `over` (the user's override)
+    /// when given. See the module docs for the rules; this is their one implementation.
+    pub fn space(&self, tag: &ColorTag, path: &Path, over: Option<&str>) -> Result<Space, SpaceError> {
+        if let Some(name) = over {
+            return self.find(name, "override".to_owned());
+        }
+        let how = format!("{}, {}", tag.space, tag.origin.label());
+        match tag.origin {
+            TagOrigin::Untagged => {
+                // A rule other than the default one names the space (studio: EXR -> ACES2065-1);
+                // the default rule alone says nothing the explicit fallback does not say better
+                // (an older config's `Default: ACES2065-1` would take an 8-bit PNG for AP0).
+                let file = path.to_string_lossy();
+                match self.cfg.colorspace_from_filepath(&file) {
+                    Some(cs) if !self.cfg.filepath_only_matches_default_rule(&file) => {
+                        self.find(cs, "untagged, the config's file rules".to_owned())
+                    }
+                    _ => self.find(&tag.space, format!("{}, untagged fallback", tag.space)),
+                }
+            }
+            TagOrigin::Luminance { to_xyz } => self.find(&tag.space, how).map(|s| Space { pre: Some(to_xyz), ..s }),
+            TagOrigin::File | TagOrigin::Chromaticities => self.find(&tag.space, how),
+        }
+    }
+
+    /// The config's colour space `name` (name, alias or role), classed for the view memory.
+    fn find(&self, name: &str, how: String) -> Result<Space, SpaceError> {
+        let cs = self.cfg.colorspace(name).ok_or_else(|| SpaceError::Unknown { space: name.to_owned(), how: how.clone() })?;
+        let class = match cs.encoding() {
+            Encoding::SceneLinear | Encoding::Log => Class::Scene,
+            Encoding::Sdr | Encoding::Hdr | Encoding::DisplayLinear => Class::Video,
+            // No encoding (OCIO v1, data, `edr-video`): the reference space says which.
+            _ if cs.reference_space_type() == ReferenceSpaceType::Display => Class::Video,
+            _ => Class::Scene,
+        };
+        Ok(Space { name: cs.name().to_owned(), how, class, pre: None })
     }
 
     /// The active displays offered: with `hdr` every one with a picture (non-data)
@@ -127,11 +273,12 @@ impl Ocio {
             .collect()
     }
 
-    /// The views of `display` offered (config order): all with `hdr`, else the
-    /// non-HDR ones (data views included).
-    pub fn views(&self, display: &str, hdr: bool) -> Vec<&str> {
+    /// The views of `display` offered for colour space `space` (config order): those the
+    /// viewing rules allow for it, all of them with `hdr`, else the non-HDR ones (data views
+    /// included).
+    pub fn views(&self, display: &str, space: &str, hdr: bool) -> Vec<&str> {
         self.cfg
-            .get_views(display)
+            .get_views_for_colorspace(display, space)
             .into_iter()
             .filter(|v| hdr || self.encoding(display, v) != Some(Encoding::Hdr))
             .map(|v| v.name())
@@ -150,53 +297,52 @@ impl Ocio {
         self.cfg.looks().names().collect()
     }
 
-    /// `sel`'s names in this config, empty ones replaced by the defaults. A name the
-    /// config lacks is an error, not a silent substitute: the panel says which.
-    pub fn resolve(&self, sel: &Sel, hdr: bool) -> Result<Names> {
-        let input = if sel.input.is_empty() {
-            if !self.cfg.has_role("scene_linear") {
-                bail!("the config has no scene_linear role: pick an input colour space");
-            }
-            "scene_linear".to_owned()
-        } else if self.cfg.colorspace(&sel.input).is_some() {
-            sel.input.clone()
-        } else {
-            bail!("the config has no colour space \"{}\"", sel.input);
-        };
+    /// The display `sel` names in this config (empty = the first offered). A name the config
+    /// lacks is an error, not a silent substitute: the panel says which.
+    fn display<'a>(&'a self, sel: &'a Sel, hdr: bool) -> Result<&'a str> {
         // What a name is missing as: an HDR display on an SDR output is "no SDR display".
         let kind = if hdr { "" } else { "SDR " };
         let displays = self.displays(hdr);
-        let display = if sel.display.is_empty() {
-            displays.first().copied().ok_or_else(|| anyhow!("the config has no {kind}display"))?
+        if sel.display.is_empty() {
+            displays.first().copied().ok_or_else(|| anyhow!("the config has no {kind}display"))
         } else if displays.contains(&sel.display.as_str()) {
-            sel.display.as_str()
+            Ok(sel.display.as_str())
         } else {
-            bail!("the config has no {kind}display \"{}\"", sel.display);
-        };
-        let views = self.views(display, hdr);
-        let view = if sel.view.is_empty() {
-            views.first().copied().ok_or_else(|| anyhow!("\"{display}\" has no {kind}view"))?
-        } else if views.contains(&sel.view.as_str()) {
-            sel.view.as_str()
+            bail!("the config has no {kind}display \"{}\"", sel.display)
+        }
+    }
+
+    /// `sel`'s names in this config for a frame in `space`, empty ones replaced by the defaults:
+    /// the view is the one remembered for the space's class, else the first the viewing rules
+    /// allow. A name the config lacks (or a view not allowed for the space) is an error.
+    pub fn resolve(&self, sel: &Sel, space: &Space, hdr: bool) -> Result<Names> {
+        let kind = if hdr { "" } else { "SDR " };
+        let display = self.display(sel, hdr)?;
+        let views = self.views(display, &space.name, hdr);
+        let want = sel.view(space.class);
+        let view = if want.is_empty() {
+            views.first().copied().ok_or_else(|| anyhow!("\"{display}\" has no {kind}view for \"{}\"", space.name))?
+        } else if views.contains(&want) {
+            want
         } else {
-            bail!("\"{display}\" has no {kind}view \"{}\"", sel.view);
+            bail!("\"{display}\" has no {kind}view \"{want}\" for \"{}\" (its viewing rules)", space.name);
         };
         if !sel.look.is_empty() && self.cfg.looks().get(&sel.look).is_none() {
             bail!("the config has no look \"{}\"", sel.look);
         }
-        Ok(Names { input, display: display.to_owned(), view: view.to_owned(), look: sel.look.clone() })
+        Ok(Names { input: space.name.clone(), display: display.to_owned(), view: view.to_owned(), look: sel.look.clone() })
     }
 
-    /// The viewer transform of `names`, built as OCIO viewers build it
-    /// (`LegacyViewingPipeline`, as `ociodisplay` does): the exposure is the pipeline's
-    /// `linearCC`, a DYNAMIC exposure applied in `scene_linear` (so it is an exposure for a
-    /// log or display-referred input too, not a gain on its codes), moved per frame without
-    /// a rebuild ([`Transform::display`], the tile shader's uniform); then the display/view
-    /// transform (a look replaces the view's own looks, OCIO's looks override); `linear`
-    /// continues it to linear Rec.709 light as the pipeline's `displayCC` (see the module
-    /// doc). Needs the config's `scene_linear` role, as OCIO's pipeline does; a data input
-    /// bypasses everything, the exposure included, as in OCIO.
-    pub fn transform(&self, names: &Names, linear: bool) -> Result<Transform> {
+    /// The viewer transform of `names` for stored values `pre` takes into `names.input` (none:
+    /// they are in it), built as OCIO viewers build it (`LegacyViewingPipeline`, as
+    /// `ociodisplay` does): the exposure is the pipeline's `linearCC`, a DYNAMIC exposure applied
+    /// in `scene_linear` (so it is an exposure for a log or display-referred input too, not a
+    /// gain on its codes), moved per frame without a rebuild ([`Transform::display`], the tile
+    /// shader's uniform); then the display/view transform (a look replaces the view's own looks,
+    /// OCIO's looks override); `linear` continues it to linear Rec.709 light as the pipeline's
+    /// `displayCC` (see the module doc). Needs the config's `scene_linear` role, as OCIO's
+    /// pipeline does; a data input bypasses everything, the exposure included, as in OCIO.
+    pub fn transform(&self, names: &Names, pre: Option<[[f32; 3]; 3]>, linear: bool) -> Result<Transform> {
         let dvt = DisplayViewTransform {
             src: names.input.clone(),
             display: names.display.clone(),
@@ -221,15 +367,28 @@ impl Ocio {
                 })));
             }
         }
-        let proc = pipeline.processor(&self.cfg)?;
+        let mut proc = pipeline.processor(&self.cfg)?;
+        if let Some(m) = pre {
+            let r = |i: usize| m[i].map(f64::from);
+            let [r0, r1, r2] = [r(0), r(1), r(2)];
+            let matrix = [r0[0], r0[1], r0[2], 0.0, r1[0], r1[1], r1[2], 0.0, r2[0], r2[1], r2[2], 0.0, 0.0, 0.0, 0.0, 1.0];
+            let into = vfx_ocio::Transform::Matrix(MatrixTransform {
+                name: String::new(),
+                matrix,
+                offset: [0.0; 4],
+                direction: TransformDirection::Forward,
+            });
+            proc = Processor::combine(&Processor::from_transform(&into, TransformDirection::Forward)?, &proc)?;
+        }
         let key = format!(
-            "{}#{}|{}|{}|{}|{}|{}",
+            "{}#{}|{}|{}|{}|{}|{:?}|{}",
             self.src,
             self.serial,
             names.input,
             names.display,
             names.view,
             names.look,
+            pre,
             if linear { "linear" } else { "encoded" }
         );
         // Absolute light: the view renders into an HDR display colour space.
@@ -278,6 +437,22 @@ impl Ocio {
         }));
         Ok(out)
     }
+
+    /// A CPU processor from the frame's space to the config's `scene_linear` role: what the
+    /// pixel inspector shows next to the stored values.
+    pub fn to_scene_linear(&self, space: &Space) -> Result<Processor> {
+        let proc = self.cfg.processor(&space.name, "scene_linear")?;
+        match space.pre {
+            None => Ok(proc),
+            Some(m) => {
+                let r = |i: usize| m[i].map(f64::from);
+                let [r0, r1, r2] = [r(0), r(1), r(2)];
+                let matrix = [r0[0], r0[1], r0[2], 0.0, r1[0], r1[1], r1[2], 0.0, r2[0], r2[1], r2[2], 0.0, 0.0, 0.0, 0.0, 1.0];
+                let into = vfx_ocio::Transform::Matrix(MatrixTransform { name: String::new(), matrix, offset: [0.0; 4], direction: TransformDirection::Forward });
+                Ok(Processor::combine(&Processor::from_transform(&into, TransformDirection::Forward)?, &proc)?)
+            }
+        }
+    }
 }
 
 /// One built display transform: the processor (CPU twin) and its WGSL.
@@ -299,13 +474,13 @@ pub struct Transform {
     /// It ends in linear Rec.709 light (HDR output), not in display code values.
     linear: bool,
     /// Its light is ABSOLUTE (an HDR display colour space, e.g. PQ: display
-    /// reference 1.0 = 100 nits), not relative to SDR white: see [`Self::gain`].
+    /// reference 1.0 = 100 nits), not relative to SDR white: see [`display_gain`].
     absolute: bool,
 }
 
 impl Transform {
     /// Compile `proc` for the GPU; `linear` says it ends in linear light,
-    /// `absolute` that the light is in absolute nits (see [`Self::gain`]).
+    /// `absolute` that the light is in absolute nits (see [`display_gain`]).
     pub fn new(proc: Processor, key: String, linear: bool, absolute: bool) -> Result<Self> {
         let gpu = GpuProcessor::from_processor_wgsl(&proc)?;
         let code = gpu.generate_shader(GpuLanguage::Wgsl)?;
@@ -347,14 +522,9 @@ impl Transform {
         self.cpu.read().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The gain from the transform's light to the canvas (1.0 = SDR white of
-    /// `white` nits). An SDR view's light is relative (its 1.0 IS SDR white, as the
-    /// OS shows SDR content on an HDR display): 1. An HDR view's light is absolute
-    /// (display reference 1.0 = 100 nits; a 1000-nit view peaks at 10): 100/white,
-    /// so the present pass, which scales canvas 1.0 to `white` nits, lands on the
-    /// nits the view meant.
-    pub fn gain(&self, white: f32) -> f32 {
-        if self.absolute { 100.0 / white.max(1.0) } else { 1.0 }
+    /// Its light is absolute (see [`display_gain`]).
+    pub fn absolute(&self) -> bool {
+        self.absolute
     }
 
     /// It ends in linear Rec.709 light, which the tile shader encodes.
@@ -368,13 +538,14 @@ impl Transform {
         !self.code.textures().is_empty()
     }
 
-    /// CPU twin of the tile shader's OCIO colour branch over linear RGBA pixels:
-    /// the transform with its dynamic exposure at `exposure_ev` (in `scene_linear`), for a
-    /// linear transform `gain` ([`Self::gain`]), the gamma dial and, for a linear transform,
-    /// the canvas encoding; alpha stays the input's.
-    pub fn display(&self, px: &mut [[f32; 4]], exposure_ev: f32, gamma: f32, gain: f32) {
+    /// CPU twin of the tile shader's OCIO colour branch over stored RGBA pixels of a frame read
+    /// as `src`: unpremultiply, the transform with its dynamic exposure at `exposure_ev` (in
+    /// `scene_linear`), for a linear transform `src.gain` ([`display_gain`]), the gamma dial and,
+    /// for a linear transform, the canvas encoding, then premultiply in light; alpha stays the
+    /// input's.
+    pub fn display(&self, px: &mut [[f32; 4]], src: &Src, exposure_ev: f32, gamma: f32) {
         let mut alpha = vec![0.0; px.len()];
-        self.display_kernel(px, &mut alpha, exposure_ev, gamma, gain);
+        self.display_kernel(px, &mut alpha, src, exposure_ev, gamma);
     }
 
     /// The exporter supplies admitted reusable alpha storage alongside its row.
@@ -382,45 +553,61 @@ impl Transform {
         &self,
         px: &mut [[f32; 4]],
         alpha: &mut [f32],
+        src: &Src,
         exposure_ev: f32,
         gamma: f32,
-        gain: f32,
     ) -> Result<(), &'static str> {
         if alpha.len() != px.len() {
             return Err("OCIO alpha scratch must match the pixel row");
         }
-        self.display_kernel(px, alpha, exposure_ev, gamma, gain);
+        self.display_kernel(px, alpha, src, exposure_ev, gamma);
         Ok(())
     }
 
-    fn display_kernel(
-        &self,
-        px: &mut [[f32; 4]],
-        alpha: &mut [f32],
-        exposure_ev: f32,
-        gamma: f32,
-        gain: f32,
-    ) {
+    fn display_kernel(&self, px: &mut [[f32; 4]], alpha: &mut [f32], src: &Src, exposure_ev: f32, gamma: f32) {
+        use crate::transfer::{dial, oetf, premul, unpremul};
         use rayon::prelude::*;
+        let straight = src.straight;
         px.par_iter_mut().zip(alpha.par_iter_mut()).for_each(|(p, a)| {
             *a = p[3];
+            [p[0], p[1], p[2]] = unpremul([p[0], p[1], p[2]], *a, straight);
             // Alpha is restored verbatim below. A NaN alpha must not enter RGB
             // matrix operations, where even a zero alpha coefficient propagates it.
             p[3] = 1.0;
         });
         self.cpu_at(exposure_ev).1.apply_rgba(px);
-        let linear = self.linear;
+        let (linear, gain) = (self.linear, src.gain);
         px.par_iter_mut().zip(alpha.par_iter()).for_each(|(p, &a)| {
-            for c in &mut p[..3] {
-                *c = if linear {
-                    crate::transfer::oetf(crate::transfer::dial(*c * gain, gamma))
-                } else {
-                    crate::transfer::dial(*c, gamma)
-                };
-            }
+            let d = [p[0], p[1], p[2]].map(|c| if linear { oetf(dial(c * gain, gamma)) } else { dial(c, gamma) });
+            [p[0], p[1], p[2]] = premul(d, a, straight);
             p[3] = a;
         });
     }
+}
+
+/// The frame on screen as [`State::frame`] resolved it, for the revision of the choice it was
+/// resolved with.
+pub struct Shown {
+    /// `DecodedFrame::id` of the frame.
+    id: u64,
+    /// [`State`]'s revision it was resolved at.
+    rev: u64,
+    /// The frame's tag and alpha kind (what the info panel shows).
+    pub tag: ColorTag,
+    pub straight: bool,
+    /// Its colour space in the config, when OCIO is on and the config loaded.
+    pub space: Option<Result<Space, SpaceError>>,
+    /// The names its transform was built with.
+    pub names: Option<Names>,
+    /// The views the config allows for its colour space on the chosen display.
+    pub views: Vec<String>,
+    /// Its transform (OCIO on, everything resolved and built).
+    transform: Option<Arc<Transform>>,
+    /// Its built-in decode (`exr_import::builtin`), or why there is none.
+    pub builtin: Result<Builtin, String>,
+    /// Its space to `scene_linear` for the pixel inspector, built on first use (hovering one
+    /// frame asks every repaint; stepping a sequence never builds it).
+    to_lin: std::sync::OnceLock<Option<Processor>>,
 }
 
 /// The Colour panel's state: the choice, the loaded config and the transform shown.
@@ -433,9 +620,18 @@ pub struct State {
     hdr: bool,
     /// The config of `source(sel.config)`, or why it does not load.
     cfg: Option<(String, Result<Ocio, String>)>,
-    /// The transform in use: OCIO is on and it built.
-    active: Option<Arc<Transform>>,
-    /// Why OCIO is on but not shown.
+    /// The input override of the open file or sequence: a colour space of the config used in
+    /// place of the frame's tag. Per file (the app clears it on every new open), not persisted.
+    pub over: Option<String>,
+    /// Bumped by every change of the choice, config, output or override, so the shown frame
+    /// resolves again.
+    rev: u64,
+    /// Transforms built from this config, by key: frames in one colour space share one, and a
+    /// sequence of mixed spaces does not rebuild per frame.
+    built: HashMap<String, Arc<Transform>>,
+    /// The frame on screen, resolved.
+    shown: Option<Shown>,
+    /// Why OCIO is on but not shown (the config, a name, the frame's colour space).
     pub err: Option<String>,
     /// The path field's widget state. Only the field's own bookkeeping: where the config dialog
     /// starts is the dialog memory's (`file_pick::DialogMemory`, key `"ocio"`).
@@ -443,11 +639,22 @@ pub struct State {
 }
 
 impl State {
-    /// A state for `sel`, built (the device is assumed to filter until
+    /// A state for `sel`, its config loaded (the device is assumed to filter until
     /// [`Self::set_filterable`] says otherwise).
     pub fn new(sel: Sel) -> Self {
         let field = egui_file_field::FileFieldState::default();
-        let mut s = Self { sel, filterable: true, hdr: false, cfg: None, active: None, err: None, field };
+        let mut s = Self {
+            sel,
+            filterable: true,
+            hdr: false,
+            cfg: None,
+            over: None,
+            rev: 0,
+            built: HashMap::new(),
+            shown: None,
+            err: None,
+            field,
+        };
         s.rebuild();
         s
     }
@@ -468,50 +675,128 @@ impl State {
         }
     }
 
-    /// The transform the colour image goes through, `None` = the built-in one.
-    pub fn active(&self) -> Option<&Arc<Transform>> {
-        self.active.as_ref()
+    /// Use `over` in place of the open file's colour tag (`None` = the tag), and rebuild.
+    pub fn set_override(&mut self, over: Option<String>) {
+        if self.over != over {
+            self.over = over;
+            self.rebuild();
+        }
     }
 
-    /// Load the config when its source changed, then (OCIO on) build the transform
-    /// of the choice; a failure is kept in `err` and the built-in transform shows.
+    /// The transform the shown frame's colour image goes through, `None` = the built-in one.
+    pub fn active(&self) -> Option<&Arc<Transform>> {
+        self.shown.as_ref().and_then(|s| s.transform.as_ref())
+    }
+
+    /// The shown frame as resolved ([`Self::frame`]).
+    pub fn shown(&self) -> Option<&Shown> {
+        self.shown.as_ref()
+    }
+
+    /// Load the config when its source changed and mark the shown frame for resolving again
+    /// (its transform is built by [`Self::frame`]); a config that does not load is kept in
+    /// `err` and the built-in transform shows.
     pub fn rebuild(&mut self) {
+        self.rev += 1;
         self.err = None;
         if !self.sel.on {
-            self.active = None;
             return;
         }
-        match self.build() {
-            Ok(t) => {
-                if self.active.as_ref().is_none_or(|a| a.key != t.key) {
-                    log::info!("OCIO display transform: {}", t.key);
-                    self.active = Some(Arc::new(t));
-                }
-            }
-            Err(e) => {
-                log::warn!("OCIO: {e:#}");
-                self.err = Some(format!("{e:#}"));
-                self.active = None;
+        self.load_config();
+        if let Err(e) = self.config() {
+            log::warn!("OCIO: {e}");
+            self.err = Some(e);
+        }
+    }
+
+    /// Resolve `frame` (cached until it or the choice changes) and return how the tile shader
+    /// reads it on `target`: its built-in decode, alpha kind and display gain. With OCIO on,
+    /// [`Self::active`] is then its transform, or `err` says why there is none. `Err` only when
+    /// no transform can show the colour image: OCIO is not shown and the tag has no built-in
+    /// decode.
+    pub fn frame(&mut self, frame: &DecodedFrame, target: &crate::present::Target) -> Result<Src, String> {
+        if self.shown.as_ref().is_none_or(|s| s.id != frame.id || s.rev != self.rev) {
+            self.resolve(frame);
+        }
+        let Some(s) = &self.shown else { return Err("the frame did not resolve".to_owned()) };
+        match &s.transform {
+            // Under OCIO the built-in decode only tells an isolated channel's code from its
+            // light; a tag without one shows its channels as light (the data rule).
+            Some(t) => Ok(Src {
+                builtin: s.builtin.clone().unwrap_or(Builtin::LINEAR),
+                straight: s.straight,
+                gain: display_gain(t.absolute(), target),
+            }),
+            None => {
+                let builtin = s.builtin.clone()?;
+                Ok(Src { builtin, straight: s.straight, gain: display_gain(builtin.absolute, target) })
             }
         }
     }
 
-    fn build(&mut self) -> Result<Transform> {
+    /// Resolve `frame` into [`Self::shown`]: its colour space, names and transform (OCIO on),
+    /// and its built-in decode; a failure of the OCIO part is kept in `err`.
+    fn resolve(&mut self, frame: &DecodedFrame) {
+        let mut shown = Shown {
+            id: frame.id,
+            rev: self.rev,
+            tag: frame.tag.clone(),
+            straight: frame.straight,
+            space: None,
+            names: None,
+            views: Vec::new(),
+            transform: None,
+            builtin: exr_import::builtin(&frame.tag).map_err(|e| e.to_string()),
+            to_lin: std::sync::OnceLock::new(),
+        };
+        self.err = None;
+        if self.sel.on
+            && let Err(e) = self.build(frame, &mut shown)
+        {
+            log::warn!("OCIO {}: {e:#}", frame.path.display());
+            self.err = Some(format!("{e:#}"));
+        }
+        self.shown = Some(shown);
+    }
+
+    /// The OCIO part of [`Self::resolve`].
+    fn build(&mut self, frame: &DecodedFrame, shown: &mut Shown) -> Result<()> {
         self.load_config();
+        let (hdr, filterable) = (self.hdr, self.filterable);
         let ocio = self.config().map_err(|e| anyhow!(e))?;
-        let t = ocio.transform(&ocio.resolve(&self.sel, self.hdr)?, self.hdr)?;
-        if t.has_luts() && !self.filterable {
+        let space = ocio.space(&frame.tag, &frame.path, self.over.as_deref());
+        shown.space = Some(space.clone());
+        let space = space?;
+        if let Ok(display) = ocio.display(&self.sel, hdr) {
+            shown.views = ocio.views(display, &space.name, hdr).into_iter().map(str::to_owned).collect();
+        }
+        let names = ocio.resolve(&self.sel, &space, hdr)?;
+        shown.names = Some(names.clone());
+        let t = ocio.transform(&names, space.pre, hdr)?;
+        if t.has_luts() && !filterable {
             bail!("this transform samples LUT textures, and this GPU cannot filter 32-bit float textures");
         }
-        Ok(t)
+        let t = match self.built.get(&t.key) {
+            Some(had) => had.clone(),
+            None => {
+                log::info!("OCIO display transform: {}", t.key);
+                let t = Arc::new(t);
+                self.built.insert(t.key.clone(), t.clone());
+                t
+            }
+        };
+        shown.transform = Some(t);
+        Ok(())
     }
 
-    /// Load the config of `sel.config` when its source changed.
+    /// Load the config of `sel.config` when its source changed (the transforms of the old one
+    /// are dropped with it).
     fn load_config(&mut self) {
         let src = source(&self.sel.config);
         if self.cfg.as_ref().is_none_or(|(s, _)| *s != src) {
             let loaded = Ocio::load(&src).map_err(|e| format!("{e:#}"));
             self.cfg = Some((src, loaded));
+            self.built.clear();
         }
     }
 
@@ -524,10 +809,64 @@ impl State {
         }
     }
 
+    /// One line for the status bar: the shown frame's colour space in the config and how it was
+    /// found (OCIO on), else its tag and origin; `None` before a frame is shown.
+    pub fn summary(&self) -> Option<String> {
+        let s = self.shown.as_ref()?;
+        Some(match &s.space {
+            Some(Ok(sp)) => format!("{} ({})", sp.name, sp.how),
+            _ => format!("{} ({})", s.tag.space, s.tag.origin.label()),
+        })
+    }
+
+    /// The Metadata panel's colour rows for the shown frame: the tag and its origin, the alpha
+    /// kind, the built-in decode, and with OCIO the colour space, the view and any error.
+    pub fn rows(&self) -> Vec<(&'static str, String)> {
+        let Some(s) = &self.shown else { return Vec::new() };
+        let mut out = vec![
+            ("Colour tag", s.tag.space.clone()),
+            ("Tag origin", s.tag.origin.label().to_owned()),
+            ("Alpha", if s.straight { "straight" } else { "associated (or none)" }.to_owned()),
+            ("Built-in decode", match &s.builtin {
+                Ok(b) => format!("{:?}{}", b.tf, if b.absolute { ", absolute (100 nits = 1)" } else { "" }),
+                Err(e) => e.clone(),
+            }),
+        ];
+        match &s.space {
+            Some(Ok(sp)) => {
+                out.push(("OCIO colour space", sp.name.clone()));
+                out.push(("Found by", sp.how.clone()));
+            }
+            Some(Err(e)) => out.push(("OCIO colour space", e.to_string())),
+            None => {}
+        }
+        if let Some(n) = &s.names {
+            out.push(("OCIO view", format!("{} / {}", n.display, n.view)));
+        }
+        if let Some(e) = &self.err {
+            out.push(("OCIO error", e.clone()));
+        }
+        out
+    }
+
+    /// The scene-linear values of stored `rgb` of the shown frame (the pixel inspector), `None`
+    /// when OCIO is off or the frame has no colour space in the config.
+    pub fn scene_linear(&self, rgb: [f32; 3]) -> Option<[f32; 3]> {
+        let shown = self.shown.as_ref()?;
+        let proc = shown.to_lin.get_or_init(|| {
+            let space = shown.space.as_ref()?.as_ref().ok()?;
+            self.config().ok()?.to_scene_linear(space).map_err(|e| log::warn!("OCIO scene_linear of {}: {e:#}", space.name)).ok()
+        });
+        let mut px = [[rgb[0], rgb[1], rgb[2], 1.0]];
+        proc.as_ref()?.apply_rgba(&mut px);
+        Some([px[0][0], px[0][1], px[0][2]])
+    }
+
     /// Use another config: the names of the old one mean nothing there, so they go
-    /// back to the new config's defaults.
+    /// back to the new config's defaults (the override too).
     pub fn set_config(&mut self, config: String) {
         self.sel = Sel { on: self.sel.on, config, ..Sel::default() };
+        self.over = None;
         self.rebuild();
     }
 
@@ -554,10 +893,10 @@ impl State {
     /// The Colour panel. Returns whether the choice changed; `browse` is set when the
     /// user asks for a config file (the app runs the file dialog).
     pub fn ui(&mut self, ui: &mut egui::Ui, browse: &mut bool) -> bool {
-        let before = self.sel.clone();
+        let before = (self.sel.clone(), self.over.clone());
         let mut reload = false;
         ui.checkbox(&mut self.sel.on, "OCIO display transform")
-            .on_hover_text("Show the colour image through the OCIO display / view (isolated channels stay raw).\nOff: the built-in sRGB display with the tone operator.");
+            .on_hover_text("Show the colour image through the OCIO display / view (isolated channels stay raw).\nOff: the built-in decode of the frame's colour tag, the tone operator and sRGB.");
         ui.add_space(4.0);
 
         let mut config = self.sel.config.clone();
@@ -580,6 +919,7 @@ impl State {
             if config != self.sel.config {
                 // The names of the old config mean nothing in the new one.
                 self.sel = Sel { on: self.sel.on, config, ..Sel::default() };
+                self.over = None;
             }
             if reload {
                 self.cfg = None;
@@ -592,54 +932,72 @@ impl State {
             let owned = |v: Vec<&str>| v.into_iter().map(str::to_owned).collect::<Vec<_>>();
             let hdr = self.hdr;
             let displays = owned(ocio.displays(hdr));
-            let resolved = ocio.resolve(&self.sel, hdr).ok();
-            let views = resolved.as_ref().map(|n| owned(ocio.views(&n.display, hdr))).unwrap_or_default();
             let (inputs, looks) = (owned(ocio.inputs()), owned(ocio.looks()));
+            let shown = self.shown.as_ref();
+            let space = shown.and_then(|s| s.space.as_ref()).and_then(|s| s.as_ref().ok());
+            let names = shown.and_then(|s| s.names.as_ref());
+            let views = shown.map(|s| s.views.clone()).unwrap_or_default();
             let presets: Vec<_> = PRESETS
                 .iter()
                 .filter(|p| hdr || !p.hdr)
                 .map(|p| {
-                    let ok = displays.iter().any(|d| d == p.display) && ocio.views(p.display, hdr).contains(&p.view);
-                    let shown = resolved.as_ref().is_some_and(|n| n.display == p.display && n.view == p.view);
-                    (p, ok, shown)
+                    let ok = displays.iter().any(|d| d == p.display)
+                        && space.is_none_or(|s| ocio.views(p.display, &s.name, hdr).contains(&p.view));
+                    let on = names.is_some_and(|n| n.display == p.display && n.view == p.view);
+                    (p, ok, on)
                 })
                 .collect();
-            let dflt = |f: fn(&Names) -> &str| resolved.as_ref().map_or(String::new(), |n| f(n).to_owned());
 
             // Keep the quick choices above the advanced controls, including in a
             // short Settings dock. Both entry points use this same preset table.
-            ui.label("Monitor preset").on_hover_text("Choose the image rendering; this does not change UI reference white.");
+            ui.label("Monitor preset").on_hover_text("Choose the image rendering of scene-referred frames; this does not change UI reference white.");
             ui.horizontal_wrapped(|ui| {
-                for (p, ok, shown) in presets {
+                for (p, ok, on) in presets {
                     let tip = if ok {
                         p.hint.to_owned()
                     } else {
-                        format!("{}\n\nUnavailable: this config has no \"{}\" / \"{}\".", p.hint, p.display, p.view)
+                        format!("{}\n\nUnavailable: this config (or its viewing rules for the frame's colour space) has no \"{}\" / \"{}\".", p.hint, p.display, p.view)
                     };
-                    let button = egui::Button::new(p.label).selected(self.sel.on && shown);
+                    let button = egui::Button::new(p.label).selected(self.sel.on && on);
                     if ui.add_enabled(ok, button).on_hover_text(tip).clicked() {
                         self.sel.on = true;
                         self.sel.display = p.display.to_owned();
-                        self.sel.view = p.view.to_owned();
+                        self.sel.scene_view = p.view.to_owned();
                     }
                 }
             });
             ui.end_row();
-            ui.label("Input").on_hover_text("The colour space of the image's values.");
-            combo(ui, "ocio.input", &mut self.sel.input, &inputs, "scene_linear (role)");
+            ui.label("Input").on_hover_text(
+                "The colour space of the frame's values: from the file's tag (or the config's file rules for an untagged file), or an override for this file.",
+            );
+            let tag = shown.map_or_else(
+                || "the frame's tag".to_owned(),
+                |s| match &s.space {
+                    Some(Ok(sp)) if self.over.is_none() => format!("{} ({})", sp.name, sp.how),
+                    _ => format!("{} ({})", s.tag.space, s.tag.origin.label()),
+                },
+            );
+            let mut over = self.over.clone().unwrap_or_default();
+            combo(ui, "ocio.input", &mut over, &inputs, &format!("From the file: {tag}"));
+            self.over = (!over.is_empty()).then_some(over);
             ui.end_row();
             ui.label("Display").on_hover_text(
                 "The display the image is rendered for. SDR output: the monitor's own colour space (HDR ones need an HDR output, Settings > Display).",
             );
             let d_before = self.sel.display.clone();
-            combo(ui, "ocio.display", &mut self.sel.display, &displays, &dflt(|n| &n.display));
+            combo(ui, "ocio.display", &mut self.sel.display, &displays, names.map_or("", |n| n.display.as_str()));
             if self.sel.display != d_before {
-                // The view list belongs to the display.
-                self.sel.view.clear();
+                // The view lists belong to the display.
+                self.sel.scene_view.clear();
+                self.sel.video_view.clear();
             }
             ui.end_row();
-            ui.label("View").on_hover_text("The rendering of the scene for the display.");
-            combo(ui, "ocio.view", &mut self.sel.view, &views, &dflt(|n| &n.view));
+            let class = space.map_or(Class::Scene, |s| s.class);
+            ui.label("View").on_hover_text(format!(
+                "The rendering for the display: the views the config's viewing rules allow for the frame's colour space. Remembered for {} frames.",
+                class.label()
+            ));
+            combo(ui, "ocio.view", self.sel.view_mut(class), &views, names.map_or("", |n| n.view.as_str()));
             ui.end_row();
             ui.label("Look").on_hover_text("A look applied instead of the view's own looks.");
             combo(ui, "ocio.look", &mut self.sel.look, &looks, "(the view's looks)");
@@ -647,7 +1005,7 @@ impl State {
         });
 
         // One rebuild for whatever changed this frame.
-        let changed = self.sel != before || reload;
+        let changed = (self.sel.clone(), self.over.clone()) != before || reload;
         if changed {
             self.rebuild();
         }
@@ -787,11 +1145,48 @@ fn combo(ui: &mut egui::Ui, id: &str, cur: &mut String, items: &[String], empty:
 }
 
 #[cfg(test)]
+impl Ocio {
+    /// The config's `scene_linear` role as a frame's colour space (an untagged EXR without file
+    /// rules): what the tests that are about the view, not the tag, run from.
+    pub(crate) fn scene(&self) -> Space {
+        self.find("scene_linear", "test".to_owned()).expect("the config has a scene_linear role")
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image::tests_support::frame_of;
+    use crate::present::Target;
+    use exr_core::api::ChannelData;
 
     fn cg() -> Ocio {
         Ocio::load("ocio://default").expect("the default built-in config")
+    }
+
+    fn studio() -> Ocio {
+        Ocio::load("ocio://studio-config-latest").expect("the Studio built-in config")
+    }
+
+    fn tag(space: &str) -> ColorTag {
+        ColorTag { space: space.to_owned(), origin: TagOrigin::File }
+    }
+
+    /// `sel`'s transform of `space` (encoded unless `linear`).
+    fn tr(o: &Ocio, sel: &Sel, space: &Space, linear: bool) -> Transform {
+        o.transform(&o.resolve(sel, space, linear).unwrap(), space.pre, linear).unwrap()
+    }
+
+    const SDR: Target = Target { hdr: false, white: 80.0, peak: 1000.0 };
+
+    /// A 1x1 RGBA frame tagged `tag`, with `id` (the state's cache key) and `path`.
+    fn frame(tag: ColorTag, id: u64, path: &str) -> DecodedFrame {
+        let ch = |v: f32| ChannelData::Float(vec![v]);
+        let mut f = frame_of(1, 1, vec![("A".into(), ch(1.0)), ("B".into(), ch(0.18)), ("G".into(), ch(0.18)), ("R".into(), ch(0.18))]);
+        f.tag = tag;
+        f.id = id;
+        f.path = std::path::PathBuf::from(path);
+        f
     }
 
     /// A minimal OCIO v2 config file in a fresh temp folder: (folder, file).
@@ -806,28 +1201,6 @@ mod tests {
         )
         .unwrap();
         (dir, file)
-    }
-
-    /// A typed or browsed config path that does not load is an error on the state (the panel and
-    /// the toolbar show it), never a silent fallback to the default config; the dialog then starts
-    /// from the dialog memory, not from the bad path.
-    #[test]
-    fn a_bad_config_path_is_an_error_and_offers_no_folder() {
-        let mut s = State::new(Sel { on: true, config: "ocio://default".to_owned(), ..Sel::default() });
-        assert!(s.err.is_none() && s.active().is_some());
-        s.set_config("no/such/dir/config.ocio".to_owned());
-        assert!(s.err.is_some() && s.active().is_none());
-        assert_eq!(s.start_dir(), None, "nothing loaded yet, and a missing folder is not offered");
-        let (guard, file) = good_config("good");
-        let dir = guard.path().to_path_buf();
-        s.set_config(file.display().to_string());
-        assert!(s.err.is_none(), "{:?}", s.err);
-        assert_eq!(s.start_dir(), Some(dir.clone()));
-        s.set_config("no/such/dir/config.ocio".to_owned());
-        assert!(s.err.is_some());
-        assert_eq!(s.start_dir(), None, "a missing folder is not offered");
-        s.set_config("ocio://default".to_owned());
-        assert!(s.err.is_none(), "a built-in URI loads");
     }
 
     /// The path field keeps one draft PER INSTANCE (keyed by its `Ui` id): typing in one neither
@@ -871,21 +1244,46 @@ mod tests {
         assert_eq!(after[0].0, "current.ocio", "the draft is gone once applied");
     }
 
+    /// A typed or browsed config path that does not load is an error on the state (the panel and
+    /// the toolbar show it), never a silent fallback to the default config; the dialog then starts
+    /// from the dialog memory, not from the bad path.
+    #[test]
+    fn a_bad_config_path_is_an_error_and_offers_no_folder() {
+        let f = frame(ColorTag::scene_linear(), 1, "a.exr");
+        let mut s = State::new(Sel { on: true, config: "ocio://default".to_owned(), ..Sel::default() });
+        assert!(s.frame(&f, &SDR).is_ok());
+        assert!(s.err.is_none() && s.active().is_some());
+        s.set_config("no/such/dir/config.ocio".to_owned());
+        assert!(s.err.is_some());
+        s.frame(&f, &SDR).unwrap();
+        assert!(s.err.is_some() && s.active().is_none());
+        assert_eq!(s.start_dir(), None, "nothing loaded yet, and a missing folder is not offered");
+        let (guard, file) = good_config("good");
+        let dir = guard.path().to_path_buf();
+        s.set_config(file.display().to_string());
+        assert!(s.err.is_none(), "{:?}", s.err);
+        assert_eq!(s.start_dir(), Some(dir.clone()));
+        s.set_config("no/such/dir/config.ocio".to_owned());
+        assert!(s.err.is_some());
+        assert_eq!(s.start_dir(), None, "a missing folder is not offered");
+        s.set_config("ocio://default".to_owned());
+        assert!(s.err.is_none(), "a built-in URI loads");
+    }
+
     /// The defaults of the ACES 2.0 CG config, and scene 18 % grey through them at
     /// the value vfx-ocio's reference points give (0.349 encoded for the SDR sRGB view).
     #[test]
     fn default_transform_renders_mid_grey() {
         let o = cg();
-        let n = o.resolve(&Sel::default(), false).unwrap();
-        assert_eq!(n.input, "scene_linear");
+        let n = o.resolve(&Sel::default(), &o.scene(), false).unwrap();
+        assert_eq!(n.input, "ACEScg");
         assert_eq!((n.display.as_str(), n.view.as_str()), ("sRGB - Display", "ACES 2.0 - SDR 100 nits (Rec.709)"));
-        let t = o.transform(&n, false).unwrap();
-        let mut px = [[0.18, 0.18, 0.18, 0.4]];
-        t.display(&mut px, 0.0, 1.0, 1.0);
+        let t = o.transform(&n, None, false).unwrap();
+        let mut px = [[0.18, 0.18, 0.18, 1.0]];
+        t.display(&mut px, &Src::LINEAR, 0.0, 1.0);
         for c in &px[0][..3] {
             assert!((c - 0.349).abs() < 2e-3, "{px:?}");
         }
-        assert_eq!(px[0][3], 0.4, "alpha is the input's");
         eprintln!("default transform: LUT textures = {}", t.has_luts());
     }
 
@@ -894,14 +1292,14 @@ mod tests {
     #[test]
     fn exposure_and_dial_bracket_the_transform() {
         let o = cg();
-        let t = o.transform(&o.resolve(&Sel::default(), false).unwrap(), false).unwrap();
+        let t = tr(&o, &Sel::default(), &o.scene(), false);
         let mut a = [[0.09, 0.09, 0.09, 1.0]];
         let mut b = [[0.18, 0.18, 0.18, 1.0]];
-        t.display(&mut a, 1.0, 1.0, 1.0);
-        t.display(&mut b, 0.0, 1.0, 1.0);
+        t.display(&mut a, &Src::LINEAR, 1.0, 1.0);
+        t.display(&mut b, &Src::LINEAR, 0.0, 1.0);
         assert!((a[0][0] - b[0][0]).abs() < 1e-6, "{a:?} vs {b:?}");
         let mut g = [[0.18, 0.18, 0.18, 1.0]];
-        t.display(&mut g, 0.0, 2.0, 1.0);
+        t.display(&mut g, &Src::LINEAR, 0.0, 2.0);
         assert!((g[0][0] - b[0][0].sqrt()).abs() < 1e-6, "{g:?}");
     }
 
@@ -912,16 +1310,15 @@ mod tests {
     #[test]
     fn exposure_acts_in_scene_linear_for_a_log_input() {
         let o = cg();
-        let lin = o.transform(&o.resolve(&Sel::default(), false).unwrap(), false).unwrap();
-        let log_sel = Sel { input: "ACEScct".into(), ..Sel::default() };
-        let log = o.transform(&o.resolve(&log_sel, false).unwrap(), false).unwrap();
+        let lin = tr(&o, &Sel::default(), &o.scene(), false);
+        let log = tr(&o, &Sel::default(), &o.space(&tag("ACEScct"), Path::new("a.exr"), None).unwrap(), false);
         let light = [[0.18f32, 0.18, 0.18, 1.0], [0.5, 0.2, 0.05, 1.0], [2.0, 1.0, 0.3, 1.0], [0.01, 0.02, 0.005, 1.0]];
         let mut codes = light;
         o.cfg.processor("scene_linear", "ACEScct").unwrap().apply_rgba(&mut codes);
         let ev = 1.5;
         let (mut a, mut b) = (light, codes);
-        lin.display(&mut a, ev, 1.0, 1.0);
-        log.display(&mut b, ev, 1.0, 1.0);
+        lin.display(&mut a, &Src::LINEAR, ev, 1.0);
+        log.display(&mut b, &Src::LINEAR, ev, 1.0);
         for (a, b) in a.iter().zip(&b) {
             for c in 0..3 {
                 assert!((a[c] - b[c]).abs() < 2e-4, "linear {a:?} vs log input {b:?}");
@@ -929,18 +1326,18 @@ mod tests {
         }
         // A gain on the codes (the old rule) is a different, wrong picture.
         let mut gained = codes.map(|p| [p[0] * 2f32.powf(ev), p[1] * 2f32.powf(ev), p[2] * 2f32.powf(ev), p[3]]);
-        log.display(&mut gained, 0.0, 1.0, 1.0);
+        log.display(&mut gained, &Src::LINEAR, 0.0, 1.0);
         assert!(gained.iter().zip(&b).any(|(g, b)| (g[0] - b[0]).abs() > 0.05), "{gained:?} vs {b:?}");
         // The exposure moves both ways on the one processor: 0 EV, then +1.5 again, then
         // 0 EV gives the first picture back exactly.
         let mut first = codes;
-        log.display(&mut first, 0.0, 1.0, 1.0);
+        log.display(&mut first, &Src::LINEAR, 0.0, 1.0);
         assert_ne!(first, b, "the exposure must change the picture");
         let mut up = codes;
-        log.display(&mut up, ev, 1.0, 1.0);
+        log.display(&mut up, &Src::LINEAR, ev, 1.0);
         assert_eq!(up, b);
         let mut back = codes;
-        log.display(&mut back, 0.0, 1.0, 1.0);
+        log.display(&mut back, &Src::LINEAR, 0.0, 1.0);
         assert_eq!(back, first);
     }
 
@@ -948,32 +1345,33 @@ mod tests {
     /// name the config lacks is an error, not a substitute.
     #[test]
     fn only_sdr_is_offered_and_unknown_names_fail() {
-        let o = Ocio::load("ocio://studio-config-latest").unwrap();
+        let o = studio();
+        let scene = o.scene();
         let all: Vec<&str> = o.cfg.display_names();
         assert!(all.contains(&"Rec.2100-PQ - Display"));
         assert!(!o.displays(false).contains(&"Rec.2100-PQ - Display"));
         assert!(o.displays(false).contains(&"sRGB - Display"));
         let hdr = Sel { display: "Rec.2100-PQ - Display".into(), ..Sel::default() };
-        assert!(o.resolve(&hdr, false).is_err());
-        let bad = Sel { input: "no such space".into(), ..Sel::default() };
-        assert!(o.resolve(&bad, false).unwrap_err().to_string().contains("no such space"));
+        assert!(o.resolve(&hdr, &scene, false).is_err());
+        let bad = Sel { scene_view: "no such view".into(), ..Sel::default() };
+        assert!(o.resolve(&bad, &scene, false).unwrap_err().to_string().contains("no such view"));
         // An HDR output offers the PQ display and its HDR views.
         assert!(o.displays(true).contains(&"Rec.2100-PQ - Display"));
-        let n = o.resolve(&hdr, true).unwrap();
-        assert!(o.views(&n.display, true).contains(&"ACES 2.0 - HDR 1000 nits (P3 D65)"));
+        let n = o.resolve(&hdr, &scene, true).unwrap();
+        assert!(o.views(&n.display, &scene.name, true).contains(&"ACES 2.0 - HDR 1000 nits (P3 D65)"));
     }
 
     /// A look replaces the view's looks and changes the picture.
     #[test]
     fn a_look_changes_the_picture() {
-        let o = Ocio::load("ocio://studio-config-latest").unwrap();
+        let o = studio();
         let looks = o.looks();
         let look = *looks.first().expect("the Studio config has looks");
-        let plain = o.transform(&o.resolve(&Sel::default(), false).unwrap(), false).unwrap();
-        let looked = o.transform(&o.resolve(&Sel { look: look.into(), ..Sel::default() }, false).unwrap(), false).unwrap();
+        let plain = tr(&o, &Sel::default(), &o.scene(), false);
+        let looked = tr(&o, &Sel { look: look.into(), ..Sel::default() }, &o.scene(), false);
         let (mut a, mut b) = ([[0.9, 0.2, 0.05, 1.0]], [[0.9, 0.2, 0.05, 1.0]]);
-        plain.display(&mut a, 0.0, 1.0, 1.0);
-        looked.display(&mut b, 0.0, 1.0, 1.0);
+        plain.display(&mut a, &Src::LINEAR, 0.0, 1.0);
+        looked.display(&mut b, &Src::LINEAR, 0.0, 1.0);
         assert_ne!(a, b, "look {look}");
     }
 
@@ -984,15 +1382,18 @@ mod tests {
     /// view reaches ~10x SDR white) where the SDR view stays at white.
     #[test]
     fn linear_is_the_light_of_the_display() {
-        let o = Ocio::load("ocio://studio-config-latest").unwrap();
-        let sdr = o.resolve(&Sel::default(), true).unwrap();
-        let enc = o.transform(&sdr, false).unwrap();
-        let lin = o.transform(&sdr, true).unwrap();
+        let o = studio();
+        let scene = o.scene();
+        let sdr = o.resolve(&Sel::default(), &scene, true).unwrap();
+        let enc = o.transform(&sdr, None, false).unwrap();
+        let lin = o.transform(&sdr, None, true).unwrap();
         assert!(lin.linear() && !enc.linear() && lin.key != enc.key);
+        let hdr_out = Target { hdr: true, white: 240.0, peak: 1000.0 };
         for v in [0.02f32, 0.18, 0.7, 3.0] {
             let (mut a, mut b) = ([[v, v * 0.8, v * 0.5, 1.0]], [[v, v * 0.8, v * 0.5, 1.0]]);
-            enc.display(&mut a, 0.0, 1.0, 1.0);
-            lin.display(&mut b, 0.0, 1.0, lin.gain(240.0));
+            enc.display(&mut a, &Src::LINEAR, 0.0, 1.0);
+            let gain = display_gain(lin.absolute(), &hdr_out);
+            lin.display(&mut b, &Src { gain, ..Src::LINEAR }, 0.0, 1.0);
             for c in 0..3 {
                 // `display` returns the canvas encoding: sRGB-encoded both ways.
                 assert!((a[0][c] - b[0][c]).abs() < 2e-3, "{v}: encoded {:?} vs linear {:?}", a[0], b[0]);
@@ -1001,45 +1402,54 @@ mod tests {
         // Light in display-reference units (gain 1: 1.0 = 100 nits for an HDR view).
         let peak = |t: &Transform| {
             let mut px = [[64.0, 64.0, 64.0, 1.0]];
-            t.display(&mut px, 0.0, 1.0, 1.0);
+            t.display(&mut px, &Src::LINEAR, 0.0, 1.0);
             crate::transfer::eotf(px[0][1])
         };
-        let hdr_sel = Sel { display: "Rec.2100-PQ - Display".into(), view: "ACES 2.0 - HDR 1000 nits (P3 D65)".into(), ..Sel::default() };
-        let hdr = o.transform(&o.resolve(&hdr_sel, true).unwrap(), true).unwrap();
+        let hdr_sel = Sel { display: "Rec.2100-PQ - Display".into(), scene_view: "ACES 2.0 - HDR 1000 nits (P3 D65)".into(), ..Sel::default() };
+        let hdr = tr(&o, &hdr_sel, &scene, true);
         assert!(peak(&hdr) > 5.0, "1000-nit view peak {}", peak(&hdr));
         assert!(peak(&lin) < 1.05, "SDR view peak {}", peak(&lin));
         // An HDR view is absolute: on a 250-nit SDR white its 100 nits are 0.4 of it;
-        // an SDR view (and any encoded transform) is relative.
-        assert_eq!(hdr.gain(250.0), 0.4);
-        assert_eq!((lin.gain(250.0), enc.gain(250.0)), (1.0, 1.0));
+        // an SDR view (and any encoded transform) is relative, and an SDR output never scales.
+        let at = |white| Target { hdr: true, white, peak: 1000.0 };
+        assert_eq!(display_gain(hdr.absolute(), &at(250.0)), 0.4);
+        assert_eq!((display_gain(lin.absolute(), &at(250.0)), display_gain(enc.absolute(), &at(250.0))), (1.0, 1.0));
+        assert_eq!(display_gain(true, &SDR), 1.0);
     }
 
     /// A config change resets the names; OCIO off shows the built-in transform.
     #[test]
     fn state_follows_the_choice() {
+        let f = frame(ColorTag::scene_linear(), 1, "a.exr");
         let mut s = State::new(Sel { on: true, config: "ocio://default".into(), ..Sel::default() });
+        s.frame(&f, &SDR).unwrap();
         assert!(s.active().is_some(), "{:?}", s.err);
-        s.sel.view = "no such view".into();
+        s.sel.scene_view = "no such view".into();
         s.rebuild();
+        s.frame(&f, &SDR).unwrap();
         assert!(s.active().is_none() && s.err.as_deref().is_some_and(|e| e.contains("no such view")));
         s.set_config("ocio://studio-config-latest".into());
-        assert!(s.sel.view.is_empty() && s.active().is_some());
+        s.frame(&f, &SDR).unwrap();
+        assert!(s.sel.scene_view.is_empty() && s.active().is_some());
         // A reload is a new transform (new key), so the tile pipeline rebuilds too.
         let key = s.active().unwrap().key.clone();
         s.reload();
+        s.frame(&f, &SDR).unwrap();
         assert_ne!(s.active().unwrap().key, key);
         // An HDR output makes the transform linear (a new key: the pipeline rebuilds).
         let key = s.active().unwrap().key.clone();
         s.set_hdr(true);
+        s.frame(&f, &SDR).unwrap();
         assert!(s.active().unwrap().linear() && s.active().unwrap().key != key);
         s.set_on(false);
+        s.frame(&f, &SDR).unwrap();
         assert!(s.active().is_none() && s.err.is_none());
     }
 
     #[test]
     fn admitted_alpha_scratch_is_reused_and_preserves_alpha_bits() {
-        let ocio = Ocio::load("ocio://default").unwrap();
-        let transform = ocio.transform(&ocio.resolve(&Sel::default(), false).unwrap(), false).unwrap();
+        let ocio = cg();
+        let transform = tr(&ocio, &Sel::default(), &ocio.scene(), false);
         let alpha_bits = [0x8000_0000, 0x7fc0_1234, 0x3f80_0000, 0x0000_0000];
         let mut scratch = vec![0.0; 4096];
         let allocation = scratch.as_ptr();
@@ -1048,9 +1458,10 @@ mod tests {
             let mut pixels: Vec<[f32; 4]> = (0..4096)
                 .map(|i| [0.18, 0.18, 0.18, f32::from_bits(alpha_bits[i % 4])])
                 .collect();
-            transform.display_scratch(&mut pixels, &mut scratch, 0.0, 1.0, 1.0).unwrap();
+            transform.display_scratch(&mut pixels, &mut scratch, &Src::LINEAR, 0.0, 1.0).unwrap();
             for (i, pixel) in pixels.iter().enumerate() {
                 assert_eq!(pixel[3].to_bits(), alpha_bits[i % 4]);
+                // -0, NaN, 1 and 0 alpha: no partial coverage, so the colour is the opaque one.
                 assert_eq!(crate::transfer::code8(pixel[0]), 89);
             }
             assert_eq!(scratch.as_ptr(), allocation);
@@ -1060,11 +1471,219 @@ mod tests {
 
     #[test]
     fn short_alpha_scratch_refuses_before_changing_pixels() {
-        let ocio = Ocio::load("ocio://default").unwrap();
-        let transform = ocio.transform(&ocio.resolve(&Sel::default(), false).unwrap(), false).unwrap();
+        let ocio = cg();
+        let transform = tr(&ocio, &Sel::default(), &ocio.scene(), false);
         let mut pixels = [[0.18, 0.5, 1.0, f32::from_bits(0x7fc0_4567)]];
         let before = pixels.map(|p| p.map(f32::to_bits));
-        assert!(transform.display_scratch(&mut pixels, &mut [], 1.0, 1.2, 1.0).is_err());
+        assert!(transform.display_scratch(&mut pixels, &mut [], &Src::LINEAR, 1.0, 1.2).is_err());
         assert_eq!(pixels.map(|p| p.map(f32::to_bits)), before);
+    }
+
+    // ── COLOR_PLAN tests ─────────────────────────────────────────────────────
+
+    /// The PQ HDR10 PNG (cICP 9/16/0/1, tagged `pq_rec2020_display`) on a PQ display: the
+    /// viewing rules offer `Video (colorimetric)` (and the data view), never an ACES view; that is
+    /// the default; and the chain to the HDR10 signal (the canvas light at SDR white, nits, PQ)
+    /// gives the file's codes back within one 16-bit code.
+    #[test]
+    fn pq_png_is_an_identity_on_a_pq_display() {
+        let o = studio();
+        let space = o.space(&tag("pq_rec2020_display"), Path::new("frame.pq.png"), None).unwrap();
+        assert_eq!((space.name.as_str(), space.class), ("Rec.2100-PQ - Display", Class::Video));
+        let views = o.views("Rec.2100-PQ - Display", &space.name, true);
+        assert!(!views.iter().any(|v| v.starts_with("ACES")), "{views:?}");
+        let sel = Sel { display: "Rec.2100-PQ - Display".into(), ..Sel::default() };
+        let names = o.resolve(&sel, &space, true).unwrap();
+        assert_eq!(names.view, "Video (colorimetric)");
+        let t = o.transform(&names, None, true).unwrap();
+        assert!(t.absolute());
+        let target = Target { hdr: true, white: 203.0, peak: 1000.0 };
+        let src = Src { gain: display_gain(t.absolute(), &target), ..Src::LINEAR };
+        // f32 light holds ~7 digits per pixel; PQ's toe turns a component 10^8 below its
+        // neighbours (code 1 next to 10000 nits) into noise codes, so the triples stay within a
+        // range f32 carries.
+        let codes: Vec<[u16; 3]> = vec![[0, 0, 0], [20000, 30000, 40000], [32768, 32768, 32768], [41000, 38000, 12000], [65535, 52000, 30000], [8000, 9000, 7000]];
+        let mut px: Vec<[f32; 4]> = codes.iter().map(|c| [c[0], c[1], c[2]].map(|k| f32::from(k) / 65535.0)).map(|[r, g, b]| [r, g, b, 1.0]).collect();
+        t.display(&mut px, &src, 0.0, 1.0);
+        for (p, want) in px.iter().zip(&codes) {
+            let light = [p[0], p[1], p[2]].map(crate::transfer::eotf);
+            let nits = crate::present::rec2020_nits(light, target.white);
+            for (n, w) in nits.iter().zip(want) {
+                let got = (crate::present::pq(*n) * 65535.0).round();
+                assert!((got - f32::from(*w)).abs() <= 1.0, "{want:?} -> {nits:?} -> {got}");
+            }
+        }
+    }
+
+    /// An sRGB still on the sRGB display, whether tagged as a texture (vfx-io's PNG default,
+    /// `srgb_rec709_scene`) or as a display (`srgb_rec709_display`): `Video (colorimetric)` is
+    /// the default view and the 8-bit codes come back within one code.
+    #[test]
+    fn srgb_png_is_an_identity_on_an_srgb_display() {
+        let o = studio();
+        for t in ["srgb_rec709_scene", "srgb_rec709_display"] {
+            let space = o.space(&tag(t), Path::new("a.png"), None).unwrap();
+            assert_eq!(space.class, Class::Video, "{t}");
+            let names = o.resolve(&Sel::default(), &space, false).unwrap();
+            assert_eq!((names.display.as_str(), names.view.as_str()), ("sRGB - Display", "Video (colorimetric)"), "{t}");
+            let tr = o.transform(&names, None, false).unwrap();
+            for k in [0u8, 1, 17, 64, 128, 200, 254, 255] {
+                let v = f32::from(k) / 255.0;
+                let mut px = [[v, v, v, 1.0]];
+                tr.display(&mut px, &Src::LINEAR, 0.0, 1.0);
+                let got = crate::transfer::code8(px[0][1]);
+                assert!(got.abs_diff(k) <= 1, "{t}: {k} -> {got}");
+            }
+        }
+    }
+
+    /// An EXR with Rec.709 chromaticities through an ACES view is vfx-ocio's own processor from
+    /// `lin_rec709_scene`; an untagged EXR follows the file rules (Studio: EXR -> ACES2065-1).
+    #[test]
+    fn exr_tags_follow_chromaticities_then_file_rules() {
+        let o = studio();
+        let rec709 = ColorTag { space: "lin_rec709_scene".into(), origin: TagOrigin::Chromaticities };
+        let space = o.space(&rec709, Path::new("a.exr"), None).unwrap();
+        assert_eq!(space.class, Class::Scene);
+        let names = o.resolve(&Sel::default(), &space, false).unwrap();
+        assert!(names.view.starts_with("ACES 2.0"), "{names:?}");
+        let t = o.transform(&names, None, false).unwrap();
+        let reference = o.cfg.display_processor("lin_rec709_scene", &names.display, &names.view).unwrap();
+        let light = [[0.18f32, 0.18, 0.18, 1.0], [0.9, 0.3, 0.05, 1.0], [4.0, 2.0, 0.5, 1.0]];
+        let (mut a, mut b) = (light, light);
+        t.display(&mut a, &Src::LINEAR, 0.0, 1.0);
+        reference.apply_rgba(&mut b);
+        for (a, b) in a.iter().zip(&b) {
+            for c in 0..3 {
+                assert!((a[c] - b[c]).abs() < 1e-4, "{a:?} vs {b:?}");
+            }
+        }
+        let untagged = o.space(&ColorTag::scene_linear(), Path::new("/shots/a.0001.exr"), None).unwrap();
+        assert_eq!(untagged.name, "ACES2065-1");
+        assert!(untagged.how.contains("file rules"), "{}", untagged.how);
+    }
+
+    /// An untagged integer still follows the file rules; when only their default rule matches,
+    /// the explicit fallback (`srgb_rec709_display`) names it: `sRGB - Display` in Studio, which
+    /// is also what that default rule says.
+    #[test]
+    fn untagged_png_follows_the_file_rules() {
+        let o = studio();
+        let untagged = ColorTag { space: "srgb_rec709_display".into(), origin: TagOrigin::Untagged };
+        let space = o.space(&untagged, Path::new("C:/plates/a.png"), None).unwrap();
+        assert_eq!(space.name, "sRGB - Display");
+        assert_eq!(o.cfg.colorspace_from_filepath("C:/plates/a.png"), Some("sRGB - Display"));
+    }
+
+    /// A tag the config lacks is a typed error, not a substitute: the state shows no OCIO
+    /// transform and says why, the built-in decode still knows the curve, and an override fixes
+    /// it.
+    #[test]
+    fn an_unknown_tag_is_a_typed_error() {
+        let o = studio();
+        let err = o.space(&tag("KodakLog"), Path::new("a.cin"), None).unwrap_err();
+        assert!(matches!(&err, SpaceError::Unknown { space, .. } if space == "KodakLog"), "{err}");
+        let f = frame(tag("KodakLog"), 7, "a.cin");
+        let mut s = State::new(Sel { on: true, config: "ocio://studio-config-latest".into(), ..Sel::default() });
+        let src = s.frame(&f, &SDR).unwrap();
+        assert!(s.active().is_none());
+        assert!(s.err.as_deref().is_some_and(|e| e.contains("KodakLog")), "{:?}", s.err);
+        assert_eq!(src.builtin.tf, exr_import::Tf::Cineon);
+        s.set_override(Some("ADX10".into()));
+        s.frame(&f, &SDR).unwrap();
+        assert!(s.active().is_some() && s.err.is_none(), "{:?}", s.err);
+        assert!(s.shown().and_then(|x| x.space.clone()).is_some_and(|x| x.is_ok_and(|x| x.how == "override")));
+    }
+
+    /// Associated alpha: the OCIO twin's canvas pixel is the transform of the unpremultiplied
+    /// colour, premultiplied in light; straight alpha: of the colour as stored.
+    #[test]
+    fn alpha_is_processed_unpremultiplied() {
+        let o = studio();
+        let t = tr(&o, &Sel::default(), &o.scene(), false);
+        let (c, a) = ([0.4f32, 0.2, 0.1], 0.5f32);
+        let opaque = |rgb: [f32; 3]| {
+            let mut px = [[rgb[0], rgb[1], rgb[2], 1.0]];
+            t.display(&mut px, &Src::LINEAR, 0.0, 1.0);
+            [px[0][0], px[0][1], px[0][2]]
+        };
+        let want = opaque(c).map(|d| crate::transfer::oetf(crate::transfer::eotf(d) * a));
+        let mut assoc = [[c[0] * a, c[1] * a, c[2] * a, a]];
+        t.display(&mut assoc, &Src::LINEAR, 0.0, 1.0);
+        let mut straight = [[c[0], c[1], c[2], a]];
+        t.display(&mut straight, &Src { straight: true, ..Src::LINEAR }, 0.0, 1.0);
+        for k in 0..3 {
+            assert!((assoc[0][k] - want[k]).abs() < 1e-5, "{assoc:?} vs {want:?}");
+            assert!((straight[0][k] - want[k]).abs() < 1e-5, "{straight:?} vs {want:?}");
+        }
+        assert_eq!((assoc[0][3], straight[0][3]), (a, a));
+        // Premultiplying the display value directly (the old chain) is a different picture.
+        let mut old = [[c[0] * a, c[1] * a, c[2] * a, 1.0]];
+        t.display(&mut old, &Src::LINEAR, 0.0, 1.0);
+        assert!((old[0][0] - want[0]).abs() > 1e-3);
+    }
+
+    /// The built-in decode (no OCIO) of each display tag equals OCIO's own colour space taken to
+    /// its display reference and on to linear Rec.709: sRGB, gamma 2.2 / 2.4, Display P3, PQ
+    /// (units of 100 nits) and HLG (its 1000-nit reference display).
+    #[test]
+    fn builtin_decode_matches_the_config() {
+        let o = studio();
+        let to709 = vfx_ocio::Transform::Matrix(MatrixTransform {
+            name: String::new(),
+            matrix: conversion_matrix_from_xyz_d65(&REC709, Adaptation::None).unwrap(),
+            offset: [0.0; 4],
+            direction: TransformDirection::Forward,
+        });
+        let codes = [0.0f32, 0.02, 0.1, 0.25, 0.5, 0.58, 0.75, 0.9, 1.0];
+        for t in ["srgb_rec709_display", "g22_rec709_display", "g24_rec709_display", "srgb_p3d65_display", "pq_rec2020_display", "hlg_rec2020_display"] {
+            let cs = o.cfg.colorspace(t).unwrap_or_else(|| panic!("{t}"));
+            let to_ref = cs.to_display_reference().cloned().or_else(|| cs.from_display_reference().map(|x| x.clone().inverse())).unwrap();
+            let chain = vfx_ocio::Transform::Group(GroupTransform { name: String::new(), transforms: vec![to_ref, to709.clone()], direction: TransformDirection::Forward });
+            let proc = o.cfg.processor_from_transform(&chain, TransformDirection::Forward).unwrap();
+            let builtin = exr_import::builtin(&tag(t)).unwrap();
+            for &r in &codes {
+                for rgb in [[r, r, r], [r, r * 0.5, 1.0 - r]] {
+                    let mut want = [[rgb[0], rgb[1], rgb[2], 1.0]];
+                    proc.apply_rgba(&mut want);
+                    let got = crate::transfer::decode(&builtin, rgb);
+                    for c in 0..3 {
+                        let tol = 2e-4 + 2e-4 * want[0][c].abs();
+                        assert!((got[c] - want[0][c]).abs() < tol, "{t} {rgb:?}: built-in {got:?} vs OCIO {:?}", want[0]);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Our own HDR Save view EXR (display light, `whiteLuminance`, no `colorInteropID`) is
+    /// absolute CIE XYZ through the config's display reference role: display-referred, so the
+    /// sRGB display shows it colorimetrically (`Video (colorimetric)`), 100 nits at white.
+    #[test]
+    fn white_luminance_exr_is_display_light() {
+        let o = studio();
+        let mut h = exr_core::header::Header::new();
+        h.add_white_luminance(100.0).unwrap();
+        let space = o.space(&exr_import::exr_tag(&h).unwrap(), Path::new("shot.exr"), None).unwrap();
+        assert_eq!((space.name.as_str(), space.class), ("CIE XYZ-D65 - Display-referred", Class::Video));
+        let names = o.resolve(&Sel::default(), &space, false).unwrap();
+        assert_eq!(names.view, "Video (colorimetric)");
+        let t = o.transform(&names, space.pre, false).unwrap();
+        let mut px = [[1.0, 1.0, 1.0, 1.0], [0.18, 0.18, 0.18, 1.0]];
+        t.display(&mut px, &Src::LINEAR, 0.0, 1.0);
+        assert!((px[0][1] - 1.0).abs() < 1e-3, "{px:?}");
+        assert!((px[1][1] - crate::transfer::oetf(0.18)).abs() < 1e-3, "{px:?}");
+    }
+
+    /// The pixel inspector's scene-linear values: the stored value through the config from the
+    /// frame's space (an sRGB texture's 0.5 is 0.214 in Rec.709, a different triple in ACEScg).
+    #[test]
+    fn inspector_shows_scene_linear() {
+        let f = frame(tag("srgb_rec709_scene"), 3, "a.png");
+        let mut s = State::new(Sel { on: true, config: "ocio://studio-config-latest".into(), ..Sel::default() });
+        s.frame(&f, &SDR).unwrap();
+        let lin = s.scene_linear([0.5, 0.5, 0.5]).unwrap();
+        // Neutral stays neutral; 0.214 Rec.709 is 0.214 grey in ACEScg (same white after CAT).
+        assert!(lin.iter().all(|v| (v - 0.214).abs() < 2e-3), "{lin:?}");
     }
 }

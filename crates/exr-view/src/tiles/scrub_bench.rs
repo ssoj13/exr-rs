@@ -116,8 +116,7 @@ fn resident_frame_switch_cost() {
         tonemap: 0,
         nearest: false,
         hdr: false,
-        ocio_gain: 1.0,
-        light_gain: 1.0,
+        src: crate::transfer::Src::LINEAR,
     };
 
     let mut img = ImageBackend::from_frame(Arc::clone(first));
@@ -157,7 +156,7 @@ fn resident_frame_switch_cost() {
             let present_total = ms(switch);
 
             let t = Instant::now();
-            img.ensure_linear(&d, &q, &mut renderer, &mut target, Some(&mut Idle)).expect("scope source");
+            img.ensure_linear(&d, &q, &mut renderer, &mut target, Some(&mut Idle), None).expect("scope source");
             q.submit([]);
             d.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).expect("poll");
             record("4 scopes ensure_linear + gpu", ms(t), 0, warm);

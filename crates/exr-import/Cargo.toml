@@ -1,7 +1,7 @@
 [package]
 authors.workspace = true
 name = "exr-import"
-description = "Reads every non-EXR still format vfx-io decodes into an exr-core image: scene-linear, associated alpha"
+description = "Reads every non-EXR still format vfx-io decodes into an exr-core image as stored, with its colour tag"
 keywords = ["exr", "image", "dpx", "png", "vfx"]
 categories = ["multimedia::images"]
 version.workspace = true
@@ -24,9 +24,8 @@ vfx-io = { git = "ssh://git@github.com/ssoj13/oiio-rs.git", branch = "main", def
     "png", "jpeg", "tiff", "dpx", "hdr", "bmp", "cineon", "targa", "sgi", "ico", "gif",
     "softimage", "pnm", "iff", "rla", "webp", "rayon",
 ] }
-# The curves: sRGB, Rec.709 and pure-gamma decodes come from here, never re-derived.
-vfx-transfer = { git = "ssh://git@github.com/ssoj13/oiio-rs.git", branch = "main" }
-# Primaries and the RGB -> RGB matrix (with chromatic adaptation) for non-Rec.709 sources.
+# Primaries and the RGB -> RGB / XYZ matrices (with chromatic adaptation) of the built-in decode
+# and the EXR whiteLuminance tag.
 vfx-primaries = { git = "ssh://git@github.com/ssoj13/oiio-rs.git", branch = "main" }
 
 [dev-dependencies]

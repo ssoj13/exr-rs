@@ -157,11 +157,14 @@ pub struct DecodedFrame {
     pub display_window: Box2i,
     /// Validated typed header pixel aspect ratio, retained for canonical processing.
     pub pixel_aspect: f32,
-    /// Absolute light: the nits of RGB (1, 1, 1), from the standard `whiteLuminance` attribute
-    /// (OpenEXR `ImfStandardAttributes.h`) or an imported PQ still (`exr_import::Loaded::white_nits`).
-    /// The display shows such a frame at those nits whatever the SDR white is
-    /// ([`Self::light_gain`]); `None` = scene-relative, 1.0 shown at SDR white.
-    pub white_nits: Option<f32>,
+    /// The colour space of the colour channels and where it came from (`exr_import::exr_tag` for
+    /// an EXR part, `exr_import::load` for a foreign still). The pixels stay as the file holds
+    /// them; the display converts once from this space (`ocio::State::frame`, or the built-in
+    /// decode `exr_import::builtin` without OCIO).
+    pub tag: exr_import::ColorTag,
+    /// The alpha channel is straight (unassociated, as PNG stores it); `false` = associated
+    /// (every EXR) or no alpha. The tile shader unpremultiplies / premultiplies by this.
+    pub straight: bool,
     /// EXR channel names, in header (alphabetical) order — same order as
     /// [`Self::channels`] and the indices in [`Self::layers`].
     pub channel_names: Vec<String>,
@@ -295,7 +298,8 @@ impl DecodedFrame {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: validated_aspect(header.pixel_aspect_ratio().map_err(LoadError::from_exr)?)?,
-            white_nits: white_nits_of(header)?,
+            tag: tag_of(header)?,
+            straight: false,
         })
     }
 
@@ -310,18 +314,9 @@ impl DecodedFrame {
         frame.map(|f| Self { version, ..f })
     }
 
-    /// The gain on this frame's light for `target`: an absolute frame's pixels reach the nits
-    /// they hold (`white_nits` per 1.0) on an HDR output whatever its SDR white is; on SDR,
-    /// BT.2408's HDR reference white (203 nits) is SDR white. A scene-relative frame is 1.0.
-    pub fn light_gain(&self, target: &crate::present::Target) -> f32 {
-        let white = if target.hdr { target.white } else { crate::present::HDR_REF_WHITE };
-        self.white_nits.map_or(1.0, |nits| nits / white)
-    }
-
-    /// A non-EXR still (`exr-import`: PNG, DPX, HDR, ...), always resident. It arrives as
-    /// scene-linear associated-alpha channels, so everything downstream (exposure, OCIO, scopes,
-    /// readout, effects, Save view, sequences) sees a frame like any EXR's. The source colour
-    /// space, depth and alpha handling head the Metadata panel.
+    /// A non-EXR still (`exr-import`: PNG, DPX, HDR, ...), always resident. It arrives with its
+    /// values as read, its colour tag and its alpha kind, so the display converts it from its own
+    /// colour space like any EXR. The source format and depth head the Metadata panel.
     fn import(path: &Path) -> Result<DecodedFrame, LoadError> {
         log::info!("load start {} (exr-import)", path.display());
         let loaded = exr_import::load(path).map_err(|e| LoadError::Read(e.to_string()))?;
@@ -346,7 +341,8 @@ impl DecodedFrame {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
-            white_nits: loaded.white_nits,
+            tag: loaded.tag,
+            straight: loaded.straight,
         })
     }
 
@@ -408,7 +404,8 @@ impl DecodedFrame {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: validated_aspect(header.pixel_aspect_ratio().map_err(LoadError::from_exr)?)?,
-            white_nits: white_nits_of(header)?,
+            tag: tag_of(header)?,
+            straight: false,
         })
     }
 
@@ -437,13 +434,11 @@ impl DecodedFrame {
         // The facade image does not keep every attribute (it drops the derived and
         // structural ones), so the panel reads the file's own header. A file the
         // facade decodes is one `peek_header` reads, so `None` here is not expected.
-        let metadata = match header {
-            Some(h) => metadata_of(h),
-            None => {
-                log::warn!("{}: header unreadable for the Metadata panel", path.display());
-                Vec::new()
-            }
-        };
+        // The colour tag lives in the header too: a file whose header cannot be read on its own
+        // has no tag to show it by, an error rather than a guessed colour space.
+        let header = header.ok_or_else(|| LoadError::Read(format!("{}: header unreadable", path.display())))?;
+        let metadata = metadata_of(header);
+        let tag = tag_of(header)?;
         let pixel_aspect = validated_aspect(
             img.attributes().get("pixelAspectRatio")
                 .and_then(|a| a.as_any().downcast_ref::<exr_core::attr::FloatAttribute>())
@@ -497,7 +492,8 @@ impl DecodedFrame {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect,
-            white_nits: header.map(white_nits_of).transpose()?.flatten(),
+            tag,
+            straight: false,
         })
     }
 
@@ -719,8 +715,10 @@ struct ScopeTex {
     tex: wgpu::Texture,
     view: wgpu::TextureView,
     cap: (u32, u32),
-    /// `(processed, source generation or accepted revision, level)` uploaded.
-    key: Option<(bool, u64, u32)>,
+    /// `(processed, source generation or accepted revision, level, display look)` uploaded; the
+    /// look is `export::Look::id` of the display transform the texels went through, 0 for the
+    /// stored values.
+    key: Option<(bool, u64, u32, u64)>,
 }
 
 impl DisplayTarget {
@@ -746,11 +744,12 @@ impl DisplayTarget {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         pixels: crate::consumers::AcceptedPixels,
+        display: Option<&crate::export::Look>,
     ) -> Option<(&wgpu::TextureView, u32, u32)> {
         let max_dim = device.limits().max_texture_dimension_2d;
         let level = pixels.level(SCOPE_MAX_PIXELS, max_dim);
         let (w, h) = pixels.grid().level_size(level);
-        let key = (true, pixels.revision(), level);
+        let key = (true, pixels.revision(), level, display.map_or(0, crate::export::Look::id));
         if self.scope.as_ref().is_some_and(|scope| scope.key == Some(key)) {
             return self.scope.as_ref().map(|scope| (&scope.view, w, h));
         }
@@ -775,6 +774,7 @@ impl DisplayTarget {
         }
         let scope = self.scope.as_mut()?;
         scope.key = None;
+        let mut shaded = Vec::new();
         for y in 0..h {
             let row = match rows.row(y) {
                 Ok(row) => row,
@@ -782,6 +782,18 @@ impl DisplayTarget {
                     log::error!("processed scope row: {error}");
                     return None;
                 }
+            };
+            let row = match display {
+                Some(look) => {
+                    shaded.clear();
+                    shaded.extend_from_slice(row);
+                    if let Err(e) = crate::export::shade_flat(&mut shaded, look) {
+                        log::error!("processed scope row display transform: {e:#}");
+                        return None;
+                    }
+                    &shaded[..]
+                }
+                None => row,
             };
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
@@ -1704,10 +1716,11 @@ impl ImageBackend {
         renderer: &mut egui_wgpu::Renderer,
         target: &mut DisplayTarget,
         stage: Option<&mut (dyn ImageStage + '_)>,
+        display: Option<&crate::export::Look>,
     ) -> Option<(wgpu::TextureView, u32, u32)> {
         #[cfg(feature = "ofx")]
         if let Some(pixels) = target.accepted_pixels() {
-            return target.ensure_processed_linear(device, queue, pixels).map(|(view, w, h)| (view.clone(), w, h));
+            return target.ensure_processed_linear(device, queue, pixels, display).map(|(view, w, h)| (view.clone(), w, h));
         }
         if self.width == 0 || self.height == 0 {
             return None;
@@ -1728,12 +1741,14 @@ impl ImageBackend {
         let grid = *target.tiles.grid()?;
         let level = crate::tiles::source::finest_level(&grid, SCOPE_MAX_PIXELS, max_dim);
         let (lw, lh) = grid.level_size(level);
-        let key = (false, target.tiles.generation(), level);
+        let key = (false, target.tiles.generation(), level, display.map_or(0, crate::export::Look::id));
 
         // While the resident display shows this content, its original texture
         // is level 0 of the same source: read it instead of uploading the frame
         // a second time (whichever of viewport and scopes runs first uploads).
+        // Display values are the scopes' own (the CPU twin of the tile shader).
         if level == 0
+            && display.is_none()
             && matches!(target.path, Some(DisplayPath::Direct { .. }))
             && self.direct_eligible(false, max_dim)
             && let Some(gpu) = renderer.callback_resources.get_mut::<TileGpu>()
@@ -1767,6 +1782,17 @@ impl ImageBackend {
             // shows its placeholder and asks again next frame.
             let (_, pixels) = target.tiles.scope_level(SCOPE_MAX_PIXELS, max_dim)?;
             log::debug!("scope source: level {level} ({lw}x{lh})");
+            let pixels = match display {
+                Some(look) => {
+                    let mut shaded = pixels.to_vec();
+                    if let Err(e) = crate::export::shade_flat(&mut shaded, look) {
+                        log::error!("scope source display transform: {e:#}");
+                        return None;
+                    }
+                    Arc::new(shaded)
+                }
+                None => pixels,
+            };
             let scope = target.scope.as_mut()?;
             let mut lap = crate::timing::Lap::start("scope upload");
             lap.bytes(u64::from(lw) * u64::from(lh) * u64::from(LINEAR_TEXEL_SIZE));
@@ -2316,14 +2342,10 @@ fn validated_aspect(value: f32) -> Result<f32, LoadError> {
     else { Err(LoadError::Read("pixelAspectRatio must be finite and positive".into())) }
 }
 
-/// The header's `whiteLuminance` (nits of RGB 1, 1, 1), `None` when absent.
-fn white_nits_of(header: &Header) -> Result<Option<f32>, LoadError> {
-    if !header.has_white_luminance() {
-        return Ok(None);
-    }
-    let nits = *header.white_luminance().map_err(LoadError::from_exr)?;
-    if nits.is_finite() && nits > 0.0 { Ok(Some(nits)) }
-    else { Err(LoadError::Read(format!("whiteLuminance {nits} must be finite and positive"))) }
+/// The colour tag of an EXR part (`exr_import::exr_tag`: `colorInteropID`, `whiteLuminance`,
+/// `chromaticities`, else untagged).
+fn tag_of(header: &Header) -> Result<exr_import::ColorTag, LoadError> {
+    exr_import::exr_tag(header).map_err(|e| LoadError::Read(e.to_string()))
 }
 
 // ── Tests (headless — the load + materialize seam, no GPU) ─────────────────────
@@ -2363,7 +2385,8 @@ pub(crate) mod tests_support {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
-            white_nits: None,
+            tag: exr_import::ColorTag::scene_linear(),
+            straight: false,
         }
     }
 }
@@ -2592,9 +2615,9 @@ pub(crate) mod tests {
         enc.write_header().unwrap().write_image_data(&px).unwrap();
     }
 
-    /// A PNG becomes a resident linear frame through `exr-import` (the only door for non-EXR
-    /// files): sRGB 128 decodes to 0.2158605, straight alpha 128 premultiplies in linear light,
-    /// and the Metadata panel says where it came from.
+    /// A PNG becomes a resident frame through `exr-import` (the only door for non-EXR files) with
+    /// its codes as stored (128 stays 128/255, straight alpha not multiplied), its colour tag and
+    /// its alpha kind; the Metadata panel says where it came from.
     #[test]
     fn a_png_enters_through_exr_import() {
         let tmp = tempfile::Builder::new().prefix("exr-view-png-").tempdir().unwrap();
@@ -2603,13 +2626,14 @@ pub(crate) mod tests {
         write_png(&path, [128, 128, 128, 128]);
         let frame = DecodedFrame::open(&path, 0).unwrap();
         let sample = |n: &str| frame.channels.iter().find(|(c, _)| c == n).and_then(|(_, d)| d.sample_f32(0)).unwrap();
-        let alpha = 128.0 / 255.0;
-        assert!((sample("R") - 0.215_860_5 * alpha).abs() < 2e-4, "{}", sample("R"));
-        assert!((sample("A") - alpha).abs() < 2e-4);
+        let code = 128.0 / 255.0;
+        assert!((sample("R") - code).abs() < 2e-4, "{}", sample("R"));
+        assert!((sample("A") - code).abs() < 2e-4);
+        assert!(frame.straight);
+        assert_eq!(frame.tag, exr_import::ColorTag { space: "srgb_rec709_scene".into(), origin: exr_import::TagOrigin::File });
         assert_eq!((frame.width, frame.height, frame.file_types.is_none()), (1, 1, true));
         let meta = |k: &str| frame.metadata.iter().find(|m| m.key == k).map(|m| m.value.as_str());
         assert_eq!(meta("Source format"), Some("Png"), "came through exr-import");
-        assert_eq!(meta("Source alpha"), Some("straight, premultiplied in linear light"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -2755,7 +2779,8 @@ pub(crate) mod tests {
                 spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
-            white_nits: None,
+            tag: exr_import::ColorTag::scene_linear(),
+            straight: false,
             },
             w,
             h,
@@ -2791,7 +2816,8 @@ pub(crate) mod tests {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
-            white_nits: None,
+            tag: exr_import::ColorTag::scene_linear(),
+            straight: false,
         });
         let mut img = ImageBackend::from_frame(frame);
 
@@ -2862,7 +2888,8 @@ pub(crate) mod tests {
                 spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
-            white_nits: None,
+            tag: exr_import::ColorTag::scene_linear(),
+            straight: false,
             };
             let group = frame.resolve_layer(layer);
             let mut buf = Vec::new();
@@ -2901,7 +2928,8 @@ pub(crate) mod tests {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
-            white_nits: None,
+            tag: exr_import::ColorTag::scene_linear(),
+            straight: false,
         });
         let mut img = ImageBackend::from_frame(frame);
         img.set_view(&Selection::layer("depth"));
@@ -2971,7 +2999,8 @@ pub(crate) mod tests {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
-            white_nits: None,
+            tag: exr_import::ColorTag::scene_linear(),
+            straight: false,
         }));
         assert_eq!(img.pixel_at(2, 0), None);
         assert_eq!(img.pixel_at(0, 2), None);
@@ -2997,7 +3026,8 @@ pub(crate) mod tests {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
-            white_nits: None,
+            tag: exr_import::ColorTag::scene_linear(),
+            straight: false,
         };
         let b = |x0, y0, x1, y1| {
             Box2i::from_min_max(imath_rs::V2i::new(x0, y0), imath_rs::V2i::new(x1, y1))
@@ -3041,7 +3071,8 @@ pub(crate) mod tests {
                 spans: OnceLock::new(),
             version: None,
             pixel_aspect: 1.0,
-            white_nits: None,
+            tag: exr_import::ColorTag::scene_linear(),
+            straight: false,
             })
         };
         let mut img = ImageBackend::from_frame(frame(0.25, 1));
@@ -3090,7 +3121,8 @@ pub(crate) mod tests {
             spans: OnceLock::new(),
             version: None,
             pixel_aspect: f.pixel_aspect,
-            white_nits: f.white_nits,
+            tag: f.tag.clone(),
+            straight: f.straight,
         }
     }
 

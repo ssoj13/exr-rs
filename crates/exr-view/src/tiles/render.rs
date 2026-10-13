@@ -2,15 +2,17 @@
 //! visible tile, drawn straight into egui's render pass through an
 //! `egui_wgpu` paint callback.
 //!
-//! The fragment shader is the display transform: exposure x 2^EV, the gamma dial,
-//! channel isolate and the sRGB OETF spliced from [`crate::transfer`]. It writes
-//! the canvas (`present::CANVAS_FORMAT`) in the canvas encoding, extended sRGB. What it
-//! stores is the canvas contract of `egui_display::backdrop`: encoded ASSOCIATED light,
-//! `rgb = oetf(display(raw.rgb))` of the premultiplied EXR texel, `a = raw.a`, never
-//! divided by alpha (a flare texel with light and no coverage is legal and stays). That
-//! differs from egui's UI (`encode(straight) * alpha`) exactly where the present pass's
-//! backdrop composite needs it to: `eotf(rgb) + backdrop * (1 - a)` is OVER in linear
-//! light. The blend onto the canvas is egui-wgpu's premultiplied one; dithering and the
+//! The fragment shader is the display transform of a frame's stored values: the colour
+//! unpremultiplied (associated alpha) or taken as it is (straight), the frame's built-in decode
+//! (`transfer::decode`: its tag's curve and primaries) or the OCIO transform of its colour space,
+//! the display gain, exposure x 2^EV, the gamma dial, channel isolate and the sRGB OETF spliced
+//! from [`crate::transfer`], then premultiplied in light. It writes the canvas
+//! (`present::CANVAS_FORMAT`) in the canvas encoding, extended sRGB. What it stores is the canvas
+//! contract of `egui_display::backdrop`: encoded ASSOCIATED light, `rgb = oetf(L * a)` of the
+//! colour's display light `L`, `a = raw.a` (`transfer::premul`; an associated texel with light
+//! and no coverage, a flare, is legal and stays as additive light). That differs from egui's UI
+//! (`encode(straight) * alpha`) exactly where the present pass's backdrop composite needs it to:
+//! `eotf(rgb) + backdrop * (1 - a)` is OVER in linear light. The blend onto the canvas is egui-wgpu's premultiplied one; dithering and the
 //! surface's own encoding are the present pass's (`present.rs`), so this shader does not
 //! know the monitor.
 //!
@@ -96,12 +98,9 @@ pub struct Look {
     pub nearest: bool,
     /// The output is HDR: negatives are kept (else clipped, `transfer::canvas`).
     pub hdr: bool,
-    /// Gain on a linear OCIO transform's light (`ocio::Transform::gain`).
-    pub ocio_gain: f32,
-    /// Gain on the colour image's source light: an absolute-light frame's nits per 1.0 over the
-    /// SDR white (`DecodedFrame::light_gain`), 1.0 for scene-relative frames. Isolated channels
-    /// are data and stay unscaled.
-    pub light_gain: f32,
+    /// How the frame's stored values are read: the built-in decode, the alpha kind and the gain
+    /// on the colour image's display light (`ocio::State::frame`).
+    pub src: crate::transfer::Src,
 }
 
 /// One frame's draw: instances grouped by atlas page.
@@ -124,9 +123,16 @@ struct Uniforms {
     page_size: f32,
     tonemap: u32,
     hdr: u32,
-    ocio_gain: f32,
-    light_gain: f32,
-    _pad: [f32; 3],
+    gain: f32,
+    curve: u32,
+    curve_gamma: f32,
+    straight: u32,
+    /// The matrix applies (a source not in Rec.709 primaries; `transfer::decode`).
+    rotate: u32,
+    /// The rows of the built-in decode's matrix into Rec.709 (`w` unused).
+    m0: [f32; 4],
+    m1: [f32; 4],
+    m2: [f32; 4],
 }
 
 /// The WGSL of the tile pipeline; with `ocio` the colour image goes through the
@@ -137,17 +143,17 @@ pub(crate) fn shader_src(ocio: Option<&Transform>) -> String {
     // linear one, which is then encoded like the built-in chain.
     let colour = match ocio {
         Some(t) if t.linear() => {
-            "let o = ocio_transform(lit);
-        let l = o.rgb * u.ocio_gain;
-        out_rgb = vec3(srgb_oetf(apply_gamma(l.r)), srgb_oetf(apply_gamma(l.g)), srgb_oetf(apply_gamma(l.b)));"
+            "let o = ocio_transform(vec4(c, 1.0));
+        let l = o.rgb * u.gain;
+        d = vec3(srgb_oetf(apply_gamma(l.r)), srgb_oetf(apply_gamma(l.g)), srgb_oetf(apply_gamma(l.b)));"
         }
         Some(_) => {
-            "let o = ocio_transform(lit);
-        out_rgb = vec3(apply_gamma(o.r), apply_gamma(o.g), apply_gamma(o.b));"
+            "let o = ocio_transform(vec4(c, 1.0));
+        d = vec3(apply_gamma(o.r), apply_gamma(o.g), apply_gamma(o.b));"
         }
         None => {
-            "let rgb = tone(lit.rgb * u.exposure_mult, u.tonemap);
-        out_rgb = vec3(
+            "let rgb = tone(decode(c) * (u.gain * u.exposure_mult), u.tonemap);
+        d = vec3(
             srgb_oetf(apply_gamma(rgb.r)),
             srgb_oetf(apply_gamma(rgb.g)),
             srgb_oetf(apply_gamma(rgb.b)),
@@ -164,11 +170,14 @@ struct Uniforms {{
     page_size:     f32,
     tonemap:       u32,
     hdr:           u32,
-    ocio_gain:     f32,
-    light_gain:    f32,
-    _pad0:         f32,
-    _pad1:         f32,
-    _pad2:         f32,
+    gain:          f32,
+    curve:         u32,
+    curve_gamma:   f32,
+    straight:      u32,
+    rotate:        u32,
+    m0:            vec4<f32>,
+    m1:            vec4<f32>,
+    m2:            vec4<f32>,
 }}
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -202,6 +211,9 @@ fn vs_main(
 }}
 
 {oetf}
+{eotf}
+{decode}
+{alpha}
 {tone}
 fn apply_gamma(v: f32) -> f32 {{
     // Mirrored like `transfer::dial`.
@@ -227,8 +239,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {{
     var out_rgb: vec3<f32>;
     var out_a: f32 = raw.a;
     if u.channel_mode == 0u {{
-        let lit = vec4(raw.rgb * u.light_gain, raw.a);
+        // Display transforms are not linear: they take the colour, not premultiplied values.
+        let c = unpremul(raw.rgb, raw.a);
+        var d: vec3<f32>;
         {colour}
+        out_rgb = premul(d, raw.a);
     }} else {{
         var val: f32;
         switch u.channel_mode {{
@@ -238,7 +253,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {{
             case 4u: {{ val = raw.a; out_a = 1.0; }}
             default: {{ val = dot(raw.rgb, vec3({lr}, {lg}, {lb})); }}
         }}
-        val = srgb_oetf(apply_gamma(val * u.exposure_mult));
+        // `transfer::display_pixel`: light is encoded, a code (an encoded frame) is shown as is.
+        val = apply_gamma(val * u.exposure_mult);
+        if u.curve == {linear}u || u.channel_mode == 4u {{
+            val = srgb_oetf(val);
+        }}
         out_rgb = vec3(val);
         if u.channel_mode != 4u {{ out_a = 1.0; }}
     }}
@@ -254,6 +273,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {{
         page_group = OCIO_HOST_GROUP_START,
         colour = colour,
         oetf = transfer::oetf_wgsl(),
+        eotf = transfer::eotf_wgsl(),
+        decode = transfer::decode_wgsl(),
+        alpha = transfer::alpha_wgsl(),
+        linear = transfer::curve::LINEAR,
         tone = transfer::tone_wgsl(),
         lr = LUMA_709[0],
         lg = LUMA_709[1],
@@ -478,6 +501,11 @@ impl TilePipeline {
 
     /// Upload this frame's uniforms and instances (paint-callback `prepare`).
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, look: Look, page_size: u32, list: &DrawList) {
+        let (curve, curve_gamma) = transfer::curve_of(look.src.builtin.tf);
+        let row = |r: usize| {
+            let m = look.src.builtin.to709[r];
+            [m[0], m[1], m[2], 0.0]
+        };
         let u = Uniforms {
             exposure_mult: 2.0_f32.powf(look.exposure_ev),
             // The same floor `transfer::display_pixel` applies.
@@ -487,9 +515,14 @@ impl TilePipeline {
             page_size: page_size as f32,
             tonemap: look.tonemap,
             hdr: u32::from(look.hdr),
-            ocio_gain: look.ocio_gain,
-            light_gain: look.light_gain,
-            _pad: [0.0; 3],
+            gain: look.src.gain,
+            curve,
+            curve_gamma,
+            straight: u32::from(look.src.straight),
+            rotate: u32::from(look.src.builtin.to709 != exr_import::IDENTITY),
+            m0: row(0),
+            m1: row(1),
+            m2: row(2),
         };
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&u));
         if let Some(ocio) = &mut self.ocio {
@@ -597,18 +630,19 @@ mod tests {
     fn shader_with_ocio_validates_and_calls_it() {
         let o = crate::ocio::Ocio::load("ocio://studio-config-latest").unwrap();
         let sel = crate::ocio::Sel::default();
+        let space = o.scene();
         for linear in [false, true] {
-            let t = o.transform(&o.resolve(&sel, linear).unwrap(), linear).unwrap();
+            let t = o.transform(&o.resolve(&sel, &space, linear).unwrap(), None, linear).unwrap();
             let src = shader_src(Some(&t));
             crate::scopes::wgsl_probe::validate("tiles + OCIO", &src);
             assert!(src.contains(&t.prelude));
-            assert!(src.contains("let o = ocio_transform(lit);"));
-            assert!(!src.contains("tone(lit.rgb"), "the tone operator is not in the OCIO chain");
+            assert!(src.contains("let o = ocio_transform(vec4(c, 1.0));"));
+            assert!(!src.contains("tone(decode(c)"), "the tone operator is not in the OCIO chain");
             let encodes = src.contains("srgb_oetf(apply_gamma(l.r))");
             assert_eq!(encodes, linear, "linear = {linear}");
             assert!(src.contains(&format!("@group({OCIO_HOST_GROUP_START}) @binding(0) var page")));
         }
-        assert!(shader_src(None).contains("tone(lit.rgb"));
+        assert!(shader_src(None).contains("tone(decode(c)"));
     }
 
     /// Every display/view of every OCIO built-in config, SDR (encoded) and HDR
@@ -622,9 +656,10 @@ mod tests {
             let o = crate::ocio::Ocio::load(&e.uri()).unwrap();
             for hdr in [false, true] {
                 for d in o.displays(hdr) {
-                    for v in o.views(d, hdr) {
-                        let sel = crate::ocio::Sel { display: d.into(), view: v.into(), ..Default::default() };
-                        let t = o.transform(&o.resolve(&sel, hdr).unwrap(), hdr).unwrap();
+                    // Every view, whatever the viewing rules allow for one colour space.
+                    for v in o.views(d, "", hdr) {
+                        let names = crate::ocio::Names { input: "scene_linear".into(), display: d.into(), view: v.into(), look: String::new() };
+                        let t = o.transform(&names, None, hdr).unwrap();
                         if seen.insert(t.prelude.clone()) {
                             let what = format!("{} {d} / {v} hdr={hdr}", e.name);
                             crate::scopes::wgsl_probe::validate(&what, &shader_src(Some(&t)));
@@ -654,6 +689,8 @@ mod tests {
         let src = shader_src(None);
         assert!(src.contains(&transfer::oetf_wgsl()), "OETF not spliced in verbatim");
         assert!(src.contains(&transfer::tone_wgsl()), "tone operators not spliced in verbatim");
+        assert!(src.contains(&transfer::decode_wgsl()), "the built-in decode not spliced in verbatim");
+        assert!(src.contains(transfer::alpha_wgsl()), "the alpha twins not spliced in verbatim");
         assert!(src.contains(&format!("vec3({}, {}, {})", LUMA_709[0], LUMA_709[1], LUMA_709[2])));
         assert_eq!(transfer::mode::RGBA, 0);
         for (mode, arm) in [

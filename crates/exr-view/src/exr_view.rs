@@ -70,14 +70,17 @@ use winit::event_loop::{ControlFlow, EventLoop};
 /// Save `input` as the viewer shows it with the neutral look (0 EV, gamma 1, RGBA)
 /// without a window (`exr-rs view <file> --screenshot <out>`): an SDR 8-bit PNG, or with
 /// `hdr` HDR: the display light as `.exr`, or the `hdr` signal (HDR10 PQ / HLG) as `.png`
-/// (by `output`'s extension). Budgets are the saved Settings ones. Returns the saved size.
+/// (by `output`'s extension). The colour is the saved OCIO choice's (Settings > Colour) through
+/// the frame's own colour space, the processor the viewer runs; budgets are the saved Settings
+/// ones. Returns the saved size.
 pub fn screenshot(input: &std::path::Path, output: &std::path::Path, hdr: Option<export::HdrPng>) -> Result<(u32, u32)> {
-    let budgets = Config::load().budgets.clamped();
+    let cfg = Config::load();
+    let budgets = cfg.budgets.clamped();
     let ram = app::ram_budget(budgets.ram);
     if let Some(png) = hdr {
-        return export::headless_hdr(input, output, png, ram as u64 / 2, ram, budgets.upload_bytes());
+        return export::headless_hdr(input, output, png, &cfg.ocio, ram as u64 / 2, ram, budgets.upload_bytes());
     }
-    let shot = export::headless(input, output, ram as u64 / 2, ram, budgets.upload_bytes())?;
+    let shot = export::headless(input, output, &cfg.ocio, ram as u64 / 2, ram, budgets.upload_bytes())?;
     Ok((shot.w, shot.h))
 }
 

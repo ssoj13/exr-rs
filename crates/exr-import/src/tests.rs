@@ -1,11 +1,9 @@
-//! Loader tests: fixtures are written with vfx-io's own writers into a temp dir, and every
-//! expectation is a closed-form value (sRGB 128/255 = 0.2158605), not a second decode of the same
-//! code path.
+//! Loader and tag tests: fixtures are written with vfx-io's own writers into a temp dir, and every
+//! expectation is a closed-form value (a code over its maximum, a published matrix), not a second
+//! decode of the same code path.
 
 use super::*;
 use vfx_io::{AttrValue, ImageData};
-
-const SRGB_128: f32 = 0.215_860_5;
 
 fn tmp() -> tempfile::TempDir {
     tempfile::tempdir().expect("temp dir")
@@ -22,45 +20,60 @@ fn straight_png(path: &Path, w: u32, h: u32, ch: u32, px: Vec<u8>) {
     vfx_io::write(path, &img).expect("write png");
 }
 
+/// An 8-bit PNG keeps its codes (no linearisation) and says it is sRGB (vfx-io assumes sRGB for a
+/// PNG without colour chunks, as OIIO does).
 #[test]
-fn srgb_8bit_decodes_to_linear() {
+fn srgb_8bit_keeps_its_codes() {
     let dir = tmp();
     let p = dir.path().join("a.png");
     vfx_io::write(&p, &ImageData::from_u8(2, 1, 3, vec![128, 128, 128, 0, 255, 255])).unwrap();
     let l = load(&p).unwrap();
-    assert!((px(&l.image, "R", 0) - SRGB_128).abs() < 2e-4, "{}", px(&l.image, "R", 0));
+    assert!((px(&l.image, "R", 0) - 128.0 / 255.0).abs() < 2e-4, "{}", px(&l.image, "R", 0));
     assert_eq!((px(&l.image, "G", 1), px(&l.image, "R", 1)), (1.0, 0.0));
-    assert!(l.image.channel("A").is_none());
+    assert!(l.image.channel("A").is_none() && !l.straight);
     assert!(matches!(l.image.channel("R"), Some(ChannelData::Half(_))), "8-bit stays half");
-    assert!((Tf::Srgb.lin(128.0 / 255.0) - SRGB_128).abs() < 1e-6);
+    assert_eq!(l.tag, ColorTag { space: "srgb_rec709_scene".into(), origin: TagOrigin::File });
 }
 
+/// Every 8-bit code survives the half storage exactly enough to round back to itself.
 #[test]
-fn straight_alpha_is_premultiplied_in_linear_light() {
+fn half_holds_every_8bit_code() {
+    for k in 0..=255u32 {
+        let v = f32::from(Half::from(k as f32 / 255.0));
+        assert_eq!((v * 255.0).round() as u32, k);
+    }
+}
+
+/// Straight alpha stays straight: the colour is not multiplied, the flag says so.
+#[test]
+fn straight_alpha_is_kept() {
     let dir = tmp();
     let p = dir.path().join("a.png");
     straight_png(&p, 1, 1, 4, vec![128, 128, 128, 128]);
     let l = load(&p).unwrap();
-    let a = 128.0 / 255.0;
-    let want = SRGB_128 * a;
-    assert!((px(&l.image, "R", 0) - want).abs() < 2e-4, "{} vs {want}", px(&l.image, "R", 0));
-    // Premultiplying the encoded value first (OIIO's default) would give a different number.
-    let encoded_first = Tf::Srgb.lin(a * a);
-    assert!((encoded_first - want).abs() > 0.02);
-    assert!((px(&l.image, "A", 0) - a).abs() < 2e-4);
+    assert!(l.straight);
+    assert!((px(&l.image, "R", 0) - 128.0 / 255.0).abs() < 2e-4, "{}", px(&l.image, "R", 0));
+    assert!((px(&l.image, "A", 0) - 128.0 / 255.0).abs() < 2e-4);
 }
 
+/// The PQ HDR10 PNG WarpBro writes (cICP 9/16/0/1): tagged `pq_rec2020_display` by the file, its
+/// 16-bit codes kept exactly.
 #[test]
-fn associated_alpha_is_unpremultiplied_before_the_curve() {
-    // 4 channels, no straight tag: colour 64 under alpha 128 is the encoded 128 premultiplied.
-    let mut img = ImageData::from_u8(1, 1, 4, vec![64, 64, 64, 128]);
-    img.metadata.set_colorspace_attribute(colorspace::SRGB_REC709_SCENE);
-    let tf = space_of(&img).unwrap().tf;
-    let spec = img.to_spec();
-    let p = planes(&img, tf, &spec.channel_names, usize::try_from(spec.alpha_channel).ok());
-    let a = 128.0 / 255.0;
-    assert!((p[0][0] - Tf::Srgb.lin(64.0 / 255.0 / a) * a).abs() < 1e-6);
-    assert_eq!(p[3][0], a);
+fn pq_png_keeps_codes_and_cicp_tag() {
+    let dir = tmp();
+    let p = dir.path().join("hdr.png");
+    let codes = vec![0u16, 32768, 65535, 20000, 40000, 60000];
+    let mut img = ImageData::from_u16(2, 1, 3, codes.clone());
+    img.metadata.set_colorspace_attribute("pq_rec2020_display");
+    vfx_io::write(&p, &img).unwrap();
+    let l = load(&p).unwrap();
+    assert_eq!(l.tag, ColorTag { space: "pq_rec2020_display".into(), origin: TagOrigin::File });
+    for (i, (ch, k)) in ["R", "G", "B", "R", "G", "B"].iter().zip(&codes).enumerate() {
+        let v = px(&l.image, ch, i / 3);
+        assert_eq!((v * 65535.0).round() as u16, *k, "{ch}{i}");
+    }
+    let b = builtin(&l.tag).unwrap();
+    assert_eq!((b.tf, b.absolute), (Tf::Pq, true));
 }
 
 #[test]
@@ -79,29 +92,30 @@ fn float_hdr_is_linear() {
     let p = dir.path().join("a.hdr");
     vfx_io::write(&p, &ImageData::from_f32(1, 1, 3, vec![0.5, 0.25, 4.0])).unwrap();
     let l = load(&p).unwrap();
-    // RGBE shares one exponent: a few percent, but no curve (an sRGB decode would give 0.21).
+    // RGBE shares one exponent: a few percent, but no curve.
     assert!((px(&l.image, "R", 0) - 0.5).abs() < 0.02);
     assert!((px(&l.image, "B", 0) - 4.0).abs() < 0.1);
+    assert_eq!(builtin(&l.tag).unwrap(), Builtin::LINEAR);
 }
 
+/// No reader tag: integer data falls back to `srgb_rec709_display`, float to `lin_rec709_scene`,
+/// both marked untagged so the config's file rules come first.
 #[test]
-fn cineon_log_maps_white_and_black() {
-    assert!((Tf::Cineon.lin(685.0 / 1023.0) - 1.0).abs() < 1e-5);
-    assert!(Tf::Cineon.lin(95.0 / 1023.0).abs() < 1e-5);
+fn untagged_fallbacks() {
+    let int = foreign_tag(&ImageData::from_u8(1, 1, 3, vec![0; 3]));
+    assert_eq!(int, ColorTag { space: "srgb_rec709_display".into(), origin: TagOrigin::Untagged });
+    let float = foreign_tag(&ImageData::from_f32(1, 1, 3, vec![0.0; 3]));
+    assert_eq!(float, ColorTag { space: "lin_rec709_scene".into(), origin: TagOrigin::Untagged });
 }
 
+/// OIIO's informal names are stored by their interop ID; names without one stay as named.
 #[test]
-fn untagged_rule_and_unknown_tag() {
-    let u8img = ImageData::from_u8(1, 1, 3, vec![0; 3]);
-    assert_eq!(space_of(&u8img).unwrap().tf, Tf::Srgb);
-    let f = ImageData::from_f32(1, 1, 3, vec![0.0; 3]);
-    assert_eq!(space_of(&f).unwrap().tf, Tf::Linear);
-    let mut odd = ImageData::from_f32(1, 1, 3, vec![0.0; 3]);
-    odd.metadata.set_colorspace_attribute("CMYK");
-    assert!(matches!(space_of(&odd), Err(ImportError::ColorSpace(n)) if n == "CMYK"));
-    let mut g = ImageData::from_f32(1, 1, 3, vec![0.0; 3]);
-    g.metadata.set_colorspace_rec709_gamma(2.4);
-    assert_eq!(space_of(&g).unwrap().tf, Tf::Gamma(2.4));
+fn tags_are_stored_by_interop_id() {
+    let mut img = ImageData::from_f32(1, 1, 3, vec![0.0; 3]);
+    img.metadata.set_colorspace_attribute("sRGB");
+    assert_eq!(foreign_tag(&img).space, "srgb_rec709_scene");
+    img.metadata.set_colorspace_attribute("KodakLog");
+    assert_eq!(foreign_tag(&img).space, "KodakLog");
 }
 
 #[test]
@@ -127,42 +141,31 @@ fn exr_is_not_ours_and_garbage_is_typed() {
     assert!(matches!(load(&bad), Err(ImportError::Decode { .. })));
 }
 
-fn tagged(name: &str) -> ImageData {
-    let mut img = ImageData::from_f32(1, 1, 3, vec![0.0; 3]);
-    img.metadata.set_colorspace_attribute(name);
-    img
+fn tag(name: &str) -> ColorTag {
+    ColorTag { space: name.into(), origin: TagOrigin::File }
 }
 
+/// The built-in decode spells each tag out as a curve, primaries and absoluteness.
 #[test]
-fn display_gamma_tag_is_the_inverse_display_eotf() {
-    // `g24_rec709_display` is the tag of the 519-frame PNG sequence that used to fail to open.
-    let s = space_of(&tagged("g24_rec709_display")).unwrap();
-    assert_eq!((s.tf, s.to709), (Tf::Gamma(2.4), None));
-    assert!((s.tf.lin(0.5) - 0.5f32.powf(2.4)).abs() < 1e-6);
-    // The interop-ID table spells the other transfers out the same way.
-    assert_eq!(space_of(&tagged("g22_rec709_display")).unwrap().tf, Tf::Gamma(2.2));
-    assert_eq!(space_of(&tagged("srgb_rec709_display")).unwrap().tf, Tf::Srgb);
-    let pq = space_of(&tagged("pq_rec2020_display")).unwrap();
-    assert_eq!(pq.tf, Tf::Pq);
-    assert!((pq.tf.lin(0.508_078) - 100.0 / 203.0).abs() < 0.005, "ST 2084: 100 nits is signal 0.508");
-}
-
-/// HDR stills land on the viewer's SDR scale by BT.2408: the HDR reference white (203 nits in PQ,
-/// 75 % of the HLG signal) is 1.0, so 1.0 shows at the display's SDR white.
-#[test]
-fn hdr_reference_white_is_one() {
-    let pq = space_of(&tagged("pq_rec2020_display")).unwrap().tf;
-    assert!((pq.lin(vfx_transfer::pq::oetf(203.0)) - 1.0).abs() < 1e-4);
-    assert!((pq.lin(vfx_transfer::pq::oetf(1000.0)) - 1000.0 / 203.0).abs() < 1e-3);
-    let hlg = space_of(&tagged("hlg_rec2020_display")).unwrap().tf;
-    assert_eq!(hlg, Tf::Hlg);
-    assert!((hlg.lin(0.75) - 1.0).abs() < 1e-6);
-    assert!(hlg.lin(1.0) > 3.0, "HLG peak is about 3.8 x reference white");
+fn builtin_curves_of_the_interop_ids() {
+    let b = |n: &str| builtin(&tag(n)).unwrap();
+    assert_eq!(b("g24_rec709_display").tf, Tf::Gamma(2.4));
+    assert_eq!(b("g22_rec709_display").tf, Tf::Gamma(2.2));
+    assert_eq!(b("srgb_rec709_display"), Builtin { tf: Tf::Srgb, to709: IDENTITY, absolute: false });
+    assert_eq!(b("srgb_rec709_scene").tf, Tf::Srgb);
+    assert_eq!(b("Rec709").tf, Tf::Rec709);
+    assert_eq!(b("KodakLog").tf, Tf::Cineon);
+    assert_eq!(b("scene_linear"), Builtin::LINEAR);
+    let pq = b("pq_rec2020_display");
+    assert_eq!((pq.tf, pq.absolute), (Tf::Pq, true));
+    assert_ne!(pq.to709, IDENTITY, "Rec.2020 primaries rotate into Rec.709");
+    let hlg = b("hlg_rec2020_display");
+    assert_eq!((hlg.tf, hlg.absolute), (Tf::Hlg, true));
 }
 
 #[test]
 fn wide_primaries_rotate_into_rec709() {
-    let m = space_of(&tagged("lin_p3d65_scene")).unwrap().to709.expect("P3 is not Rec.709");
+    let m = builtin(&tag("lin_p3d65_scene")).unwrap().to709;
     // Published linear Display-P3 -> Rec.709 (D65 both): the columns are the P3 primaries.
     let want = [[1.224_940_1, -0.224_940_4, 0.0], [-0.042_056_9, 1.042_057_1, 0.0], [-0.019_637_6, -0.078_636_1, 1.098_273_5]];
     for (r, w) in m.iter().zip(want) {
@@ -170,26 +173,71 @@ fn wide_primaries_rotate_into_rec709() {
             assert!((a - b).abs() < 2e-4, "{m:?}");
         }
     }
-    // Pure P3 red lands out of gamut: the negative stays.
-    let mut planes = vec![vec![1.0], vec![0.0], vec![0.0]];
-    rotate(&mut planes, &["R".into(), "G".into(), "B".into()], &m);
-    assert!((planes[0][0] - 1.224_940_1).abs() < 2e-4 && planes[1][0] < -0.04 && planes[2][0] < -0.01, "{planes:?}");
 }
 
 #[test]
 fn d60_primaries_keep_neutrals_neutral() {
     // ACEScg white is D60; without the adaptation to D65 it would come out tinted.
-    for tag in ["lin_ap1_scene", "lin_ap0_scene"] {
-        let m = space_of(&tagged(tag)).unwrap().to709.unwrap_or_else(|| panic!("{tag}"));
+    for t in ["lin_ap1_scene", "lin_ap0_scene"] {
+        let m = builtin(&tag(t)).unwrap().to709;
         for row in m {
-            assert!((row.iter().sum::<f32>() - 1.0).abs() < 2e-3, "{tag}: {m:?}");
+            assert!((row.iter().sum::<f32>() - 1.0).abs() < 2e-3, "{t}: {m:?}");
         }
     }
 }
 
+/// A tag with no curve here stays a typed error: only an OCIO config can show it.
 #[test]
-fn tags_the_table_cannot_make_rgb_stay_typed_errors() {
-    for tag in ["CMYK", "lin_ciexyzd65_scene", "data", "no_such_space"] {
-        assert!(matches!(space_of(&tagged(tag)), Err(ImportError::ColorSpace(n)) if n == tag), "{tag}");
+fn tags_without_a_builtin_curve_are_typed_errors() {
+    for t in ["CMYK", "lin_ciexyzd65_scene", "data", "no_such_space", "ACEScct"] {
+        assert!(matches!(builtin(&tag(t)), Err(ImportError::ColorSpace(n)) if n == t), "{t}");
     }
+}
+
+fn header() -> Header {
+    Header::new()
+}
+
+/// EXR rules in order: `colorInteropID` first, then `whiteLuminance`, then `chromaticities`
+/// matched to a known gamut, else untagged (`scene_linear` after the file rules).
+#[test]
+fn exr_tag_rules() {
+    let mut h = header();
+    assert_eq!(exr_tag(&h).unwrap(), ColorTag { space: "scene_linear".into(), origin: TagOrigin::Untagged });
+
+    h.add_chromaticities(exr_core::Chromaticities::default()).unwrap();
+    assert_eq!(exr_tag(&h).unwrap(), ColorTag { space: "lin_rec709_scene".into(), origin: TagOrigin::Chromaticities });
+    let ap1 = &vfx_primaries::ACES_AP1;
+    *h.chromaticities_mut().unwrap() = exr_core::Chromaticities {
+        red: [ap1.r.0, ap1.r.1],
+        green: [ap1.g.0, ap1.g.1],
+        blue: [ap1.b.0, ap1.b.1],
+        white: [ap1.w.0, ap1.w.1],
+    };
+    assert_eq!(exr_tag(&h).unwrap().space, "lin_ap1_scene");
+    // An unknown gamut is not guessed at: the file rules decide.
+    h.chromaticities_mut().unwrap().red = [0.7, 0.29];
+    assert_eq!(exr_tag(&h).unwrap().origin, TagOrigin::Untagged);
+
+    let mut l = header();
+    l.add_white_luminance(203.0).unwrap();
+    let t = exr_tag(&l).unwrap();
+    assert_eq!(t.space, XYZ_DISPLAY_ROLE);
+    let TagOrigin::Luminance { to_xyz } = t.origin else { panic!("{t:?}") };
+    // White (1, 1, 1) of Rec.709 at 203 nits is D65 XYZ with Y = 2.03 display-reference units.
+    let y = to_xyz[1].iter().sum::<f32>();
+    assert!((y - 2.03).abs() < 1e-4, "{to_xyz:?}");
+    let b = builtin(&t).unwrap();
+    assert!(b.absolute && b.tf == Tf::Linear);
+    for (r, row) in b.to709.iter().enumerate() {
+        for (c, v) in row.iter().enumerate() {
+            let want = if r == c { 2.03 } else { 0.0 };
+            assert!((v - want).abs() < 1e-4, "{:?}", b.to709);
+        }
+    }
+    *l.white_luminance_mut().unwrap() = 0.0;
+    assert!(matches!(exr_tag(&l), Err(ImportError::Attr(_))));
+
+    h.add_color_interop_id(exr_core::attr::ExrString::from("lin_ap0_scene")).unwrap();
+    assert_eq!(exr_tag(&h).unwrap(), ColorTag { space: "lin_ap0_scene".into(), origin: TagOrigin::File });
 }

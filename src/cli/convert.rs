@@ -9,8 +9,9 @@
 //! (`src/iconvert/iconvert.cpp`), where reading level 0 alone would silently drop
 //! the rest. The facade rejects deep and multipart inputs with a clear
 //! [`exr_core::ExrError`]; we surface that as a non-zero exit rather than
-//! half-converting. A non-EXR input (`exr-import`: PNG, JPEG, TIFF, DPX, HDR, ...) is decoded to
-//! scene-linear, associated-alpha channels and written as a plain scanline EXR.
+//! half-converting. A non-EXR input (`exr-import`: PNG, JPEG, TIFF, DPX, HDR, ...) is written as a
+//! plain scanline EXR the way `oiiotool in.png -o out.exr` writes it: its values as read, alpha
+//! associated, its colour tag as `colorInteropID` (`exr_import::Loaded::to_exr`).
 
 use std::path::PathBuf;
 
@@ -25,13 +26,13 @@ pub const EXAMPLES: &str = examples!(
     "exr-rs convert in.exr out.exr -c zip       # lossless, zlib",
     "exr-rs convert in.exr out.exr -c dwaa      # lossy, small",
     "exr-rs convert in.exr out.exr -c htj2k256  # HTJ2K (OpenEXR 3.4)",
-    "exr-rs convert plate.dpx plate.exr         # any other still: scene-linear, associated alpha",
+    "exr-rs convert plate.dpx plate.exr         # any other still: values as read, colorInteropID tag",
 );
 
 /// `convert` arguments.
 #[derive(clap::Args)]
 pub struct Args {
-    /// Input: an EXR (single-part, not deep), or a PNG/JPEG/TIFF/DPX/HDR/... still (read as scene-linear).
+    /// Input: an EXR (single-part, not deep), or a PNG/JPEG/TIFF/DPX/HDR/... still (values as read, tagged).
     input: PathBuf,
     /// Output EXR (same storage as the input: tiles, levels and sampling are kept).
     output: PathBuf,
@@ -51,10 +52,11 @@ pub fn codec_parser() -> impl TypedValueParser<Value = Compression> {
 /// Run the `convert` subcommand. Deep / multipart inputs come back from the facade as a clear
 /// `ExrError` pointing at the low-level API: a non-zero exit, never a half conversion.
 pub fn run(args: Args) -> CliResult {
-    // Any other still comes in as scene-linear floats with associated alpha (`exr-import`, the
-    // viewer's loader), then leaves as a scanline EXR.
+    // Any other still comes in through the viewer's loader (`exr-import`) and leaves as a
+    // scanline EXR holding its values and its colour tag.
     let image = if exr_import::is_foreign(&args.input) {
-        exr_import::load(&args.input).map_err(|e| CliError::Other(e.to_string()))?.image
+        let other = |e: exr_import::ImportError| CliError::Other(e.to_string());
+        exr_import::load(&args.input).map_err(other)?.to_exr().map_err(other)?
     } else {
         Image::read_all(&args.input)?
     };
@@ -133,8 +135,9 @@ mod tests {
     }
 
     /// A PNG and a Radiance HDR (both written here by hand / by the `png` crate, not by the
-    /// importer) come out as scene-linear EXRs that exr-core reads back: sRGB 128 is 0.2158605
-    /// under half alpha 128/255 in linear light, and the HDR's 1.0 stays 1.0.
+    /// importer) come out as EXRs that exr-core reads back with their values and tags, as
+    /// oiiotool writes them: the PNG's code 128 associated with alpha 128 (128/255 squared) and
+    /// tagged `srgb_rec709_scene`, the HDR's 1.0 stays 1.0, tagged `lin_rec709_scene`.
     #[test]
     fn convert_reads_a_png_and_an_hdr_into_exr() {
         let tmp = std::env::temp_dir().join(format!("exr-rs-convert-foreign-{}", std::process::id()));
@@ -155,10 +158,16 @@ mod tests {
         run(Args { input: hdr, output: out_hdr.clone(), compress: None }).unwrap();
         let (p, h) = (Image::read_all(&out_png).unwrap(), Image::read_all(&out_hdr).unwrap());
         let a = 128.0 / 255.0;
-        assert!((sample(&p, "R") - 0.215_860_5 * a).abs() < 2e-4, "{}", sample(&p, "R"));
+        assert!((sample(&p, "R") - a * a).abs() < 2e-4, "{}", sample(&p, "R"));
         assert!((sample(&p, "A") - a).abs() < 2e-4);
         assert_eq!((sample(&h, "R"), sample(&h, "G"), sample(&h, "B")), (1.0, 1.0, 1.0));
         assert!(h.channel("A").is_none());
+        let id = |img: &Image| {
+            let attr = img.attributes().get("colorInteropID").and_then(|a| a.as_any().downcast_ref::<exr_core::attr::StringAttribute>());
+            attr.map(|a| String::from_utf8_lossy(a.value.as_bytes()).into_owned())
+        };
+        assert_eq!(id(&p).as_deref(), Some("srgb_rec709_scene"));
+        assert_eq!(id(&h).as_deref(), Some("lin_rec709_scene"));
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 

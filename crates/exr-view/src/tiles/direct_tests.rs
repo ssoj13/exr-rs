@@ -178,6 +178,7 @@ fn exceptional_float_sources_reduce_on_the_gpu_like_the_f64_reference() {
             let expected = crate::transfer::canvas(
                 crate::transfer::display_pixel(
                     [want.to_f32(), 0.25, 0.0, 1.0],
+                    &crate::transfer::Src::LINEAR,
                     0.0,
                     1.0,
                     crate::transfer::mode::RGBA,
@@ -309,7 +310,7 @@ fn export_scope_view_layer_coverage_and_effect_share_one_source() {
         .unwrap();
     assert_eq!(&export[..], &[0.0, 0.5, 1.0, 1.0]);
     image
-        .ensure_linear(&d, &q, &mut renderer, &mut target, Some(&mut stage))
+        .ensure_linear(&d, &q, &mut renderer, &mut target, Some(&mut stage), None)
         .unwrap();
     let cb = image
         .present(
@@ -346,7 +347,7 @@ fn export_scope_view_layer_coverage_and_effect_share_one_source() {
             .direct
     );
     image
-        .ensure_linear(&d, &q, &mut renderer, &mut target, Some(&mut stage))
+        .ensure_linear(&d, &q, &mut renderer, &mut target, Some(&mut stage), None)
         .unwrap();
     assert_eq!(stage.calls, 2);
     image.set_coverage_overlay(None, None);
@@ -609,6 +610,7 @@ fn direct_to_delayed_tiles_holds_pixels_and_budget_refusal_does_not_stall() {
     let expected = crate::transfer::canvas(
         crate::transfer::display_pixel(
             [0.75, 0.25, 0.0, 1.0],
+            &crate::transfer::Src::LINEAR,
             0.0,
             1.0,
             crate::transfer::mode::RGBA,
@@ -676,8 +678,7 @@ fn look() -> Look {
         tonemap: 0,
         nearest: true,
         hdr: false,
-        ocio_gain: 1.0,
-        light_gain: 1.0,
+        src: crate::transfer::Src::LINEAR,
     }
 }
 #[test]
@@ -768,7 +769,7 @@ fn resident_present_bypasses_workers_and_reuses_upload() {
         .unwrap();
     assert_eq!((level, w, h), (0, 1, 1));
     assert_eq!(&rgba[..], &[0.0, 1.0, 2.0, 1.0]);
-    img.ensure_linear(&d, &q, &mut renderer, &mut target, None).unwrap();
+    img.ensure_linear(&d, &q, &mut renderer, &mut target, None, None).unwrap();
     let mut next = frame_with(&["R", "G", "B"]);
     next.id = 2;
     img.set_frame(Arc::new(next));
@@ -842,7 +843,7 @@ fn scopes_read_the_resident_original_without_a_second_upload() {
     };
     let mut img = ImageBackend::from_frame(frame(1, 0.0));
     assert!(img.present(&d, &q, &mut renderer, &mut target, None, place(w, h, 1.0), look(), None).unwrap().direct);
-    let (_, sw, sh) = img.ensure_linear(&d, &q, &mut renderer, &mut target, None).unwrap();
+    let (_, sw, sh) = img.ensure_linear(&d, &q, &mut renderer, &mut target, None, None).unwrap();
     assert_eq!((sw, sh), (w, h));
     let (uploads, tex) = direct(&renderer);
     assert_eq!(uploads, 1, "the scopes reuse the display's upload");
@@ -853,7 +854,7 @@ fn scopes_read_the_resident_original_without_a_second_upload() {
     // A sequence step whose scopes run before the viewport: they upload, the
     // viewport then only reduces.
     img.set_frame(frame(2, 4.0));
-    img.ensure_linear(&d, &q, &mut renderer, &mut target, None).unwrap();
+    img.ensure_linear(&d, &q, &mut renderer, &mut target, None, None).unwrap();
     assert_eq!(direct(&renderer).0, 2);
     assert!(img.present(&d, &q, &mut renderer, &mut target, None, place(w, h, 1.0), look(), None).unwrap().direct);
     let (uploads, tex) = direct(&renderer);
@@ -1046,6 +1047,7 @@ fn direct_reduction_matches_clipped_f64_half_reference() {
                         crate::transfer::canvas(
                             crate::transfer::display_pixel(
                                 rgba,
+                                &crate::transfer::Src::LINEAR,
                                 0.0,
                                 1.0,
                                 crate::transfer::mode::RGBA,

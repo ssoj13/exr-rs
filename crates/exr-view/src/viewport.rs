@@ -273,20 +273,25 @@ pub fn show(
     // (pixel-exact); minified ones filtered. An error draws its reason instead
     // of an image — the viewer stays alive and says why.
     let place = Placement { origin: if worker { canvas.min } else { img_rect.min }, zoom: img.zoom, clip: rect };
-    let look = Look {
-        exposure_ev: controls.exposure,
-        gamma: controls.gamma,
-        channel_mode: img.channel_display.to_channel_mode(),
-        tonemap: controls.tonemap,
-        nearest: img.zoom >= 1.0,
-        hdr: controls.target.hdr,
-        ocio_gain: controls.colour.active().map_or(1.0, |t| t.gain(controls.target.white)),
-        light_gain: img.frame.light_gain(&controls.target),
-    };
+    // The frame's colour space resolves here, once per frame and choice (`ocio::State::frame`):
+    // its OCIO transform, or the built-in decode of its tag.
+    let src = controls.colour.frame(&img.frame, &controls.target);
     let colour = controls.colour.active().map(|t| &**t);
-    let shown = match gpu.gpu() {
-        Some(g) => img.present(g.device, g.queue, g.renderer, target, stage.as_deref_mut(), place, look, colour),
-        None => Err("no GPU adapter".to_owned()),
+    let shown = match (gpu.gpu(), src) {
+        (_, Err(e)) => Err(format!("{e} (OCIO off: no built-in decode for the frame's colour space)")),
+        (Some(g), Ok(src)) => {
+            let look = Look {
+                exposure_ev: controls.exposure,
+                gamma: controls.gamma,
+                channel_mode: img.channel_display.to_channel_mode(),
+                tonemap: controls.tonemap,
+                nearest: img.zoom >= 1.0,
+                hdr: controls.target.hdr,
+                src,
+            };
+            img.present(g.device, g.queue, g.renderer, target, stage.as_deref_mut(), place, look, colour)
+        }
+        (None, Ok(_)) => Err("no GPU adapter".to_owned()),
     };
     match shown {
         Ok(tiles) => {

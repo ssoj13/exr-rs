@@ -1,54 +1,58 @@
-//! Non-EXR stills into an [`exr_core::api::Image`]: scene-linear, associated alpha.
+//! Non-EXR stills into an [`exr_core::api::Image`], and the colour tag of every frame.
 //!
-//! One loader for the viewer and the CLI. EXR itself never comes through here (it keeps the
-//! exr-core paths: tiles, levels, deep, multipart); [`vfx_io`] decodes everything else, and this
-//! crate turns what it returns into what the rest of the workspace assumes of a frame.
+//! One loader for the viewer and the CLI. EXR itself never comes through [`load`] (it keeps the
+//! exr-core paths: tiles, levels, deep, multipart); [`vfx_io`] decodes everything else. This crate
+//! is also the one owner of the tag rules: [`load`] tags a foreign still, [`exr_tag`] an EXR
+//! header, and [`builtin`] says how the viewer decodes a tag when no OCIO config is in use.
 //!
-//! # Colour (OIIO's rule, `oiio:ColorSpace` first)
+//! # Pixels as read, plus a tag (`COLOR_PLAN.md`)
 //!
-//! * The reader's colour-space tag wins (`srgb_rec709_scene`, `lin_rec709_scene`,
-//!   `g<NN>_rec709_scene`, `Rec709`, `KodakLog`): PNG/JPEG/BMP/GIF/WebP tag sRGB (PNG honours its
-//!   `sRGB`/`gAMA` chunks), Radiance HDR is linear, PNM is `Rec709` (OIIO `pnminput.cpp:404`,
-//!   PFM included), DPX maps its transfer byte (linear, log, ITU-709, user gamma).
-//! * No tag: integer data is sRGB, float data is linear (the formats that never tag: TIFF without
-//!   an EXIF block, SGI, IFF, ICO, Softimage, DPX printing-density/video codes, RLA without gamma).
-//! * `KodakLog` (Cineon, DPX log) is a bare name in OIIO: the conversion belongs to the OCIO
-//!   config. Here it is the standard Kodak printing-density curve (white 685, black 95, density
-//!   step 0.002, gamma 0.6 of 1023 codes), see [`Tf::Cineon`].
-//! * Any other tag goes through vfx-io's colour-space table (Color Interop Forum IDs and OIIO's
-//!   aliases, e.g. `g24_rec709_display`, `lin_ap1_scene`, `pq_rec2020_display`): the ID names a
-//!   transfer curve and primaries; primaries other than Rec.709 are rotated into linear Rec.709
-//!   (Bradford when the white points differ), negatives kept.
-//! * A tag the table does not know, or that is not RGB (`CMYK`, XYZ), is a typed error.
+//! A frame keeps its values as the file holds them (integers normalised to 0..1, floats as they
+//! are) and a [`ColorTag`]: its colour space and where that came from. Nothing is linearised or
+//! rotated into a working space here: a viewer converts once, at display, from the frame's own
+//! space (one OCIO processor per frame), so a display-referred picture (a PQ HDR10 PNG, an sRGB
+//! screenshot) is not rendered a second time by a scene view.
+//!
+//! # Foreign tags (OIIO's rule, `oiio:ColorSpace` first)
+//!
+//! * The reader's colour-space tag wins: PNG (`sRGB` / `gAMA` / `cICP` chunks), JPEG, BMP, GIF,
+//!   WebP, Radiance HDR, PNM, DPX (transfer byte), Cineon. It is stored by its Color Interop ID
+//!   when vfx-io's table knows one (`sRGB` -> `srgb_rec709_scene`), else as the reader named it
+//!   (`Rec709`, `KodakLog`, `g20_rec709_scene`); the OCIO config resolves it later (names and
+//!   aliases), and a name it does not know is a typed error there, never a substitute.
+//! * No tag (TIFF without an EXIF block, SGI, IFF, ICO, Softimage, ...): [`TagOrigin::Untagged`],
+//!   left to the config's file rules; the explicit fallback when they say nothing more than their
+//!   default (or there is no config) is `srgb_rec709_display` for integer data and
+//!   `lin_rec709_scene` for float data.
 //!
 //! # Alpha
 //!
-//! The viewer's canvas contract is encoded ASSOCIATED light. PNG, TGA, WebP and unassociated TIFF
-//! are straight on disk; vfx-io would premultiply them in the encoded space (OIIO's default),
-//! which is wrong once the colour is linearised, so they are read with `unassociated_alpha` and
-//! multiplied here, in linear light. Every other format is taken as vfx-io returns it (OIIO's
-//! model: associated, even where the file does not say so): its colour is divided by alpha,
-//! linearised, and multiplied back.
+//! Whether the file's alpha is straight or associated is kept ([`Loaded::straight`]), not baked:
+//! PNG, TGA, WebP and unassociated TIFF are read straight (vfx-io would premultiply them in the
+//! encoded space, OIIO's default); every other format is taken as vfx-io returns it (associated,
+//! OIIO's model). The viewer's shader handles both (unpremultiply, convert, premultiply).
 
 use std::path::{Path, PathBuf};
 
+use exr_core::header::Header;
 use exr_core::api::{ChannelData, Image};
 use imath_rs::{Box2i, Half, V2i};
 use vfx_io::{FormatReader, ImageData, PixelData, colorspace};
 
-/// A decoded still: the pixels plus what the Metadata panel shows of the source.
+/// A decoded still: the pixels as read, their colour tag, and what the Metadata panel shows.
 pub struct Loaded {
-    /// Linear, associated-alpha channels (`R G B [A]`, `Y [A]`, extra data channels as named).
+    /// The channels as read (`R G B [A]`, `Y [A]`, extra data channels as named): integers
+    /// normalised to 0..1, floats as stored. Never linearised, never premultiplied here.
     pub image: Image,
-    /// Source facts in display order: format, colour space, alpha handling, reader attributes.
+    /// The colour space of the colour channels and where it came from.
+    pub tag: ColorTag,
+    /// The alpha channel is straight (unassociated); `false` = associated, or no alpha.
+    pub straight: bool,
+    /// Source facts in display order: format, depth, reader attributes.
     pub meta: Vec<(String, String)>,
-    /// Absolute light: the nits of RGB (1, 1, 1) when the source encodes absolute luminance
-    /// (PQ: [`HDR_REFERENCE_WHITE_NITS`]), `None` for scene-relative sources. The EXR equivalent
-    /// is the `whiteLuminance` attribute.
-    pub white_nits: Option<f32>,
 }
 
-/// Why a still did not load.
+/// Why a still did not load, or a header has no usable colour facts.
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
     /// An EXR was given: it has its own reader.
@@ -57,9 +61,13 @@ pub enum ImportError {
     /// The decoder refused the file (unreadable, malformed, format not built in).
     #[error("{path}: {source}")]
     Decode { path: String, source: vfx_io::IoError },
-    /// The reader tagged a colour space this loader has no curve for.
-    #[error("unsupported colour space `{0}`")]
+    /// The tag names no curve and primaries the built-in decode knows (`CMYK`, XYZ, an OCIO
+    /// name such as `ACEScct`): only an OCIO config can show it.
+    #[error("no built-in decode for colour space `{0}`")]
     ColorSpace(String),
+    /// A colour attribute of an EXR header is malformed (`whiteLuminance` not finite and > 0).
+    #[error("{0}")]
+    Attr(String),
     /// The pixels do not fit the facade (no channels, size mismatch).
     #[error("{0}")]
     Pixels(String),
@@ -127,71 +135,184 @@ pub fn is_foreign(path: &Path) -> bool {
     ext_of(path).is_some_and(|e| e != "tx" && vfx_io::FormatRegistry::global().supports_extension(&e))
 }
 
-// -- colour ---------------------------------------------------------------------------------------
+// -- colour tags ----------------------------------------------------------------------------------
 
-/// The decode curve of a source colour space.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Tf {
-    Linear,
-    Srgb,
-    /// BT.709 camera OETF inverse (OIIO `Rec709`).
-    Rec709,
-    /// Pure power law (`g22_rec709_scene`, DPX user gamma).
-    Gamma(f32),
-    /// Kodak Cineon printing-density log. `lin = (10^((code - 685) * 0.002 / 0.6) - k) / (1 - k)`
-    /// with `k = 10^((95 - 685) * 0.002 / 0.6)`, `code = v * 1023`: 685 maps to 1, 95 to 0.
-    Cineon,
-    /// SMPTE ST 2084, [`HDR_REFERENCE_WHITE_NITS`] = 1.0.
-    Pq,
-    /// BT.2100 HLG inverse OETF (scene light, no display OOTF), reference white (75 % signal) = 1.0.
-    Hlg,
+/// The colour space of a frame's colour channels and where it came from. The space is a name an
+/// OCIO config resolves (a colour space name, alias, role or Color Interop ID); the viewer maps it
+/// to the config's colour space once per frame, at display.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColorTag {
+    /// The colour space; for [`TagOrigin::Untagged`] the explicit fallback (see there).
+    pub space: String,
+    /// Where `space` came from.
+    pub origin: TagOrigin,
 }
 
-/// BT.2408 HDR reference white in cd/m2: the level SDR white (1.0 here and in the viewer) sits at
-/// in HDR. A PQ still decodes as `nits / 203`, so the viewer, which shows 1.0 at the display's SDR
-/// white, puts its pixels at the nits the file holds when that white is 203. (OCIO's display
-/// reference, 1.0 = 100 nits, would show every PQ still about twice as bright.)
-pub const HDR_REFERENCE_WHITE_NITS: f32 = 203.0;
+/// Where a [`ColorTag`] came from, in the order the tag rules try them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TagOrigin {
+    /// The file names it: `oiio:ColorSpace` of a foreign still (PNG chunks, DPX transfer, ...) or
+    /// the EXR `colorInteropID` attribute (OpenEXR `exrstdattr.rst`).
+    File,
+    /// EXR `chromaticities` matched to a `lin_<primaries>_scene` interop ID.
+    Chromaticities,
+    /// EXR `whiteLuminance` without `colorInteropID`: by OpenEXR's definition the nits of RGB
+    /// (1, 1, 1), so with the primaries the pixels are absolute CIE XYZ, i.e. display light.
+    /// `space` is the config's `cie_xyz_d65_interchange` role (OCIO's display reference, 1.0 =
+    /// 100 nits) and `to_xyz` takes the pixels there (primaries, Bradford to D65, nits / 100).
+    Luminance { to_xyz: [[f32; 3]; 3] },
+    /// The file says nothing. The config's file rules decide; when the path matches only their
+    /// default rule (or there is no config) `space` is used: `srgb_rec709_display` for integer
+    /// stills, `lin_rec709_scene` for float stills, `scene_linear` for EXR.
+    Untagged,
+}
 
-/// HLG scene light of BT.2408's reference white (75 % HLG signal), the divisor that puts it at 1.0;
-/// without it a reference white decodes to ~0.26 and HLG stills show about four times too dark.
-static HLG_REFERENCE_WHITE: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| vfx_transfer::hlg::eotf(0.75));
+impl ColorTag {
+    /// The tag of an EXR without colour attributes (and of frames built in tests): untagged,
+    /// `scene_linear` after the file rules.
+    pub fn scene_linear() -> Self {
+        Self { space: colorspace::SCENE_LINEAR.to_owned(), origin: TagOrigin::Untagged }
+    }
+}
 
-impl Tf {
-    /// Encoded value `v` to scene-linear.
-    pub fn lin(self, v: f32) -> f32 {
+impl TagOrigin {
+    /// How the Metadata panel and the status bar name it.
+    pub fn label(&self) -> &'static str {
         match self {
-            Tf::Linear => v,
-            Tf::Srgb => vfx_transfer::srgb::eotf(v),
-            Tf::Rec709 => vfx_transfer::rec709::eotf(v),
-            Tf::Gamma(g) => vfx_transfer::gamma::gamma_eotf(v, g),
-            Tf::Pq => vfx_transfer::pq::eotf(v) / HDR_REFERENCE_WHITE_NITS,
-            Tf::Hlg => vfx_transfer::hlg::eotf(v) / *HLG_REFERENCE_WHITE,
-            Tf::Cineon => {
-                let k = 10f32.powf((95.0 - 685.0) * 0.002 / 0.6);
-                (10f32.powf((v * 1023.0 - 685.0) * 0.002 / 0.6) - k) / (1.0 - k)
-            }
+            Self::File => "the file's tag",
+            Self::Chromaticities => "EXR chromaticities",
+            Self::Luminance { .. } => "EXR whiteLuminance (absolute light)",
+            Self::Untagged => "untagged",
         }
     }
 }
 
-/// A source colour space reduced to what the loader applies: a decode curve and, for primaries
-/// other than Rec.709, the matrix into linear Rec.709.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Space {
+/// The interop-ID tokens of the primaries an EXR `chromaticities` attribute is matched against.
+const EXR_PRIMARIES: [(&str, &vfx_primaries::Primaries); 5] = [
+    ("ap0", &vfx_primaries::ACES_AP0),
+    ("ap1", &vfx_primaries::ACES_AP1),
+    ("rec709", &vfx_primaries::REC709),
+    ("rec2020", &vfx_primaries::REC2020),
+    ("p3d65", &vfx_primaries::DISPLAY_P3),
+];
+
+/// How close (CIE xy) a stored chromaticity must be to a known one: a file rounds its floats, but
+/// distinct standard primaries are far further apart than this.
+const XY_TOLERANCE: f32 = 1e-3;
+
+/// The OCIO role of OCIO's display reference, linear CIE XYZ D65 with 1.0 = 100 nits.
+pub const XYZ_DISPLAY_ROLE: &str = "cie_xyz_d65_interchange";
+
+fn primaries_of_exr(c: &exr_core::Chromaticities) -> vfx_primaries::Primaries {
+    vfx_primaries::Primaries {
+        r: (c.red[0], c.red[1]),
+        g: (c.green[0], c.green[1]),
+        b: (c.blue[0], c.blue[1]),
+        w: (c.white[0], c.white[1]),
+        name: "EXR chromaticities",
+    }
+}
+
+/// The tag of one EXR part (`exrinfo.rst`: colour attributes are per part): `colorInteropID`
+/// first; else `whiteLuminance` (absolute light, [`TagOrigin::Luminance`]); else `chromaticities`
+/// matched to AP0 / AP1 / Rec.709 / Rec.2020 / P3-D65; else untagged (`scene_linear` after the
+/// file rules).
+pub fn exr_tag(header: &Header) -> Result<ColorTag, ImportError> {
+    let attr = |e: exr_core::ExrError| ImportError::Attr(e.to_string());
+    if header.has_color_interop_id() {
+        let id = String::from_utf8_lossy(header.color_interop_id().map_err(attr)?.as_bytes()).trim().to_owned();
+        if !id.is_empty() {
+            return Ok(ColorTag { space: id, origin: TagOrigin::File });
+        }
+    }
+    let chroma = if header.has_chromaticities() { Some(*header.chromaticities().map_err(attr)?) } else { None };
+    if header.has_white_luminance() {
+        let nits = *header.white_luminance().map_err(attr)?;
+        if !(nits.is_finite() && nits > 0.0) {
+            return Err(ImportError::Attr(format!("whiteLuminance {nits} must be finite and positive")));
+        }
+        // No chromaticities means Rec.709, as OpenEXR's `Chromaticities()` default.
+        let prim = primaries_of_exr(&chroma.unwrap_or_default());
+        if vfx_primaries::try_rgb_to_xyz_matrix(&prim).is_none() {
+            return Err(ImportError::Attr(format!("chromaticities {:?} are degenerate", chroma.unwrap_or_default())));
+        }
+        let rec709 = &vfx_primaries::REC709;
+        let to_xyz = vfx_primaries::rgb_to_xyz_matrix(rec709) * vfx_primaries::rgb_to_rgb_matrix(&prim, rec709) * (nits / 100.0);
+        return Ok(ColorTag { space: XYZ_DISPLAY_ROLE.to_owned(), origin: TagOrigin::Luminance { to_xyz: to_xyz.m } });
+    }
+    if let Some(c) = chroma {
+        let near = |a: (f32, f32), b: [f32; 2]| (a.0 - b[0]).abs() <= XY_TOLERANCE && (a.1 - b[1]).abs() <= XY_TOLERANCE;
+        let hit = EXR_PRIMARIES
+            .iter()
+            .find(|(_, p)| near(p.r, c.red) && near(p.g, c.green) && near(p.b, c.blue) && near(p.w, c.white));
+        if let Some((tok, _)) = hit {
+            return Ok(ColorTag { space: format!("lin_{tok}_scene"), origin: TagOrigin::Chromaticities });
+        }
+    }
+    Ok(ColorTag::scene_linear())
+}
+
+/// The tag of a decoded foreign still (see the module docs).
+fn foreign_tag(img: &ImageData) -> ColorTag {
+    match img.metadata.colorspace() {
+        Some(name) => {
+            let space = colorspace::interop_id(name).filter(|id| id != "unknown").unwrap_or_else(|| name.to_owned());
+            ColorTag { space, origin: TagOrigin::File }
+        }
+        None => {
+            let integer = matches!(img.data, PixelData::U8(_) | PixelData::U16(_));
+            let space = if integer { "srgb_rec709_display" } else { colorspace::LIN_REC709_SCENE };
+            ColorTag { space: space.to_owned(), origin: TagOrigin::Untagged }
+        }
+    }
+}
+
+// -- the built-in decode (no OCIO config) ---------------------------------------------------------
+
+/// A decode curve the viewer's built-in path applies to a frame's stored values (its tile shader
+/// and CPU twin evaluate it; this crate only names it). The light it yields is relative (1.0 =
+/// the display's white) for SDR curves and absolute for [`Tf::Pq`] / [`Tf::Hlg`]: OCIO's display
+/// reference, 1.0 = 100 nits.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Tf {
+    Linear,
+    /// The piecewise sRGB EOTF.
+    Srgb,
+    /// BT.709 camera OETF inverse (OIIO `Rec709`).
+    Rec709,
+    /// Pure power law (`g22_rec709_display`, `g24_rec709_display` = BT.1886 with a zero black,
+    /// DPX user gamma).
+    Gamma(f32),
+    /// Kodak Cineon printing-density log: 685 of 1023 codes maps to 1, 95 to 0 (density step
+    /// 0.002, gamma 0.6). `KodakLog` is a bare name in OIIO; this is the standard curve.
+    Cineon,
+    /// SMPTE ST 2084, in units of 100 nits.
+    Pq,
+    /// BT.2100 HLG on its 1000-nit reference display (inverse OETF, then the OOTF with system
+    /// gamma 1.2 on the BT.2020 luminance), in units of 100 nits: OCIO's `Rec.2100-HLG - Display`.
+    Hlg,
+}
+
+/// How the built-in path decodes a tag: the curve, then a linear-RGB matrix into Rec.709 (the
+/// canvas primaries; identity for Rec.709 sources), and whether the light is absolute (1.0 = 100
+/// nits, shown at those nits on an HDR output) rather than relative to SDR white.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Builtin {
     pub tf: Tf,
-    /// Row-major linear-RGB matrix into Rec.709 primaries; `None` when the source already is.
-    pub to709: Option<[[f32; 3]; 3]>,
-    /// The tag as shown in the Metadata panel.
-    pub name: String,
+    /// Row-major linear-RGB matrix into Rec.709 primaries (Bradford when the white points differ).
+    pub to709: [[f32; 3]; 3],
+    pub absolute: bool,
+}
+
+/// The identity matrix.
+pub const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+impl Builtin {
+    /// Linear Rec.709, relative: the built-in path's own reference.
+    pub const LINEAR: Builtin = Builtin { tf: Tf::Linear, to709: IDENTITY, absolute: false };
 }
 
 /// Transfer token of a Color Interop Forum ID (`<transfer>_<primaries>_<scene|display>`).
-///
-/// A `*_display` ID is linearised by inverting the display encoding (its EOTF), like OIIO's
-/// colorconvert to `lin_rec709_scene` does for the encoding itself. The ACES output transform
-/// (tone map, gamut compression) a studio config puts between display and scene is NOT inverted:
-/// a still tagged this way is a plain encoded picture, not an ACES rendering.
 fn tf_of(tok: &str) -> Option<Tf> {
     Some(match tok {
         "lin" => Tf::Linear,
@@ -220,21 +341,21 @@ fn primaries_of(tok: &str) -> Option<&'static vfx_primaries::Primaries> {
     })
 }
 
-/// Curve and primaries of a tag, resolved through vfx-io's colour-space table (the one owner of
+/// Curve and primaries of a space name, through vfx-io's colour-space table (the one owner of
 /// OIIO's names and aliases); `None` when the table does not know the name or it is not RGB.
-fn resolve(name: &str, gamma: Option<f32>) -> Option<(Tf, &'static vfx_primaries::Primaries)> {
+fn curve_of(name: &str) -> Option<(Tf, &'static vfx_primaries::Primaries)> {
     let is = |canon: &str| colorspace::equivalent(name, canon);
     let rec709 = &vfx_primaries::REC709;
-    // The names OIIO's readers set that carry no interop ID, or a gamma only `oiio:Gamma` knows.
-    if is(colorspace::SRGB_REC709_SCENE) {
-        return Some((Tf::Srgb, rec709));
-    } else if is(colorspace::LIN_REC709_SCENE) {
+    // Without a config the built-in reference is linear Rec.709, so is the untagged EXR's role.
+    if name.eq_ignore_ascii_case(colorspace::SCENE_LINEAR) || is(colorspace::LIN_REC709_SCENE) {
         return Some((Tf::Linear, rec709));
+    } else if is(colorspace::SRGB_REC709_SCENE) {
+        return Some((Tf::Srgb, rec709));
     } else if is(colorspace::REC709) {
         return Some((Tf::Rec709, rec709));
     } else if is(colorspace::KODAK_LOG) {
         return Some((Tf::Cineon, rec709));
-    } else if let Some(g) = colorspace::rec709_gamma_of(name, gamma) {
+    } else if let Some(g) = colorspace::rec709_gamma_of(name, None) {
         return Some((Tf::Gamma(g), rec709));
     }
     // Everything else by its interop ID, which spells both halves out.
@@ -243,82 +364,31 @@ fn resolve(name: &str, gamma: Option<f32>) -> Option<(Tf, &'static vfx_primaries
     Some((tf_of(parts.next()?)?, primaries_of(parts.next()?)?))
 }
 
-/// The [`Space`] of `img` (`unset` rule included).
-pub fn space_of(img: &ImageData) -> Result<Space, ImportError> {
-    let integer = matches!(img.data, PixelData::U8(_) | PixelData::U16(_));
-    let Some(name) = img.metadata.colorspace() else {
-        let (tf, name) = if integer { (Tf::Srgb, "sRGB (untagged integer)") } else { (Tf::Linear, "linear (untagged float)") };
-        return Ok(Space { tf, to709: None, name: name.into() });
-    };
-    let (tf, prim) = resolve(name, img.metadata.gamma()).ok_or_else(|| ImportError::ColorSpace(name.to_owned()))?;
-    // Bradford-adapted when the white points differ (AP0/AP1 are D60); out-of-gamut results stay
-    // negative, the scene-linear canvas keeps them.
-    let to709 = (*prim != vfx_primaries::REC709).then(|| vfx_primaries::rgb_to_rgb_matrix(prim, &vfx_primaries::REC709).m);
-    Ok(Space { tf, to709, name: name.to_owned() })
-}
-
-/// Rotate the linear `R G B` planes by `m` (associated alpha commutes with a linear map).
-fn rotate(planes: &mut [Vec<f32>], names: &[String], m: &[[f32; 3]; 3]) {
-    let at = |n: &str| names.iter().position(|s| s == n);
-    let (Some(r), Some(g), Some(b)) = (at("R"), at("G"), at("B")) else { return };
-    // Three disjoint mutable planes out of the slice, in R G B order.
-    let mut rgb: [Option<&mut Vec<f32>>; 3] = [None, None, None];
-    for (i, plane) in planes.iter_mut().enumerate() {
-        if let Some(k) = [r, g, b].iter().position(|&c| c == i) {
-            rgb[k] = Some(plane);
-        }
+/// The built-in decode of `tag`: what the viewer shows without an OCIO config. A tag with no
+/// curve here (an OCIO-only name, XYZ, CMYK) is a typed error, never a guess.
+pub fn builtin(tag: &ColorTag) -> Result<Builtin, ImportError> {
+    if let TagOrigin::Luminance { to_xyz } = tag.origin {
+        let m = vfx_primaries::xyz_to_rgb_matrix(&vfx_primaries::REC709) * vfx_primaries::Mat3 { m: to_xyz };
+        return Ok(Builtin { tf: Tf::Linear, to709: m.m, absolute: true });
     }
-    let [Some(pr), Some(pg), Some(pb)] = rgb else { return };
-    for ((r, g), b) in pr.iter_mut().zip(pg.iter_mut()).zip(pb.iter_mut()) {
-        let v = [*r, *g, *b];
-        let out = m.map(|row| row[0] * v[0] + row[1] * v[1] + row[2] * v[2]);
-        (*r, *g, *b) = (out[0], out[1], out[2]);
-    }
-}
-
-/// Decode table for 8/16-bit sources: one curve evaluation per code, not per sample.
-fn table(data: &PixelData, tf: Tf) -> Option<Vec<f32>> {
-    let max = match data {
-        PixelData::U8(_) => 255usize,
-        PixelData::U16(_) => 65535,
-        _ => return None,
-    };
-    Some((0..=max).map(|i| tf.lin(i as f32 / max as f32)).collect())
+    let (tf, prim) = curve_of(&tag.space).ok_or_else(|| ImportError::ColorSpace(tag.space.clone()))?;
+    // Out-of-gamut results stay negative: the canvas keeps them on an HDR output.
+    let to709 = if *prim == vfx_primaries::REC709 { IDENTITY } else { vfx_primaries::rgb_to_rgb_matrix(prim, &vfx_primaries::REC709).m };
+    Ok(Builtin { tf, to709, absolute: matches!(tf, Tf::Pq | Tf::Hlg) })
 }
 
 fn is_straight(img: &ImageData) -> bool {
     img.metadata.attrs.get("oiio:UnassociatedAlpha").and_then(|v| v.as_u32()).is_some_and(|v| v != 0)
 }
 
-/// The decoded planes: linearised colour, associated alpha, data channels untouched.
-fn planes(img: &ImageData, tf: Tf, names: &[String], alpha: Option<usize>) -> Vec<Vec<f32>> {
+/// The decoded planes as read, one per channel: integers normalised to 0..1, floats as stored.
+fn planes(img: &ImageData) -> Vec<Vec<f32>> {
     let c = img.channels as usize;
     let n = img.pixel_count();
-    let straight = is_straight(img);
-    let lut = table(&img.data, tf);
-    let colour: Vec<bool> = names.iter().map(|s| matches!(s.as_str(), "R" | "G" | "B" | "Y")).collect();
-    // The table serves a code as stored; a division by alpha leaves the codes.
-    let lin = |i: usize, div: f32| match (&lut, &img.data) {
-        (Some(t), PixelData::U8(d)) if div == 1.0 => t[d[i] as usize],
-        (Some(t), PixelData::U16(d)) if div == 1.0 => t[d[i] as usize],
-        _ => tf.lin(img.sample_f32(i) / div),
-    };
     let mut out = vec![Vec::with_capacity(n); c];
     for p in 0..n {
-        let base = p * c;
-        let a = alpha.map(|k| img.sample_f32(base + k));
         for (ch, plane) in out.iter_mut().enumerate() {
-            let i = base + ch;
-            plane.push(if !colour[ch] {
-                img.sample_f32(i)
-            } else {
-                match a {
-                    None => lin(i, 1.0),
-                    Some(a) if straight => lin(i, 1.0) * a,
-                    Some(a) if a > 0.0 => lin(i, a) * a,
-                    Some(_) => lin(i, 1.0),
-                }
-            });
+            plane.push(img.sample_f32(p * c + ch));
         }
     }
     out
@@ -346,45 +416,70 @@ fn decode(path: &Path) -> Result<ImageData, ImportError> {
 /// Load a foreign still: first frame/page of multi-image files (GIF, ICO, TIFF, WebP).
 pub fn load(path: &Path) -> Result<Loaded, ImportError> {
     let img = decode(path)?;
-    let Space { tf, to709, name: space } = space_of(&img)?;
+    let tag = foreign_tag(&img);
     let spec = img.to_spec();
     let names = spec.channel_names.clone();
-    let alpha = usize::try_from(spec.alpha_channel).ok();
+    let alpha = spec.alpha_channel >= 0;
     let (w, h) = (img.width as i32, img.height as i32);
     if names.len() != img.channels as usize || w == 0 || h == 0 {
         return Err(ImportError::Pixels(format!("{}: {}x{} with {} channel name(s) for {} channel(s)", path.display(), w, h, names.len(), img.channels)));
     }
-    let mut planes = planes(&img, tf, &names, alpha);
-    if let Some(m) = &to709 {
-        rotate(&mut planes, &names, m);
-    }
-    // 8-bit sources keep half the memory: half's 11 bits beat a linear 8-bit step except in the
-    // deepest shadows, where the step itself is far below visibility.
+    // 8-bit sources keep half the memory: half's 11 bits hold every code k/255 to well under half
+    // a code step.
     let half = matches!(img.data, PixelData::U8(_));
     let mut out = Image::new(Box2i::from_min_max(V2i::new(0, 0), V2i::new(w - 1, h - 1)));
-    for (name, plane) in names.iter().zip(planes) {
+    for (name, plane) in names.iter().zip(planes(&img)) {
         let data = if half { ChannelData::Half(plane.into_iter().map(Half::from).collect()) } else { ChannelData::Float(plane) };
         out.insert_channel(name.clone(), data).map_err(|e| ImportError::Pixels(e.to_string()))?;
     }
 
-    let straight = is_straight(&img);
+    let straight = alpha && is_straight(&img);
+    // The tag and the alpha kind are the frame's own fields ([`Loaded::tag`], [`Loaded::straight`]);
+    // the viewer shows them with the resolved colour space, so they are not repeated here.
     let mut meta = vec![
         ("Source format".to_owned(), vfx_io::Format::detect(path).map(|f| format!("{f:?}")).unwrap_or_default()),
-        ("Source colour space".to_owned(), space),
         ("Source depth".to_owned(), format!("{:?}", img.format)),
     ];
-    if alpha.is_some() {
-        let how = if straight { "straight, premultiplied in linear light" } else { "associated as stored" };
-        meta.push(("Source alpha".to_owned(), how.to_owned()));
-    }
     for (k, v) in img.metadata.attrs.iter_flat() {
         let v = v.to_string();
         if v.len() <= 200 {
             meta.push((k.to_string(), v));
         }
     }
-    let white_nits = (tf == Tf::Pq).then_some(HDR_REFERENCE_WHITE_NITS);
-    Ok(Loaded { image: out, meta, white_nits })
+    Ok(Loaded { image: out, tag, straight, meta })
+}
+
+impl Loaded {
+    /// The still as an EXR image, as `oiiotool in.png -o out.exr` writes it: the values as read
+    /// (no colour conversion), alpha associated (straight colour multiplied by alpha in the stored
+    /// encoding, OpenEXR's alpha model), and the tag as the standard `colorInteropID` attribute
+    /// when the file named it (an untagged still stays untagged, so a reader's file rules decide).
+    pub fn to_exr(self) -> Result<Image, ImportError> {
+        let Loaded { image, tag, straight, .. } = self;
+        let mut out = Image::new(image.data_window);
+        let alpha = image.channel("A").map(ChannelData::to_f32);
+        let pixels = |e: exr_core::ExrError| ImportError::Pixels(e.to_string());
+        for (name, data) in image.into_channels().map_err(pixels)? {
+            let data = match (&alpha, straight && matches!(name.as_str(), "R" | "G" | "B" | "Y")) {
+                (Some(a), true) => {
+                    let v: Vec<f32> = data.to_f32().iter().zip(a).map(|(c, a)| c * a).collect();
+                    match data {
+                        ChannelData::Half(_) => ChannelData::Half(v.into_iter().map(Half::from).collect()),
+                        _ => ChannelData::Float(v),
+                    }
+                }
+                _ => data,
+            };
+            out.insert_channel(name, data).map_err(pixels)?;
+        }
+        if tag.origin == TagOrigin::File {
+            let id = exr_core::attr::ExrString::from(tag.space.as_str());
+            out.attributes_mut()
+                .insert("colorInteropID", Box::new(exr_core::attr::TypedAttribute::new(id)))
+                .map_err(pixels)?;
+        }
+        Ok(out)
+    }
 }
 
 /// A header-level summary for `exr-rs info` (size, channels, format) without decoding the pixels.

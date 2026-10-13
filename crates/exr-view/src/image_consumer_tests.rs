@@ -184,8 +184,7 @@ fn look() -> DisplayLook {
         tonemap: 0,
         nearest: true,
         hdr: false,
-        ocio_gain: 1.0,
-        light_gain: 1.0,
+        src: crate::transfer::Src::LINEAR,
     }
 }
 fn place(zoom: f32, width: f32) -> Placement {
@@ -555,6 +554,7 @@ fn accepted_native_mosaic_drives_display_scopes_readout_and_frozen_two_pass_expo
         let half = imath_rs::Half::from_f32(v).to_f32();
         let expected = crate::transfer::display_pixel(
             [half, half, half, 1.0],
+            &crate::transfer::Src::LINEAR,
             0.0,
             1.0,
             crate::transfer::mode::RGBA,
@@ -568,7 +568,7 @@ fn accepted_native_mosaic_drives_display_scopes_readout_and_frozen_two_pass_expo
         }
     }
     let (_, w, h) = image
-        .ensure_linear(&device, &queue, &mut renderer, &mut display, Some(&mut stage))
+        .ensure_linear(&device, &queue, &mut renderer, &mut display, Some(&mut stage), None)
         .unwrap();
     assert_eq!((w, h), (513, 7));
     let scope = display.scope.as_ref().unwrap();
@@ -748,7 +748,7 @@ fn accepted_native_mosaic_drives_display_scopes_readout_and_frozen_two_pass_expo
         old_overlay_line,
     );
     let (_, w, h) = image
-        .ensure_linear(&device, &queue, &mut renderer, &mut display, Some(&mut stage))
+        .ensure_linear(&device, &queue, &mut renderer, &mut display, Some(&mut stage), None)
         .unwrap();
     assert_eq!((w, h), (513, 7));
     let held_scope = display.scope.as_ref().unwrap();

@@ -47,18 +47,18 @@ pub struct Look {
     pub mode: u32,
     /// `transfer::tonemap::*`.
     pub tonemap: u32,
-    /// The OCIO transform of the colour image in place of the tone operator and the
-    /// sRGB encode (`None` = the built-in transform).
+    /// The OCIO transform of the shown frame's colour image in place of the built-in decode,
+    /// the tone operator and the sRGB encode (`None` = the built-in transform).
     pub ocio: Option<Arc<crate::ocio::Transform>>,
-    /// SDR white in nits, for a linear OCIO transform's gain (HDR output).
+    /// How the frame's stored values are read (`ocio::State::frame`): the built-in decode, the
+    /// alpha kind and the display gain for the output the file is saved for.
+    pub src: transfer::Src,
+    /// SDR white in nits: the nits of canvas light 1.0 in an HDR file.
     pub white: f32,
     /// The HLG display's peak in nits (the viewer's `Target::peak`: Settings > Display, else
     /// the OS's, else 1000): an HLG PNG is encoded for it, so the file is what an HLG window
     /// shows. HLG is relative to its display; PQ and the EXR ignore this.
     pub peak: f32,
-    /// Gain on the colour image's source light (`DecodedFrame::light_gain`): an absolute-light
-    /// frame is saved at the nits the viewer shows it at. 1.0 for scene-relative frames.
-    pub light_gain: f32,
 }
 
 impl Default for Look {
@@ -70,9 +70,9 @@ impl Default for Look {
             mode: transfer::mode::RGBA,
             tonemap: transfer::tonemap::NONE,
             ocio: None,
+            src: transfer::Src::LINEAR,
             white: crate::present::SCRGB_NITS,
             peak: egui_display::export::HLG_REFERENCE_PEAK_NITS,
-            light_gain: 1.0,
         }
     }
 }
@@ -177,16 +177,7 @@ impl<'a> RowSession<'a> {
         let (rgba, alpha, _) = self.buffers();
         let pixels: &mut [[f32; 4]] = bytemuck::try_cast_slice_mut(rgba)
             .map_err(|_| anyhow::anyhow!("export RGBA row is not aligned"))?;
-        light(pixels, look);
-        if let Some(transform) = look.ocio.as_ref().filter(|_| look.mode == transfer::mode::RGBA) {
-            transform.display_scratch(pixels, alpha, look.exposure, look.gamma, transform.gain(look.white))
-                .map_err(anyhow::Error::msg)?;
-        } else {
-            for pixel in pixels {
-                *pixel = transfer::display_pixel(*pixel, look.exposure, look.gamma, look.mode, look.tonemap);
-            }
-        }
-        Ok(())
+        shade(pixels, alpha, look)
     }
     fn light(&mut self, y: u32, look: &Look) -> Result<()> {
         self.canvas(y, look)?;
@@ -229,45 +220,61 @@ impl<'a> RowSession<'a> {
     }
 }
 
-/// `linear` (RGBA, whole pixels) through the display transform: the canvas value
-/// per pixel (display-encoded RGB). Alpha is dropped: EXR alpha is premultiplied and
-/// PNG's is straight, so the image is saved as the viewer paints it, without the
-/// checkerboard behind it.
-fn canvas_px(linear: &[f32], look: &Look) -> Vec<[f32; 3]> {
-    let mut px: Vec<[f32; 4]> = linear.as_chunks::<4>().0.to_vec();
-    light(&mut px, look);
-    if let Some(t) = look.ocio.as_ref().filter(|_| look.mode == transfer::mode::RGBA) {
-        t.display(&mut px, look.exposure, look.gamma, t.gain(look.white));
-        return px.iter().map(|d| [d[0], d[1], d[2]]).collect();
+impl Look {
+    /// A digest of everything the display values depend on (the scopes' upload key): equal
+    /// looks give equal ids, a change of any dial, the transform or the frame's source reading
+    /// gives another. Never 0 (0 is the scopes' "stored values").
+    pub(crate) fn id(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let floats = [self.exposure, self.gamma, self.src.gain, self.white, self.peak];
+        floats.map(f32::to_bits).hash(&mut h);
+        (self.mode, self.tonemap, self.src.straight).hash(&mut h);
+        format!("{:?}", self.src.builtin).hash(&mut h);
+        self.ocio.as_ref().map(|t| t.key.as_str()).hash(&mut h);
+        h.finish().max(1)
     }
-    px.iter()
-        .map(|p| {
-            let d = transfer::display_pixel(*p, look.exposure, look.gamma, look.mode, look.tonemap);
-            [d[0], d[1], d[2]]
-        })
-        .collect()
 }
 
-/// The tile shader's `lit`: the colour image's light times `look.light_gain`; isolated channels
-/// are data and stay as stored.
-fn light(px: &mut [[f32; 4]], look: &Look) {
-    if look.mode != transfer::mode::RGBA || look.light_gain == 1.0 {
-        return;
+/// [`shade`] over flat stored RGBA samples (`4 * n` floats), in place.
+pub(crate) fn shade_flat(rgba: &mut [f32], look: &Look) -> Result<()> {
+    let px: &mut [[f32; 4]] = bytemuck::try_cast_slice_mut(rgba).map_err(|_| anyhow::anyhow!("RGBA samples are not whole pixels"))?;
+    let mut alpha = vec![0.0; px.len()];
+    shade(px, &mut alpha, look)
+}
+
+/// The one CPU display transform of every export path: stored RGBA `px` to canvas values in
+/// place, through the shown frame's OCIO transform (colour mode) or the built-in twin of the tile
+/// shader; `alpha` is the OCIO twin's per-pixel scratch (`px.len()` long).
+fn shade(px: &mut [[f32; 4]], alpha: &mut [f32], look: &Look) -> Result<()> {
+    if let Some(t) = look.ocio.as_ref().filter(|_| look.mode == transfer::mode::RGBA) {
+        return t.display_scratch(px, alpha, &look.src, look.exposure, look.gamma).map_err(anyhow::Error::msg);
     }
     for p in px {
-        for c in &mut p[..3] {
-            *c *= look.light_gain;
-        }
+        *p = transfer::display_pixel(*p, &look.src, look.exposure, look.gamma, look.mode, look.tonemap);
     }
+    Ok(())
 }
 
-/// `linear` (`w * h * 4` RGBA) through the display transform, as SDR 8-bit RGB.
-pub fn encode(linear: &[f32], look: &Look) -> Vec<u8> {
+/// Stored RGBA (whole pixels) through the display transform: the canvas value per pixel
+/// (display-encoded RGB, premultiplied in light). Alpha is dropped: EXR alpha is premultiplied and
+/// PNG's is straight, so the image is saved as the viewer paints it, without the checkerboard
+/// behind it.
+fn canvas_px(stored: &[f32], look: &Look) -> Result<Vec<[f32; 3]>> {
+    let mut px: Vec<[f32; 4]> = stored.as_chunks::<4>().0.to_vec();
+    let mut alpha = vec![0.0; px.len()];
+    shade(&mut px, &mut alpha, look)?;
+    Ok(px.iter().map(|d| [d[0], d[1], d[2]]).collect())
+}
+
+/// Stored `w * h * 4` RGBA through the display transform, as SDR 8-bit RGB.
+pub fn encode(stored: &[f32], look: &Look) -> Result<Vec<u8>> {
     use rayon::prelude::*;
-    linear
+    let strips: Vec<Vec<u8>> = stored
         .par_chunks(STRIP * 4)
-        .flat_map_iter(|c| canvas_px(c, look).into_iter().flat_map(|d| d.map(transfer::code8)))
-        .collect()
+        .map(|c| Ok(canvas_px(c, look)?.into_iter().flat_map(|d| d.map(transfer::code8)).collect()))
+        .collect::<Result<_>>()?;
+    Ok(strips.concat())
 }
 
 /// The display light of `linear` RGBA pixels: the canvas value decoded back to linear
@@ -277,7 +284,7 @@ pub fn encode(linear: &[f32], look: &Look) -> Vec<u8> {
 /// extended sRGB curve).
 #[cfg(test)]
 fn light_px(linear: &[f32], look: &Look) -> Vec<[f32; 3]> {
-    let mut d = canvas_px(linear, look);
+    let mut d = canvas_px(linear, look).expect("the display transform");
     for p in &mut d {
         *p = p.map(transfer::eotf);
     }
@@ -310,7 +317,7 @@ impl Raw {
         match &self.source {
             RawSource::Original(px) => {
                 Self::validate_original(self.w, self.h, px)?;
-                Ok(Shot { w: self.w, h: self.h, rgb: encode(px, look),
+                Ok(Shot { w: self.w, h: self.h, rgb: encode(px, look)?,
                     #[cfg(feature = "ofx")] _permit: None })
             },
             #[cfg(feature = "ofx")]
@@ -610,16 +617,14 @@ const HEADLESS_WAIT: Duration = Duration::from_secs(600);
 
 /// Open `input` as the viewer does (file-backed above `backing` bytes) and wait for its
 /// level 0 / overview; `ram_budget` sizes the tile cache. No window, no GPU.
-fn grab_wait(input: &Path, backing: u64, ram_budget: usize, upload: usize) -> Result<(Raw, f32)> {
-    let frame = DecodedFrame::open(input, backing).map_err(|e| anyhow::anyhow!("{}: {e}", input.display()))?;
-    // Headless SDR and HDR both put SDR white at BT.2408's HDR reference white (203 nits).
-    let gain = frame.white_nits.map_or(1.0, |nits| nits / HEADLESS_WHITE);
-    let mut img = ImageBackend::from_frame(std::sync::Arc::new(frame));
+fn grab_wait(input: &Path, backing: u64, ram_budget: usize, upload: usize) -> Result<(Raw, Arc<DecodedFrame>)> {
+    let frame = Arc::new(DecodedFrame::open(input, backing).map_err(|e| anyhow::anyhow!("{}: {e}", input.display()))?);
+    let mut img = ImageBackend::from_frame(frame.clone());
     let mut target = DisplayTarget::new(ram_budget, upload);
     let deadline = Instant::now() + HEADLESS_WAIT;
     loop {
         if let Some(raw) = grab(&mut img, &mut target, u32::MAX, None)? {
-            return Ok((raw, gain));
+            return Ok((raw, frame));
         }
         if Instant::now() > deadline {
             bail!("{}: the overview did not arrive within {HEADLESS_WAIT:?}", input.display());
@@ -628,10 +633,33 @@ fn grab_wait(input: &Path, backing: u64, ram_budget: usize, upload: usize) -> Re
     }
 }
 
-/// Open `input`, take the shot with the neutral look and write it to `output` as an SDR PNG.
-pub fn headless(input: &Path, output: &Path, backing: u64, ram_budget: usize, upload: usize) -> Result<Shot> {
-    let (raw, light_gain) = grab_wait(input, backing, ram_budget, upload)?;
-    let shot = raw.sdr(&Look { light_gain, ..Look::default() })?;
+/// The neutral look (0 EV, gamma 1, RGBA, no tone operator) of `frame` for `target`, through
+/// the OCIO choice `sel` as the viewer would show it (`ocio::State::frame`: the frame's colour
+/// space, its view, the same processor). OCIO on but not shown (a config that does not load, a
+/// colour space the config lacks) is an error, not a silent built-in shot.
+fn headless_look(frame: &DecodedFrame, sel: &crate::ocio::Sel, target: &crate::present::Target) -> Result<Look> {
+    let mut colour = crate::ocio::State::new(sel.clone());
+    colour.set_hdr(target.hdr);
+    let src = colour.frame(frame, target).map_err(anyhow::Error::msg)?;
+    if let Some(e) = &colour.err {
+        bail!("OCIO: {e}");
+    }
+    Ok(Look { ocio: colour.active().cloned(), src, white: target.white, ..Look::default() })
+}
+
+/// Open `input`, take the shot with the neutral look through `sel` and write it to `output` as
+/// an SDR PNG.
+pub fn headless(
+    input: &Path,
+    output: &Path,
+    sel: &crate::ocio::Sel,
+    backing: u64,
+    ram_budget: usize,
+    upload: usize,
+) -> Result<Shot> {
+    let (raw, frame) = grab_wait(input, backing, ram_budget, upload)?;
+    let target = crate::present::Target { hdr: false, white: HEADLESS_WHITE, ..crate::present::Target::default() };
+    let shot = raw.sdr(&headless_look(&frame, sel, &target)?)?;
     write_png(output, &shot)?;
     Ok(shot)
 }
@@ -640,17 +668,20 @@ pub fn headless(input: &Path, output: &Path, backing: u64, ram_budget: usize, up
 /// display shows for the neutral look.
 pub const HEADLESS_WHITE: f32 = crate::present::HDR_REF_WHITE;
 
-/// Like [`headless`], saved as HDR (`save_hdr`: `.exr`, or `.png` as `png`). Returns the size.
+/// Like [`headless`], saved as HDR (`save_hdr`: `.exr`, or `.png` as `png`) for an HDR output
+/// with SDR white at [`HEADLESS_WHITE`]. Returns the size.
 pub fn headless_hdr(
     input: &Path,
     output: &Path,
     png: HdrPng,
+    sel: &crate::ocio::Sel,
     backing: u64,
     ram_budget: usize,
     upload: usize,
 ) -> Result<(u32, u32)> {
-    let (raw, light_gain) = grab_wait(input, backing, ram_budget, upload)?;
-    save_hdr(output, &raw, &Look { white: HEADLESS_WHITE, light_gain, ..Look::default() }, png)?;
+    let (raw, frame) = grab_wait(input, backing, ram_budget, upload)?;
+    let target = crate::present::Target { hdr: true, white: HEADLESS_WHITE, ..crate::present::Target::default() };
+    save_hdr(output, &raw, &headless_look(&frame, sel, &target)?, png)?;
     Ok((raw.w, raw.h))
 }
 
@@ -696,12 +727,12 @@ mod tests {
         let want: Vec<u8> = px
             .as_chunks::<4>().0.iter()
             .flat_map(|p| {
-                let d = transfer::display_pixel([p[0], p[1], p[2], p[3]], 1.0, 1.2, transfer::mode::RGBA, transfer::tonemap::AGX);
+                let d = transfer::display_pixel([p[0], p[1], p[2], p[3]], &transfer::Src::LINEAR, 1.0, 1.2, transfer::mode::RGBA, transfer::tonemap::AGX);
                 [transfer::code8(d[0]), transfer::code8(d[1]), transfer::code8(d[2])]
             })
             .collect();
-        assert_eq!(encode(&px, &look), want);
-        assert_eq!(encode(&px, &Look::default())[..3], [118, 188, 255], "18% grey is sRGB code 118");
+        assert_eq!(encode(&px, &look).unwrap(), want);
+        assert_eq!(encode(&px, &Look::default()).unwrap()[..3], [118, 188, 255], "18% grey is sRGB code 118");
     }
 
     /// With OCIO the colour image is its CPU twin (ACES 2.0 SDR: 18 % grey at 0.349,
@@ -709,12 +740,12 @@ mod tests {
     #[test]
     fn encode_uses_ocio_for_colour_only() {
         let o = crate::ocio::Ocio::load("ocio://default").unwrap();
-        let t = Arc::new(o.transform(&o.resolve(&crate::ocio::Sel::default(), false).unwrap(), false).unwrap());
+        let t = Arc::new(o.transform(&o.resolve(&crate::ocio::Sel::default(), &o.scene(), false).unwrap(), None, false).unwrap());
         let px = [0.18f32, 0.18, 0.18, 1.0];
         let look = Look { ocio: Some(t), ..Look::default() };
-        assert_eq!(encode(&px, &look), [89, 89, 89]);
+        assert_eq!(encode(&px, &look).unwrap(), [89, 89, 89]);
         let red = Look { mode: transfer::mode::R, ..look };
-        assert_eq!(encode(&px, &red), encode(&px, &Look { mode: transfer::mode::R, ..Look::default() }));
+        assert_eq!(encode(&px, &red).unwrap(), encode(&px, &Look { mode: transfer::mode::R, ..Look::default() }).unwrap());
     }
 
     /// Headless: a resident file is saved at full resolution and reads back as the
@@ -735,7 +766,7 @@ mod tests {
             .unwrap();
 
         let out = dir.join("shot.png");
-        let shot = headless(&src, &out, u64::MAX, 1 << 30, 64 << 20).unwrap();
+        let shot = headless(&src, &out, &crate::ocio::Sel::default(), u64::MAX, 1 << 30, 64 << 20).unwrap();
         assert_eq!((shot.w, shot.h), (300, 200));
         let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&out).unwrap()));
         let mut reader = decoder.read_info().unwrap();
@@ -743,14 +774,14 @@ mod tests {
         let info = reader.next_frame(&mut buf).unwrap();
         assert_eq!((info.width, info.height, info.color_type), (300, 200, png::ColorType::Rgb));
         let at = |x: usize, y: usize| &buf[(y * w + x) * 3..(y * w + x) * 3 + 3];
-        let want = |x: usize, y: usize| encode(&[x as f32 / 300.0, y as f32 / 200.0, 0.18, 1.0], &Look::default());
+        let want = |x: usize, y: usize| encode(&[x as f32 / 300.0, y as f32 / 200.0, 0.18, 1.0], &Look::default()).unwrap();
         for (x, y) in [(0, 0), (150, 100), (299, 199)] {
             assert_eq!(at(x, y), &want(x, y)[..], "({x}, {y})");
         }
 
         // Backing budget 1 byte: file-backed, saved at the overview level (the
         // whole image here is within it, so level 0 is the overview).
-        let backed = headless(&src, &dir.join("backed.png"), 1, 1 << 30, 64 << 20).unwrap();
+        let backed = headless(&src, &dir.join("backed.png"), &crate::ocio::Sel::default(), 1, 1 << 30, 64 << 20).unwrap();
         assert_eq!((backed.w, backed.h), (300, 200));
         // A file-backed level is assembled from the pyramid's f16 tiles, a resident
         // frame's level 0 is its f32 pixels: f16 rounding moves a value across an
@@ -888,7 +919,7 @@ mod tests {
         let samples: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|b| u16::from_be_bytes(*b)).collect();
         let target = Target { hdr: true, white: 300.0, peak: 1000.0 };
         for (i, p) in px.as_chunks::<4>().0.iter().enumerate() {
-            let d = transfer::display_pixel([p[0], p[1], p[2], p[3]], 0.5, 1.1, transfer::mode::RGBA, transfer::tonemap::NONE);
+            let d = transfer::display_pixel([p[0], p[1], p[2], p[3]], &transfer::Src::LINEAR, 0.5, 1.1, transfer::mode::RGBA, transfer::tonemap::NONE);
             let want = present([d[0], d[1], d[2]], Encoding::Pq, target);
             for c in 0..3 {
                 let got = f32::from(samples[i * 3 + c]) / 65535.0;
@@ -951,7 +982,7 @@ mod tests {
         assert_ne!(png_samples(&at_1000).1, samples, "the display peak must change the HLG signal");
         let target = Target { hdr: true, white: 300.0, peak: 600.0 };
         for (i, p) in px.as_chunks::<4>().0.iter().enumerate() {
-            let d = transfer::display_pixel([p[0], p[1], p[2], p[3]], 0.5, 1.1, transfer::mode::RGBA, transfer::tonemap::NONE);
+            let d = transfer::display_pixel([p[0], p[1], p[2], p[3]], &transfer::Src::LINEAR, 0.5, 1.1, transfer::mode::RGBA, transfer::tonemap::NONE);
             let want = present([d[0], d[1], d[2]], Encoding::Hlg, target);
             for c in 0..3 {
                 let got = f32::from(samples[i * 3 + c]) / 65535.0;
@@ -992,9 +1023,10 @@ mod tests {
         }
     }
 
-    /// A display-light EXR reopens as absolute light: its `whiteLuminance` is the frame's
-    /// `white_nits`, so an HDR output shows it at the saved nits whatever its SDR white, and an
-    /// SDR output puts BT.2408's 203 nits at white. Save view scales the colour image only.
+    /// A display-light EXR reopens as absolute light: its `whiteLuminance` makes it absolute CIE
+    /// XYZ (`exr_import::TagOrigin::Luminance`), so the built-in decode holds the saved nits (in
+    /// units of 100) and an HDR output shows them whatever its SDR white; an SDR output shows
+    /// 100 nits at white. An isolated channel is data and is not scaled.
     #[test]
     fn absolute_light_round_trips_and_scales_only_colour() {
         let guard = tmp("absolute");
@@ -1002,17 +1034,21 @@ mod tests {
         let px = vec![1.0f32, 0.5, 0.25, 1.0];
         write_exr(&path, &raw(1, 1, px.clone()), &Look { white: 300.0, ..Look::default() }).unwrap();
         let frame = DecodedFrame::load(&path).unwrap();
-        assert_eq!(frame.white_nits, Some(300.0));
+        assert!(matches!(frame.tag.origin, exr_import::TagOrigin::Luminance { .. }), "{:?}", frame.tag);
+        let builtin = exr_import::builtin(&frame.tag).unwrap();
+        assert!(builtin.absolute);
         let target = |hdr, white| crate::present::Target { hdr, white, peak: 1000.0 };
-        assert_eq!(frame.light_gain(&target(true, 150.0)), 2.0);
-        assert_eq!(frame.light_gain(&target(false, 80.0)), 300.0 / crate::present::HDR_REF_WHITE);
-        let scene = crate::image::tests_support::frame_of(1, 1, Vec::new());
-        assert_eq!(scene.light_gain(&target(true, 150.0)), 1.0, "scene-relative light is not scaled");
-
-        let lit = canvas_px(&px, &Look { light_gain: 2.0, ..Look::default() });
-        assert_eq!(lit, canvas_px(&[2.0, 1.0, 0.5, 1.0], &Look::default()));
-        let red = |light_gain| Look { light_gain, mode: transfer::mode::R, ..Look::default() };
-        assert_eq!(canvas_px(&px, &red(2.0)), canvas_px(&px, &red(1.0)), "an isolated channel is data");
+        let mut colour = crate::ocio::State::new(crate::ocio::Sel::default());
+        let src = colour.frame(&frame, &target(true, 150.0)).unwrap();
+        // 1.0 at 300 nits is 2.0 x a 150-nit SDR white.
+        let lit = canvas_px(&px, &Look { src, ..Look::default() }).unwrap();
+        let want = canvas_px(&[2.0, 1.0, 0.5, 1.0], &Look::default()).unwrap();
+        for (a, b) in lit[0].iter().zip(want[0]) {
+            assert!((a - b).abs() < 1e-4, "{lit:?} vs {want:?}");
+        }
+        assert_eq!(colour.frame(&frame, &target(false, 80.0)).unwrap().gain, 1.0, "SDR shows 100 nits at white");
+        let red = |src| Look { src, mode: transfer::mode::R, ..Look::default() };
+        assert_eq!(canvas_px(&px, &red(src)).unwrap(), canvas_px(&px, &red(transfer::Src::LINEAR)).unwrap(), "an isolated channel is data");
     }
 
 
@@ -1058,7 +1094,7 @@ mod tests {
         };
         let (r, g, b) = (chan("R"), chan("G"), chan("B"));
         for (i, p) in px.as_chunks::<4>().0.iter().enumerate() {
-            let d = transfer::display_pixel([p[0], p[1], p[2], p[3]], -0.5, 1.3, transfer::mode::RGBA, transfer::tonemap::REINHARD);
+            let d = transfer::display_pixel([p[0], p[1], p[2], p[3]], &transfer::Src::LINEAR, -0.5, 1.3, transfer::mode::RGBA, transfer::tonemap::REINHARD);
             for (got, want) in [(r[i], d[0]), (g[i], d[1]), (b[i], d[2])] {
                 // Half keeps 11 bits: the light is within 2^-10 relative, the encoded
                 // value (below 1) moves less than that.
@@ -1072,7 +1108,7 @@ mod tests {
     #[test]
     fn light_follows_ocio() {
         let o = crate::ocio::Ocio::load("ocio://default").unwrap();
-        let t = Arc::new(o.transform(&o.resolve(&crate::ocio::Sel::default(), false).unwrap(), false).unwrap());
+        let t = Arc::new(o.transform(&o.resolve(&crate::ocio::Sel::default(), &o.scene(), false).unwrap(), None, false).unwrap());
         let look = Look { ocio: Some(t), ..Look::default() };
         let l = light_px(&[0.18, 0.18, 0.18, 1.0], &look)[0];
         for c in l {
@@ -1086,10 +1122,10 @@ mod tests {
     fn sdr_encode_is_strip_independent() {
         let n = STRIP + STRIP / 2 + 7;
         let px: Vec<f32> = (0..(n * 4) as u32).map(|i| noise(i, 2500)).collect();
-        let got = encode(&px, &Look::default());
+        let got = encode(&px, &Look::default()).unwrap();
         assert_eq!(got.len(), n * 3);
         for (i, p) in px.as_chunks::<4>().0.iter().enumerate() {
-            let d = transfer::display_pixel([p[0], p[1], p[2], p[3]], 0.0, 1.0, transfer::mode::RGBA, transfer::tonemap::NONE);
+            let d = transfer::display_pixel([p[0], p[1], p[2], p[3]], &transfer::Src::LINEAR, 0.0, 1.0, transfer::mode::RGBA, transfer::tonemap::NONE);
             assert_eq!(got[i * 3..i * 3 + 3], [d[0], d[1], d[2]].map(transfer::code8), "pixel {i}");
         }
     }

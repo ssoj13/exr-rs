@@ -1023,6 +1023,8 @@ impl AppState {
         self.controls.crypto_layer.clear();
         self.controls.crypto_name.clear();
         self.crypto = None;
+        // The input override is for the file it was picked on.
+        self.controls.colour.set_override(None);
     }
 
     /// Open a detected sequence: build the clock over the PRESENT frame set
@@ -1430,10 +1432,29 @@ impl AppState {
             return;
         };
 
+        // Stored values, or the display values (the colour image through the shown display
+        // transform, the export's CPU twin): a switch over every scope.
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.config.scope_display, "Display values")
+                .on_hover_text("Off: the frame's stored values. On: the colour image as displayed (its colour space through the display transform, exposure and gamma), encoded.");
+        });
+        let look = if self.config.scope_display {
+            let target = self.controls.target;
+            match Self::display_look(&mut self.controls, &img.frame, &target) {
+                Ok(look) => Some(look),
+                Err(e) => {
+                    ui.colored_label(ui.visuals().error_fg_color, e);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
         // Ensure the linear source texture is on the GPU (no-op if present()
         // already uploaded it this frame) and grab its view + dimensions.
         let Some((src_view, src_w, src_h)) =
-            img.ensure_linear(gpu.device, gpu.queue, gpu.renderer, display_gpu, stage)
+            img.ensure_linear(gpu.device, gpu.queue, gpu.renderer, display_gpu, stage, look.as_ref())
         else {
             ui.centered_and_justified(|ui| {
                 ui.label("Empty image — nothing to analyse.");
@@ -1611,19 +1632,27 @@ impl AppState {
         }
     }
 
+    /// The CPU display transform of `frame` as the viewport shows it for `target` (the dials, the
+    /// frame's colour resolution, the OCIO transform): what Save view and the scopes' display
+    /// values run (`export::shade`). `Err` when the colour image cannot be shown (no OCIO and no
+    /// built-in decode for the frame's tag).
+    fn display_look(controls: &mut ViewControls, frame: &DecodedFrame, target: &crate::present::Target) -> Result<crate::export::Look, String> {
+        let src = controls.colour.frame(frame, target)?;
+        Ok(crate::export::Look {
+            exposure: controls.exposure,
+            gamma: controls.gamma,
+            mode: controls.channel.to_channel_mode(),
+            tonemap: controls.tonemap,
+            ocio: controls.colour.active().cloned(),
+            src,
+            white: target.white,
+            peak: target.peak,
+        })
+    }
+
     /// Save what is shown (`export.rs`) and say how it went on the status line: an SDR
     /// 8-bit PNG, or with `hdr` the display light as `.exr` / that signal as a `.png`.
     fn save_view(&mut self, path: &Path, max_dim: u32, hdr: Option<crate::export::HdrPng>) {
-        let mut look = crate::export::Look {
-            exposure: self.controls.exposure,
-            gamma: self.controls.gamma,
-            mode: self.controls.channel.to_channel_mode(),
-            tonemap: self.controls.tonemap,
-            ocio: self.controls.colour.active().cloned(),
-            white: self.controls.target.white,
-            peak: self.controls.target.peak,
-            light_gain: 1.0,
-        };
         let display_gpu = &mut self.display_gpu;
         #[cfg(feature = "ofx")]
         let stage = Self::stage(&mut self.effects);
@@ -1638,10 +1667,16 @@ impl AppState {
             self.status = "Nothing to save".to_owned();
             return;
         };
-        // The file holds the light the saved encoding shows: HDR at the display's SDR white,
-        // the SDR PNG at BT.2408's (as the viewer on an SDR output).
+        // The same per-frame resolution as the viewport (`ocio::State::frame`); the gain is the
+        // saved encoding's: HDR at the display's SDR white, SDR as on an SDR output.
         let target = crate::present::Target { hdr: hdr.is_some(), ..self.controls.target };
-        look.light_gain = img.frame.light_gain(&target);
+        let look = match Self::display_look(&mut self.controls, &img.frame, &target) {
+            Ok(look) => look,
+            Err(e) => {
+                self.status = format!("Save view failed: {e}");
+                return;
+            }
+        };
         self.status = match crate::export::grab(img, display_gpu, max_dim, stage) {
             Ok(None) => "Save view: the image is still loading, try again".to_owned(),
             Err(crate::tiles::region::RegionError::Pending) =>
@@ -1724,6 +1759,18 @@ impl AppState {
                 ui.monospace(format!("Primary pixel aspect: {}", source.pixel_aspect));
             });
         }
+        let colour = self.controls.colour.rows();
+        if !colour.is_empty() {
+            section(ui, "Colour", colors.status_info, |ui| {
+                egui::Grid::new("meta.colour").num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| {
+                    for (k, v) in colour {
+                        ui.label(k);
+                        ui.label(v);
+                        ui.end_row();
+                    }
+                });
+            });
+        }
         // Only show raw header attributes belonging to this accepted primary.
         let fields = self.current_backend().filter(|_img| {
             #[cfg(feature = "ofx")]
@@ -1799,6 +1846,18 @@ impl AppState {
                     if let Some(rows) = img.readout_at(px, py) {
                         ui.monospace(format!("x: {px}   y: {py}"));
                         for (name, v) in rows {
+                            ui.monospace(format!("{name}: {v:.6}"));
+                        }
+                    }
+                    // The stored colour in the config's scene_linear (OCIO on): the values a
+                    // compositor's working space would hold, next to the file's own.
+                    if self.controls.channel == ChannelDisplay::Rgba
+                        && let Some(p) = img.pixel_at(px, py)
+                        && let Some(lin) = self.controls.colour.scene_linear(crate::transfer::unpremul([p[0], p[1], p[2]], p[3], img.frame.straight))
+                    {
+                        ui.separator();
+                        ui.label(egui::RichText::new("scene_linear (OCIO), unpremultiplied").strong());
+                        for (name, v) in ["R", "G", "B"].into_iter().zip(lin) {
                             ui.monospace(format!("{name}: {v:.6}"));
                         }
                     }
@@ -2937,6 +2996,8 @@ fn build_ui(
         let (tiles_ram, tiles_budget) = app_state.display_gpu.tiles_ram();
         let tiles_pending = app_state.display_gpu.tiles_pending();
         let display_path = app_state.display_gpu.path();
+        let colour = app_state.controls.colour.summary();
+        let colour_err = app_state.controls.colour.err.clone();
 
         let crate::persist::Config { status_bar_layout: layout, status_bar_locked: locked, .. } = &mut app_state.config;
         // Right-click on the bar: lock the splitters / put the widths back. The sense sits under
@@ -3029,6 +3090,19 @@ fn build_ui(
                     humanize_bytes(tiles_budget as u64)
                 ))
                 .on_hover_text("RAM tile cache held / its budget; tiles still being produced");
+            }),
+            // The shown frame's colour space and where it came from; an OCIO error in red.
+            egui_statusbar::Section::new(260.0, move |ui| match (&colour, &colour_err) {
+                (_, Some(e)) => {
+                    ui.colored_label(ui.visuals().error_fg_color, format!("colour: {e}"))
+                        .on_hover_text("Settings > Colour: pick an input override for this file, or another view.");
+                }
+                (Some(c), None) => {
+                    ui.label(format!("colour: {c}")).on_hover_text("The frame's colour space (Metadata > Colour has the details).");
+                }
+                (None, None) => {
+                    ui.label("colour —");
+                }
             }),
             // File / dimensions / channels (the flex tail).
             egui_statusbar::Section::new(0.0, move |ui| {

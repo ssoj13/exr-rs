@@ -3173,7 +3173,6 @@ dependencies = [
  "thiserror 2.0.21",
  "vfx-io",
  "vfx-primaries",
- "vfx-transfer",
 ]
 
 [[package]]
