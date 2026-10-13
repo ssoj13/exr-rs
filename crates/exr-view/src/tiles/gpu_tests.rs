@@ -416,7 +416,7 @@ fn tiles_render_the_display_transform_of_every_texel() {
         let look = Look { exposure_ev: 0.5, gamma: 1.1, channel_mode, tonemap: tonemap::NONE, nearest: true, hdr, src };
         let got = render(&device, &queue, &mut gpu, &mut state, 1.0, look, w, h);
         let what = format!("decode {what} mode={channel_mode} hdr={hdr}");
-        if src.builtin.absolute {
+        if src.builtin.nits.is_some() {
             check_light(&got, &codes, w, h, look, &what);
         } else {
             check(&got, &codes, w, h, look, &what);
@@ -513,7 +513,7 @@ fn tiles_render_the_ocio_transform_of_every_texel() {
 
     // SDR white of the HDR cases: the absolute 1000-nit view scales by 100/203.
     let white = crate::present::Target { hdr: true, white: 203.0, peak: 1000.0 };
-    let gain = |t: &crate::ocio::Transform| crate::ocio::display_gain(t.absolute(), &white);
+    let gain = |t: &crate::ocio::Transform| crate::ocio::display_gain(t.absolute().then_some(100.0), &white);
     assert!((gain(&hdr) - 100.0 / 203.0).abs() < 1e-6 && gain(&aces) == 1.0);
     for (t, ev, gamma, channel_mode, out_hdr) in [
         (&aces, 0.0, 1.0, mode::RGBA, false),

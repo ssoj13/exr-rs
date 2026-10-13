@@ -122,7 +122,10 @@ source viewed with `Video (colorimetric)` on a PQ display is PQ -> XYZ -> PQ: an
   video default none; test: the PQ PNG with a saved scene LMT keeps no look and stays an identity.
 - [ ] HIGH 2 EDR displays (`Encoding::Edr` from oiio-rs), the SDR screenshot on a matching SDR
   display, `srgbe_p3d65_display` frames get their video view.
-- [ ] MEDIUM 3 whiteLuminance round trip exact on relative displays (203 test).
+- [x] MEDIUM 3 `TagOrigin::Luminance { to_xyz, nits }`: RGB 1 is the display reference's 1.0
+  (the white of a relative display), `nits` only sets where an absolute (HDR) output shows it
+  (`Builtin::nits`, `ocio::display_gain(nits, target)`); test `white_luminance_exr_is_display_light`
+  (203 nits: 1.0 = white on sRGB - Display, 203 nits on a PQ display at any SDR white).
 - [x] MEDIUM 4 `Ocio::key(names, pre, linear)` is asked of the cache before `transform` builds;
   test `frames_of_one_space_share_the_transform`.
 - [ ] MEDIUM 5 unmatched EXR chromaticities: pre-matrix or typed error, no silent untagged.
@@ -161,8 +164,10 @@ pq_png_keeps_codes_and_cicp_tag, ...}`, GPU `tiles_render_the_display_transform_
   the pixels to CIE XYZ (`ImfStandardAttributes.h`, `exrstdattr.rst`). So such a file is absolute
   CIE XYZ light: the tag is the config's `cie_xyz_d65_interchange` role (OCIO's display reference,
   1.0 = 100 nits; `CIE XYZ-D65 - Display-referred`, encoding display-linear in the ACES configs)
-  with a pre-matrix (primaries, Bradford to D65, x nits / 100, `TagOrigin::Luminance`), combined in
-  front of the processor (`Processor::combine`). The viewing rules then offer `Video
+  with a pre-matrix (primaries, Bradford to D65, `TagOrigin::Luminance`), combined in front of
+  the processor (`Processor::combine`). Revised in review: RGB 1 maps to the reference 1.0 (the
+  white of a relative display, so the picture reopens as saved on SDR) and `whiteLuminance` is the
+  nits an absolute (HDR) output shows that 1.0 at, not a factor on the pixels. The viewing rules then offer `Video
   (colorimetric)`, so our own Save view HDR EXRs (Rec.709 display light + `whiteLuminance`)
   reopen as they were saved, with no gain special case. A config without the role is a typed
   error (override offered); the no-OCIO path decodes the same matrix as absolute light.

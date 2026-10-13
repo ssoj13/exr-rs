@@ -73,7 +73,7 @@ fn pq_png_keeps_codes_and_cicp_tag() {
         assert_eq!((v * 65535.0).round() as u16, *k, "{ch}{i}");
     }
     let b = builtin(&l.tag).unwrap();
-    assert_eq!((b.tf, b.absolute), (Tf::Pq, true));
+    assert_eq!((b.tf, b.nits), (Tf::Pq, Some(100.0)));
 }
 
 #[test]
@@ -151,16 +151,16 @@ fn builtin_curves_of_the_interop_ids() {
     let b = |n: &str| builtin(&tag(n)).unwrap();
     assert_eq!(b("g24_rec709_display").tf, Tf::Gamma(2.4));
     assert_eq!(b("g22_rec709_display").tf, Tf::Gamma(2.2));
-    assert_eq!(b("srgb_rec709_display"), Builtin { tf: Tf::Srgb, to709: IDENTITY, absolute: false });
+    assert_eq!(b("srgb_rec709_display"), Builtin { tf: Tf::Srgb, to709: IDENTITY, nits: None });
     assert_eq!(b("srgb_rec709_scene").tf, Tf::Srgb);
     assert_eq!(b("Rec709").tf, Tf::Rec709);
     assert_eq!(b("KodakLog").tf, Tf::Cineon);
     assert_eq!(b("scene_linear"), Builtin::LINEAR);
     let pq = b("pq_rec2020_display");
-    assert_eq!((pq.tf, pq.absolute), (Tf::Pq, true));
+    assert_eq!((pq.tf, pq.nits), (Tf::Pq, Some(100.0)));
     assert_ne!(pq.to709, IDENTITY, "Rec.2020 primaries rotate into Rec.709");
     let hlg = b("hlg_rec2020_display");
-    assert_eq!((hlg.tf, hlg.absolute), (Tf::Hlg, true));
+    assert_eq!((hlg.tf, hlg.nits), (Tf::Hlg, Some(100.0)));
 }
 
 #[test]
@@ -223,15 +223,15 @@ fn exr_tag_rules() {
     l.add_white_luminance(203.0).unwrap();
     let t = exr_tag(&l).unwrap();
     assert_eq!(t.space, XYZ_DISPLAY_ROLE);
-    let TagOrigin::Luminance { to_xyz } = t.origin else { panic!("{t:?}") };
-    // White (1, 1, 1) of Rec.709 at 203 nits is D65 XYZ with Y = 2.03 display-reference units.
+    let TagOrigin::Luminance { to_xyz, nits } = t.origin else { panic!("{t:?}") };
+    // White (1, 1, 1) of Rec.709 is D65 XYZ with Y = 1 (the reference white); its nits ride along.
     let y = to_xyz[1].iter().sum::<f32>();
-    assert!((y - 2.03).abs() < 1e-4, "{to_xyz:?}");
+    assert!((y - 1.0).abs() < 1e-4 && nits == 203.0, "{to_xyz:?}");
     let b = builtin(&t).unwrap();
-    assert!(b.absolute && b.tf == Tf::Linear);
+    assert!(b.nits == Some(203.0) && b.tf == Tf::Linear);
     for (r, row) in b.to709.iter().enumerate() {
         for (c, v) in row.iter().enumerate() {
-            let want = if r == c { 2.03 } else { 0.0 };
+            let want = if r == c { 1.0 } else { 0.0 };
             assert!((v - want).abs() < 1e-4, "{:?}", b.to709);
         }
     }

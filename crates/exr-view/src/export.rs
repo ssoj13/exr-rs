@@ -1036,7 +1036,7 @@ mod tests {
         let frame = DecodedFrame::load(&path).unwrap();
         assert!(matches!(frame.tag.origin, exr_import::TagOrigin::Luminance { .. }), "{:?}", frame.tag);
         let builtin = exr_import::builtin(&frame.tag).unwrap();
-        assert!(builtin.absolute);
+        assert_eq!(builtin.nits, Some(300.0));
         let target = |hdr, white| crate::present::Target { hdr, white, peak: 1000.0 };
         let mut colour = crate::ocio::State::new(crate::ocio::Sel::default());
         let src = colour.frame(&frame, &target(true, 150.0)).unwrap();

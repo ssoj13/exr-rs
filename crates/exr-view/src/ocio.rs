@@ -166,8 +166,26 @@ pub fn source(sel_config: &str) -> String {
 /// an absolute source of the built-in decode (OCIO's display reference, 1.0 = 100 nits; a
 /// 1000-nit view peaks at 10): 100/white on an HDR output, so the present pass, which scales
 /// canvas 1.0 to `white` nits, lands on the nits meant. An SDR output shows 100 nits at white.
-pub fn display_gain(absolute: bool, target: &crate::present::Target) -> f32 {
-    if absolute && target.hdr { 100.0 / target.white.max(1.0) } else { 1.0 }
+///
+/// `nits` is the nits of the light's 1.0 when it is absolute (an HDR display colour space: 100,
+/// the display reference; a frame with its own white, `exr_import::Builtin::nits`), `None` when
+/// relative.
+pub fn display_gain(nits: Option<f32>, target: &crate::present::Target) -> f32 {
+    match nits {
+        Some(n) if target.hdr => n / target.white.max(1.0),
+        _ => 1.0,
+    }
+}
+
+/// The nits of a transform's light 1.0 for a frame tagged `tag`: OCIO's display reference (100)
+/// on an absolute (HDR) display, or the frame's own white when it is display light with a stated
+/// white (EXR `whiteLuminance`, whose 1.0 is the reference white).
+fn nits_of(t: &Transform, tag: &ColorTag) -> Option<f32> {
+    let white = match tag.origin {
+        TagOrigin::Luminance { nits, .. } => nits,
+        _ => 100.0,
+    };
+    t.absolute().then_some(white)
 }
 
 /// A frame's colour space in a config ([`Ocio::space`]).
@@ -260,7 +278,7 @@ impl Ocio {
                     _ => self.find(&tag.space, format!("{}, untagged fallback", tag.space)),
                 }
             }
-            TagOrigin::Luminance { to_xyz } => self.find(&tag.space, how).map(|s| Space { pre: Some(to_xyz), ..s }),
+            TagOrigin::Luminance { to_xyz, .. } => self.find(&tag.space, how).map(|s| Space { pre: Some(to_xyz), ..s }),
             TagOrigin::File | TagOrigin::Chromaticities => self.find(&tag.space, how),
         }
     }
@@ -753,11 +771,11 @@ impl State {
             Some(t) => Ok(Src {
                 builtin: s.builtin.clone().unwrap_or(Builtin::LINEAR),
                 straight: s.straight,
-                gain: display_gain(t.absolute(), target),
+                gain: display_gain(nits_of(t, &s.tag), target),
             }),
             None => {
                 let builtin = s.builtin.clone()?;
-                Ok(Src { builtin, straight: s.straight, gain: display_gain(builtin.absolute, target) })
+                Ok(Src { builtin, straight: s.straight, gain: display_gain(builtin.nits, target) })
             }
         }
     }
@@ -857,7 +875,10 @@ impl State {
             ("Tag origin", s.tag.origin.label().to_owned()),
             ("Alpha", if s.straight { "straight" } else { "associated (or none)" }.to_owned()),
             ("Built-in decode", match &s.builtin {
-                Ok(b) => format!("{:?}{}", b.tf, if b.absolute { ", absolute (100 nits = 1)" } else { "" }),
+                Ok(b) => match b.nits {
+                    Some(n) => format!("{:?}, absolute ({n} nits = 1)", b.tf),
+                    None => format!("{:?}", b.tf),
+                },
                 Err(e) => e.clone(),
             }),
         ];
@@ -1421,7 +1442,7 @@ mod tests {
         for v in [0.02f32, 0.18, 0.7, 3.0] {
             let (mut a, mut b) = ([[v, v * 0.8, v * 0.5, 1.0]], [[v, v * 0.8, v * 0.5, 1.0]]);
             enc.display(&mut a, &Src::LINEAR, 0.0, 1.0);
-            let gain = display_gain(lin.absolute(), &hdr_out);
+            let gain = display_gain(lin.absolute().then_some(100.0), &hdr_out);
             lin.display(&mut b, &Src { gain, ..Src::LINEAR }, 0.0, 1.0);
             for c in 0..3 {
                 // `display` returns the canvas encoding: sRGB-encoded both ways.
@@ -1441,9 +1462,10 @@ mod tests {
         // An HDR view is absolute: on a 250-nit SDR white its 100 nits are 0.4 of it;
         // an SDR view (and any encoded transform) is relative, and an SDR output never scales.
         let at = |white| Target { hdr: true, white, peak: 1000.0 };
-        assert_eq!(display_gain(hdr.absolute(), &at(250.0)), 0.4);
-        assert_eq!((display_gain(lin.absolute(), &at(250.0)), display_gain(enc.absolute(), &at(250.0))), (1.0, 1.0));
-        assert_eq!(display_gain(true, &SDR), 1.0);
+        let g = |t: &Transform, target: &Target| display_gain(t.absolute().then_some(100.0), target);
+        assert_eq!(g(&hdr, &at(250.0)), 0.4);
+        assert_eq!((g(&lin, &at(250.0)), g(&enc, &at(250.0))), (1.0, 1.0));
+        assert_eq!(display_gain(Some(100.0), &SDR), 1.0);
     }
 
     /// A config change resets the names; OCIO off shows the built-in transform.
@@ -1532,7 +1554,7 @@ mod tests {
         let t = o.transform(&names, None, true).unwrap();
         assert!(t.absolute());
         let target = Target { hdr: true, white: 203.0, peak: 1000.0 };
-        let src = Src { gain: display_gain(t.absolute(), &target), ..Src::LINEAR };
+        let src = Src { gain: display_gain(t.absolute().then_some(100.0), &target), ..Src::LINEAR };
         // f32 light holds ~7 digits per pixel; PQ's toe turns a component 10^8 below its
         // neighbours (code 1 next to 10000 nits) into noise codes, so the triples stay within a
         // range f32 carries.
@@ -1702,15 +1724,18 @@ mod tests {
         }
     }
 
-    /// Our own HDR Save view EXR (display light, `whiteLuminance`, no `colorInteropID`) is
-    /// absolute CIE XYZ through the config's display reference role: display-referred, so the
-    /// sRGB display shows it colorimetrically (`Video (colorimetric)`), 100 nits at white.
+    /// Our own HDR Save view EXR (display light at SDR white 203 nits: `whiteLuminance` 203, no
+    /// `colorInteropID`) is display-referred CIE XYZ through the config's display reference role
+    /// (`Video (colorimetric)`), and it reopens as it was saved on both kinds of display: on the
+    /// relative sRGB display 1.0 is white again (not 2.03x over it); on a PQ display on an HDR
+    /// output 1.0 is 203 nits whatever the SDR white.
     #[test]
     fn white_luminance_exr_is_display_light() {
         let o = studio();
         let mut h = exr_core::header::Header::new();
-        h.add_white_luminance(100.0).unwrap();
-        let space = o.space(&exr_import::exr_tag(&h).unwrap(), Path::new("shot.exr"), None).unwrap();
+        h.add_white_luminance(203.0).unwrap();
+        let f = frame(exr_import::exr_tag(&h).unwrap(), 9, "shot.exr");
+        let space = o.space(&f.tag, Path::new("shot.exr"), None).unwrap();
         assert_eq!((space.name.as_str(), space.class), ("CIE XYZ-D65 - Display-referred", Class::Video));
         let names = o.resolve(&Sel::default(), &space, false).unwrap();
         assert_eq!(names.view, "Video (colorimetric)");
@@ -1719,6 +1744,19 @@ mod tests {
         t.display(&mut px, &Src::LINEAR, 0.0, 1.0);
         assert!((px[0][1] - 1.0).abs() < 1e-3, "{px:?}");
         assert!((px[1][1] - crate::transfer::oetf(0.18)).abs() < 1e-3, "{px:?}");
+        // PQ display, HDR output with a 250-nit SDR white: 1.0 lands at 203 nits.
+        let mut s = State::new(Sel { on: true, config: "ocio://studio-config-latest".into(), display: "Rec.2100-PQ - Display".into(), ..Sel::default() });
+        s.set_hdr(true);
+        let hdr = Target { hdr: true, white: 250.0, peak: 1000.0 };
+        let src = s.frame(&f, &hdr).unwrap();
+        let mut px = [[1.0, 1.0, 1.0, 1.0]];
+        s.active().unwrap().display(&mut px, &src, 0.0, 1.0);
+        let nits = crate::transfer::eotf(px[0][1]) * hdr.white;
+        assert!((nits - 203.0).abs() < 0.5, "{nits}");
+        // Without OCIO: the same white, relative on SDR, at its nits on HDR.
+        let mut off = State::new(Sel::default());
+        assert_eq!(off.frame(&f, &SDR).unwrap().gain, 1.0);
+        assert!((off.frame(&f, &hdr).unwrap().gain - 203.0 / 250.0).abs() < 1e-6);
     }
 
     /// The pixel inspector's scene-linear values: the stored value through the config from the

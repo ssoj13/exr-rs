@@ -157,10 +157,13 @@ pub enum TagOrigin {
     /// EXR `chromaticities` matched to a `lin_<primaries>_scene` interop ID.
     Chromaticities,
     /// EXR `whiteLuminance` without `colorInteropID`: by OpenEXR's definition the nits of RGB
-    /// (1, 1, 1), so with the primaries the pixels are absolute CIE XYZ, i.e. display light.
-    /// `space` is the config's `cie_xyz_d65_interchange` role (OCIO's display reference, 1.0 =
-    /// 100 nits) and `to_xyz` takes the pixels there (primaries, Bradford to D65, nits / 100).
-    Luminance { to_xyz: [[f32; 3]; 3] },
+    /// (1, 1, 1), so with the primaries the pixels are colorimetric CIE XYZ, display light whose
+    /// white is `nits`. `space` is the config's `cie_xyz_d65_interchange` role (OCIO's display
+    /// reference) and `to_xyz` takes the pixels there (primaries, Bradford to D65) with RGB 1 at
+    /// the reference's 1.0, the white of a relative (SDR) display; an absolute (HDR) output shows
+    /// that 1.0 at `nits` (`Builtin::nits`, the viewer's display gain). So a picture saved as
+    /// display light at its SDR white reopens as it was on both kinds of display.
+    Luminance { to_xyz: [[f32; 3]; 3], nits: f32 },
     /// The file says nothing. The config's file rules decide; when the path matches only their
     /// default rule (or there is no config) `space` is used: `srgb_rec709_display` for integer
     /// stills, `lin_rec709_scene` for float stills, `scene_linear` for EXR.
@@ -237,8 +240,8 @@ pub fn exr_tag(header: &Header) -> Result<ColorTag, ImportError> {
             return Err(ImportError::Attr(format!("chromaticities {:?} are degenerate", chroma.unwrap_or_default())));
         }
         let rec709 = &vfx_primaries::REC709;
-        let to_xyz = vfx_primaries::rgb_to_xyz_matrix(rec709) * vfx_primaries::rgb_to_rgb_matrix(&prim, rec709) * (nits / 100.0);
-        return Ok(ColorTag { space: XYZ_DISPLAY_ROLE.to_owned(), origin: TagOrigin::Luminance { to_xyz: to_xyz.m } });
+        let to_xyz = vfx_primaries::rgb_to_xyz_matrix(rec709) * vfx_primaries::rgb_to_rgb_matrix(&prim, rec709);
+        return Ok(ColorTag { space: XYZ_DISPLAY_ROLE.to_owned(), origin: TagOrigin::Luminance { to_xyz: to_xyz.m, nits } });
     }
     if let Some(c) = chroma {
         let near = |a: (f32, f32), b: [f32; 2]| (a.0 - b[0]).abs() <= XY_TOLERANCE && (a.1 - b[1]).abs() <= XY_TOLERANCE;
@@ -294,14 +297,16 @@ pub enum Tf {
 }
 
 /// How the built-in path decodes a tag: the curve, then a linear-RGB matrix into Rec.709 (the
-/// canvas primaries; identity for Rec.709 sources), and whether the light is absolute (1.0 = 100
-/// nits, shown at those nits on an HDR output) rather than relative to SDR white.
+/// canvas primaries; identity for Rec.709 sources), and, for absolute light, the nits of its 1.0
+/// (shown at those nits on an HDR output) rather than relative to SDR white.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Builtin {
     pub tf: Tf,
     /// Row-major linear-RGB matrix into Rec.709 primaries (Bradford when the white points differ).
     pub to709: [[f32; 3]; 3],
-    pub absolute: bool,
+    /// The nits of light 1.0 when the light is absolute (PQ / HLG: 100, the decode's unit; an EXR
+    /// with `whiteLuminance`: that); `None` = relative, 1.0 is SDR white.
+    pub nits: Option<f32>,
 }
 
 /// The identity matrix.
@@ -309,7 +314,7 @@ pub const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0
 
 impl Builtin {
     /// Linear Rec.709, relative: the built-in path's own reference.
-    pub const LINEAR: Builtin = Builtin { tf: Tf::Linear, to709: IDENTITY, absolute: false };
+    pub const LINEAR: Builtin = Builtin { tf: Tf::Linear, to709: IDENTITY, nits: None };
 }
 
 /// Transfer token of a Color Interop Forum ID (`<transfer>_<primaries>_<scene|display>`).
@@ -367,14 +372,14 @@ fn curve_of(name: &str) -> Option<(Tf, &'static vfx_primaries::Primaries)> {
 /// The built-in decode of `tag`: what the viewer shows without an OCIO config. A tag with no
 /// curve here (an OCIO-only name, XYZ, CMYK) is a typed error, never a guess.
 pub fn builtin(tag: &ColorTag) -> Result<Builtin, ImportError> {
-    if let TagOrigin::Luminance { to_xyz } = tag.origin {
+    if let TagOrigin::Luminance { to_xyz, nits } = tag.origin {
         let m = vfx_primaries::xyz_to_rgb_matrix(&vfx_primaries::REC709) * vfx_primaries::Mat3 { m: to_xyz };
-        return Ok(Builtin { tf: Tf::Linear, to709: m.m, absolute: true });
+        return Ok(Builtin { tf: Tf::Linear, to709: m.m, nits: Some(nits) });
     }
     let (tf, prim) = curve_of(&tag.space).ok_or_else(|| ImportError::ColorSpace(tag.space.clone()))?;
     // Out-of-gamut results stay negative: the canvas keeps them on an HDR output.
     let to709 = if *prim == vfx_primaries::REC709 { IDENTITY } else { vfx_primaries::rgb_to_rgb_matrix(prim, &vfx_primaries::REC709).m };
-    Ok(Builtin { tf, to709, absolute: matches!(tf, Tf::Pq | Tf::Hlg) })
+    Ok(Builtin { tf, to709, nits: matches!(tf, Tf::Pq | Tf::Hlg).then_some(100.0) })
 }
 
 fn is_straight(img: &ImageData) -> bool {
