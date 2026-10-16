@@ -532,7 +532,7 @@ mod tests {
     /// `a_full_config_round_trips`'s guard until it is set here).
     fn full_config() -> Config {
         let mut layouts = egui_dock_layout::LayoutStore::default();
-        layouts.save("Wide", "{}");
+        layouts.save("Wide", "{}").expect("a free layout name");
         Config {
             window: Some(WindowGeom { x: -3, y: 7, w: 1200, h: 800 }),
             exposure: 1.5,
