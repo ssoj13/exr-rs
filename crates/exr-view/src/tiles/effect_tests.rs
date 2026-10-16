@@ -304,13 +304,16 @@ impl<const KIND: usize> Plugin for Whole<KIND> {
         _ => "com.exr-view.module3.cancel",
     };
     const VERSION: (u32, u32) = (1, 0);
+    const TRAITS: ofx::PluginTraits = ofx::PluginTraits {
+        supported_pixel_depths: &[ofx::PixelDepth::Float],
+        render_thread_safety: ofx::RenderThreadSafety::InstanceSafe,
+        cpu_render_supported: ofx::GpuSupport::True,
+        ..ofx::PluginTraits::DEFAULT
+    };
     fn new() -> Self { Self }
     fn describe(&self, e: &NativeEffect) -> ofx::Result<()> {
         e.set_label("Module3 render counter")?;
         e.set_supported_contexts(&[kOfxImageEffectContextGenerator])?;
-        e.set_supported_pixel_depths(&[kOfxBitDepthFloat])?;
-        e.set_render_thread_safety(kOfxImageEffectRenderInstanceSafe)?;
-        e.properties().set_cpu_render_supported(true)?;
         e.properties().set_int(kOfxImageEffectPropSupportsTiles, 0)?;
         e.properties().set_int(kOfxImageEffectPropSupportsMultiResolution, 1)
     }

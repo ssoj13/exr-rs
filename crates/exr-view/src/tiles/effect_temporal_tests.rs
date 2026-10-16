@@ -14,14 +14,17 @@ struct TemporalProbe;
 impl Plugin for TemporalProbe {
     const ID: &'static str = "com.exr-view.module3.temporal-probe";
     const VERSION: (u32, u32) = (1, 0);
+    const TRAITS: ofx::PluginTraits = ofx::PluginTraits {
+        supported_pixel_depths: &[ofx::PixelDepth::Float],
+        render_thread_safety: ofx::RenderThreadSafety::InstanceSafe,
+        cpu_render_supported: ofx::GpuSupport::True,
+        ..ofx::PluginTraits::DEFAULT
+    };
     fn new() -> Self {
         Self
     }
     fn describe(&self, effect: &NativeEffect) -> ofx::Result<()> {
         effect.set_supported_contexts(&[kOfxImageEffectContextFilter])?;
-        effect.set_supported_pixel_depths(&[kOfxBitDepthFloat])?;
-        effect.set_render_thread_safety(kOfxImageEffectRenderInstanceSafe)?;
-        effect.properties().set_cpu_render_supported(true)?;
         effect
             .properties()
             .set_int(kOfxImageEffectPropSupportsTiles, 0)?;
@@ -70,33 +73,18 @@ impl Plugin for TemporalProbe {
                 .recv_timeout(Duration::from_secs(10))
                 .map_err(|_| ofx::Status::FAILED)?;
         }
-        let sample = if let Some(image) = image.as_ref() {
-            let plane = image.plane()?;
-            let bounds = plane.bounds();
-            // SAFETY: fixture requests Float RGBA, checked in-bounds CPU pixel;
-            // read_unaligned also honors a host whose row layout is not aligned.
-            unsafe {
-                plane
-                    .ptr(bounds.x1, bounds.y1)?
-                    .cast::<[f32; 4]>()
-                    .read_unaligned()
-            }
-        } else {
-            [0.0; 4]
-        };
+        // The first pixel of the Source, copied to the first pixel of the Output.
+        let first = |b: OfxRectI| OfxRectI { x1: b.x1, y1: b.y1, x2: b.x1 + 1, y2: b.y1 + 1 };
+        let mut sample = [[0.0; 4]];
+        if let Some(image) = image.as_ref() {
+            let reader = image.reader()?;
+            reader.stage_into(first(reader.bounds()), &mut sample, &|| false)?;
+        }
         let output = effect
             .clip(kOfxImageEffectOutputClipName)?
             .get_image(time, None)?;
         let plane = output.plane()?;
-        let bounds = plane.bounds();
-        // SAFETY: checked Float RGBA output pixel, owned by this native Render.
-        unsafe {
-            plane
-                .ptr(bounds.x1, bounds.y1)?
-                .cast::<[f32; 4]>()
-                .write_unaligned(sample);
-        }
-        Ok(())
+        plane.write_pixels(first(plane.bounds()), &sample)
     }
 }
 

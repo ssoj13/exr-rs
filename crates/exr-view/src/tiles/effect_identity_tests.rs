@@ -13,14 +13,17 @@ struct IdProbe;
 impl Plugin for IdProbe {
     const ID: &'static str = "com.exr-view.identity.probe";
     const VERSION: (u32, u32) = (1, 0);
+    const TRAITS: ofx::PluginTraits = ofx::PluginTraits {
+        supported_pixel_depths: &[ofx::PixelDepth::Float],
+        render_thread_safety: ofx::RenderThreadSafety::InstanceSafe,
+        cpu_render_supported: ofx::GpuSupport::True,
+        ..ofx::PluginTraits::DEFAULT
+    };
     fn new() -> Self {
         Self
     }
     fn describe(&self, effect: &NativeEffect) -> ofx::Result<()> {
         effect.set_supported_contexts(&[kOfxImageEffectContextFilter])?;
-        effect.set_supported_pixel_depths(&[kOfxBitDepthFloat])?;
-        effect.set_render_thread_safety(kOfxImageEffectRenderInstanceSafe)?;
-        effect.properties().set_cpu_render_supported(true)?;
         effect.properties().set_int(kOfxImageEffectPropSupportsTiles, 1)?;
         effect.properties().set_int(kOfxImageEffectPropSupportsMultiResolution, 1)
     }

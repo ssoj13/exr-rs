@@ -100,6 +100,12 @@ struct ConsumerEffect;
 impl Plugin for ConsumerEffect {
     const ID: &'static str = "com.exr-view.acceptance.consumer-mosaic";
     const VERSION: (u32, u32) = (1, 0);
+    const TRAITS: ofx::PluginTraits = ofx::PluginTraits {
+        supported_pixel_depths: &[ofx::PixelDepth::Float],
+        render_thread_safety: ofx::RenderThreadSafety::InstanceSafe,
+        cpu_render_supported: ofx::GpuSupport::True,
+        ..ofx::PluginTraits::DEFAULT
+    };
     fn new() -> Self {
         Self
     }
@@ -107,9 +113,6 @@ impl Plugin for ConsumerEffect {
         e.set_label("Accepted consumer mosaic")?;
         e.set_overlay_interact_id(ConsumerOverlay::ID, ofx::OverlayVersion::V2)?;
         e.set_supported_contexts(&[kOfxImageEffectContextGenerator])?;
-        e.set_supported_pixel_depths(&[kOfxBitDepthFloat])?;
-        e.set_render_thread_safety(kOfxImageEffectRenderInstanceSafe)?;
-        e.properties().set_cpu_render_supported(true)?;
         e.properties()
             .set_int(kOfxImageEffectPropSupportsTiles, 1)?;
         e.properties()
@@ -144,21 +147,12 @@ impl Plugin for ConsumerEffect {
         let output = e
             .clip(kOfxImageEffectOutputClipName)?
             .get_image(time, None)?;
-        let plane = output.plane()?;
-        // PixelPlane validates coordinates and signed row layout; Float RGBA
-        // was the sole advertised native format and this is exclusive Output.
-        for y in window.y1..window.y2 {
-            for x in window.x1..window.x2 {
-                let ptr = plane.ptr(x, y)?.cast::<f32>();
-                for (c, sample) in [value, value, value, 1.0].into_iter().enumerate() {
-                    // SAFETY: live checked Float RGBA Output pixel, one callback writer.
-                    unsafe {
-                        ptr.add(c).write_unaligned(sample);
-                    }
-                }
-            }
-        }
-        Ok(())
+        // write_pixels validates the window and the signed row layout of the
+        // Float RGBA Output (the sole advertised native format).
+        let area = ofx::width_i(window) as usize * ofx::height_i(window) as usize;
+        output
+            .plane()?
+            .write_pixels(window, &vec![[value, value, value, 1.0]; area])
     }
 }
 /// The fixture effect's plug-in ID, for tests elsewhere.
