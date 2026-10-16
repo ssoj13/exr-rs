@@ -225,11 +225,12 @@ pub const COMMANDS: &[Command] = &[
         at: VIEW,
         action: Action::Nav(NavCmd::Home),
     },
-    // `Equals` next to `Plus`: `+` is Shift+= on most layouts, and egui reports either.
+    // `+` is Shift+= on most layouts and egui reports either key: the additive (`ctrl_any`)
+    // binding of `Plus` takes `Equals` too (egui-hotkeys), so one chord covers both.
     Command {
         id: "view.zoom_in",
         label: "Zoom in",
-        keys: &[ctrl_any(Key::Plus).rep(), ctrl(Key::Equals).rep()],
+        keys: &[ctrl_any(Key::Plus).rep()],
         at: VIEW,
         action: Action::Nav(NavCmd::ZoomIn),
     },
@@ -555,12 +556,14 @@ mod tests {
     /// Run `pressed` over a frame in which `key` is pressed with `mods`, with `scope` the panel
     /// the pointer rests over (`None`: no panel registered, nothing clicked). Mirrors the app's
     /// order: the keys are read at the top of the frame, from the geometry of the frame before.
-    fn press_in(scope: Option<Scope>, key: Key, mods: Modifiers, typing: bool, has_seq: bool) -> Pressed {
-        press_at(scope, key, None, mods, typing, has_seq)
+    /// `modal`: the viewer's file dialog is open, which the "while typing" tests stand for (a
+    /// focused text field is egui-hotkeys' own guard and holds back the same bare keys).
+    fn press_in(scope: Option<Scope>, key: Key, mods: Modifiers, modal: bool, has_seq: bool) -> Pressed {
+        press_at(scope, key, None, mods, modal, has_seq)
     }
 
     /// [`press_in`] for a key that reports its position (`physical_key`) apart from what it types.
-    fn press_at(scope: Option<Scope>, key: Key, physical_key: Option<Key>, mods: Modifiers, typing: bool, has_seq: bool) -> Pressed {
+    fn press_at(scope: Option<Scope>, key: Key, physical_key: Option<Key>, mods: Modifiers, modal: bool, has_seq: bool) -> Pressed {
         let ctx = egui::Context::default();
         let screen = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         let run = |events: Vec<egui::Event>, f: &mut dyn FnMut(&mut Ui)| {
@@ -580,7 +583,7 @@ mod tests {
         let event = egui::Event::Key { key, physical_key, pressed: true, repeat: false, modifiers: mods };
         let mut got = Pressed { actions: Vec::new(), left: false };
         run(vec![event], &mut |ui| {
-            got.actions = pressed(ui.ctx(), typing, Avail { seq: has_seq, file: has_seq });
+            got.actions = pressed(ui.ctx(), modal, Avail { seq: has_seq, file: has_seq });
             got.left = ui.input(|i| i.key_pressed(key));
             draw(ui);
         });
@@ -588,8 +591,8 @@ mod tests {
     }
 
     /// [`press_in`] over the viewport, with a sequence open.
-    fn press(key: Key, mods: Modifiers, typing: bool) -> Vec<Action> {
-        press_in(Some(Scope::Viewport), key, mods, typing, true).actions
+    fn press(key: Key, mods: Modifiers, modal: bool) -> Vec<Action> {
+        press_in(Some(Scope::Viewport), key, mods, modal, true).actions
     }
 
     fn step(scope: Scope, key: Key, has_seq: bool) -> Pressed {
