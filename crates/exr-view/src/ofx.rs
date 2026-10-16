@@ -787,10 +787,10 @@ mod tests {
             .with_size(egui::vec2(700.0, 500.0))
             .build_ui_state(|ui, fx: &mut OfxEffects| { fx.tick(ui.ctx()); fx.panel(ui) }, fx);
         harness.run_steps(3);
-        eprintln!("DBGTREE {:#?}", harness.root());
         // The "Presets" group is closed by default: open it, then press the Preset File browse icon.
         harness.get_by_label("Presets").click();
         harness.run_steps(3);
+        eprintln!("DBGTREE {:#?}", harness.root());
         harness
             .get_all_by_role_and_label(Role::Button, egui_widgets_config::icons::FILE)
             .next()
