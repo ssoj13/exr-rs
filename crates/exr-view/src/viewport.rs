@@ -608,10 +608,12 @@ fn coords_label(win: &Windows, px: u32, py: u32) -> String {
 /// The corner HUD: the pixel readout (top left) and the zoom (bottom right), on
 /// translucent plates so they stay legible over any image.
 fn draw_hud(ui: &mut egui::Ui, rect: egui::Rect, readout: Option<String>, zoom: f32) {
-    use egui_viewport_hud::{HudBlock, HudCorner, HudStyle};
-    let mut blocks = vec![HudBlock::new(HudCorner::BottomRight, vec![format!("{:.0}%", zoom * 100.0)])];
-    if let Some(line) = readout {
-        blocks.push(HudBlock::new(HudCorner::TopLeft, vec![line]));
+    use egui_viewport_hud::{HudBlock, HudCorner, HudLine, HudStyle};
+    let zoom = [HudLine::new(format!("{:.0}%", zoom * 100.0))];
+    let readout = readout.map(|line| [HudLine::new(line)]);
+    let mut blocks = vec![HudBlock::new(HudCorner::BottomRight, &zoom)];
+    if let Some(line) = &readout {
+        blocks.push(HudBlock::new(HudCorner::TopLeft, line));
     }
     let style = HudStyle {
         text_color: egui::Color32::from_gray(230),

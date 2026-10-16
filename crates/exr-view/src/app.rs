@@ -1538,7 +1538,6 @@ impl AppState {
         let mut open_colour = false;
         let mut open_display = false;
         let mut category = self.prefs.selected;
-        let mut reset = false;
         let fonts = config.fonts;
         let categories = [
             egui_prefs2::Category::new(icon::MEMORY, "Memory"),
@@ -1546,10 +1545,14 @@ impl AppState {
             egui_prefs2::Category::new(icon::TEXT_AA, "UI"),
             egui_prefs2::Category::new(icon::MONITOR, "Colour"),
         ];
-        egui_prefs2::draw(
+        // The footer's confirmed "Reset to Defaults" resets the category shown.
+        let opts = egui_prefs2::PanelOpts { reset: true, ..Default::default() };
+        let reset = egui_prefs2::draw(
             ui,
+            "exr_view.settings",
             &mut self.prefs,
             &categories,
+            &opts,
             |ui, idx| {
                 category = idx;
                 match idx {
@@ -1570,7 +1573,6 @@ impl AppState {
                     _ => ui_prefs(ui, &mut config.fonts, &mut config.open_seq),
                 }
             },
-            Some(|| reset = true),
         );
         if reset {
             match category {
@@ -1905,7 +1907,7 @@ impl AppState {
     /// display transform, channel isolate, layer / Cryptomatte pick, fit / 1:1, snapshot.
     /// These feed the GPU colour-pass uniforms (no CPU processing).
     fn ui_toolbar(&mut self, ui: &mut egui::Ui) {
-        // Display dials. Ctrl+click or right-click resets one to its default (the shared
+        // Display dials. Ctrl+click resets one to its default (the shared
         // `egui_widgets_config::reset` gesture): exposure -> 0 EV, gamma -> 1.0, display -> None,
         // channel -> RGBA.
         ui.label("Exposure");
@@ -1914,12 +1916,14 @@ impl AppState {
             &mut self.controls.exposure,
             &mut self.controls.exposure_hold,
             -10.0..=10.0,
+            // The set-wide wheel policy (`WidgetsConfig::wheel_edit`).
+            None,
         );
         ui.separator();
         ui.label("Gamma");
         // A SlimSlider owns the reset gesture (no Ctrl-press preview of a wrong value).
         ui.add(egui_slider::SlimSlider::new(&mut self.controls.gamma, 0.1..=4.0).default_value(1.0).decimals(2))
-            .on_hover_text("Display gamma dial — pow(c, 1/gamma) before the sRGB encode.\n1.0 = off (correct sRGB look).\nCtrl+click or right-click: reset to 1.0.");
+            .on_hover_text("Display gamma dial — pow(c, 1/gamma) before the sRGB encode.\n1.0 = off (correct sRGB look).\nCtrl+click: reset to 1.0.");
         ui.separator();
         // One control for the display transform of the colour image: a built-in
         // tone operator + sRGB, or OCIO (configured in Settings > Colour).
@@ -1952,9 +1956,9 @@ impl AppState {
             })
             .response
             .on_hover_text(format!(
-                "{tip}\nDisplay transform of the colour image (after the exposure; isolated channels stay raw).\nT cycles; Ctrl+click or right-click: reset to None."
+                "{tip}\nDisplay transform of the colour image (after the exposure; isolated channels stay raw).\nT cycles; Ctrl+click: reset to None."
             ));
-        if reset::requested(ui, &display) {
+        if reset::clicked(&display) {
             pick = Some(Some(crate::transfer::tonemap::NONE));
         }
         if let Some(d) = pick {
@@ -1980,9 +1984,9 @@ impl AppState {
             };
             let resp = ui
                 .selectable_label(selected, mode.name())
-                .on_hover_text(format!("{what}\nCtrl+click or right-click: reset to RGBA."));
+                .on_hover_text(format!("{what}\nCtrl+click: reset to RGBA."));
             // The reset wins over the click it rides on.
-            if reset::requested(ui, &resp) {
+            if reset::clicked(&resp) {
                 self.controls.channel = ChannelDisplay::Rgba;
             } else if resp.clicked() {
                 self.controls.channel = mode;
@@ -2120,9 +2124,8 @@ impl AppState {
         }
         // What shows under the image's alpha: composited by the present pass (`viewport::show`).
         ui.separator();
-        if let Some(b) = egui_viewport_toolbar::backdrop_picker(ui, &self.controls.backdrop) {
-            self.controls.backdrop = b;
-        }
+        // Persisted with the other view controls at exit (`config.backdrop`).
+        egui_viewport_toolbar::backdrop_picker(ui, &mut self.controls.backdrop);
         // One snapshot button keeps the strip narrow: a click is File > Save view as PNG, the
         // right-click menu offers the HDR save. Both are the registry's actions (run by `build_ui`).
         ui.separator();
@@ -2232,14 +2235,15 @@ impl AppState {
                 ui.label(format!("{} / [{}–{}]", pb.current(), pb.first(), pb.last()));
                 ui.separator();
                 ui.label("fps");
-                let mut fps = ui
-                    .add(
-                        egui::DragValue::new(&mut pb.fps)
-                            .speed(0.5)
-                            .range(0.1..=240.0),
-                    )
-                    .on_hover_text("Playback rate in frames per second — drag to change.\nCtrl+click or right-click: reset to the default rate.");
-                reset::apply(ui, &mut fps, &mut pb.fps, crate::persist::DEFAULT_FPS);
+                // The shared numeric field: Ctrl slows the drag, Shift snaps, Ctrl+click resets.
+                ui.add(
+                    egui_widgets_config::num::drag(&mut pb.fps)
+                        .speed(0.5)
+                        .range(0.1..=240.0)
+                        .reset(crate::persist::DEFAULT_FPS)
+                        .id_salt("exr_view.fps"),
+                )
+                .on_hover_text("Playback rate in frames per second — drag to change.\nCtrl+click: reset to the default rate.");
                 // What really reaches the screen: green while every frame is shown,
                 // red once the clock passes frames unshown; the measured rate in brackets.
                 if pb.playing {
@@ -2332,6 +2336,8 @@ struct Viewer {
     egui_renderer: egui_wgpu::Renderer,
     /// The canvas everything is drawn into and the pass that encodes it for the surface.
     present: crate::present::PresentPass,
+    /// The canvas failure being reported (frames are skipped while it lasts), logged once.
+    canvas_err: Option<egui_display::CanvasError>,
     /// The output last asked for (`config.display.output`); a new ask re-applies.
     asked: crate::present::Output,
     /// The monitor the window is on (a move to another one re-reads its HDR figures).
@@ -2420,6 +2426,7 @@ impl Viewer {
             egui_state,
             egui_renderer,
             present,
+            canvas_err: None,
             asked,
             monitor: None,
             dock,
@@ -2592,7 +2599,8 @@ impl Viewer {
         }
 
         let _ = self.gpu.device.poll(wgpu::PollType::Poll);
-        self.present.prepare_canvas(
+        // A failure keeps the previous canvas; the frame is skipped below (`canvas`).
+        let prepared = self.present.prepare_canvas(
             &self.gpu.device,
             &self.gpu.queue,
             self.gpu.config.width,
@@ -2700,6 +2708,25 @@ impl Viewer {
             }
         }
 
+        // The canvas at the surface size, before a surface frame is acquired: a window over the
+        // device's texture limit (or a refused allocation) skips the frame instead of drawing
+        // into a canvas of another size.
+        // The preparation's error is the cause; the `Unprepared` that follows from it is not.
+        let canvas = prepared.and_then(|()| {
+            self.present.canvas(&self.gpu.device, self.gpu.config.width, self.gpu.config.height).cloned()
+        });
+        let canvas = match canvas {
+            Ok(view) => {
+                note_canvas(&mut self.canvas_err, None);
+                view
+            }
+            Err(e) => {
+                note_canvas(&mut self.canvas_err, Some(e));
+                free_textures(&mut self.egui_renderer, &mut textures);
+                return Ok(());
+            }
+        };
+
         let t_paint = Instant::now();
         // Acquire the next surface frame (wgpu 30 `CurrentSurfaceTexture` enum).
         // Every skip path still frees what egui asked to free — a skipped `free`
@@ -2731,10 +2758,6 @@ impl Viewer {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let canvas = self
-            .present
-            .canvas(&self.gpu.device, self.gpu.config.width, self.gpu.config.height)
-            .clone();
 
         let screen = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.gpu.config.width, self.gpu.config.height],
@@ -2823,6 +2846,19 @@ fn hand_backdrop(ctx: &egui::Context, slot: &mut Vec<egui_display::BackdropUnifo
     *slot = egui_display::take_backdrops(ctx, egui::ViewportId::ROOT);
 }
 
+/// Record the canvas outcome of this frame, logging a failure once per distinct error (a window
+/// over the texture limit fails every frame until it shrinks) and the recovery.
+fn note_canvas(last: &mut Option<egui_display::CanvasError>, now: Option<egui_display::CanvasError>) {
+    if *last == now {
+        return;
+    }
+    match &now {
+        Some(e) => log::error!("display canvas: {e}; frames are skipped"),
+        None => log::info!("display canvas available again"),
+    }
+    *last = now;
+}
+
 /// Release the egui textures this frame's output retired, draining the list.
 /// Called on EVERY exit from `render` (including the skipped-frame paths) — a
 /// skipped `free` leaks a texture and its bind group for the rest of the session.
@@ -2832,12 +2868,12 @@ fn free_textures(renderer: &mut egui_wgpu::Renderer, delta: &mut egui::TexturesD
     }
 }
 
-/// Run the keys pressed this frame. Every bare-letter shortcut is suppressed while a widget wants
-/// the keyboard (a text field, a slider being typed into): otherwise typing "z" in a filter box
-/// toggled fullscreen and " " played the sequence.
+/// Run the keys pressed this frame. Every bare-letter shortcut is suppressed while a text field
+/// has the keyboard (egui-hotkeys) or the file dialog is open: otherwise typing "z" in a filter
+/// box toggled fullscreen and " " played the sequence.
 fn read_keys(ctx: &egui::Context, app_state: &mut AppState, dock: &mut Dock) {
-    let typing = ctx.egui_wants_keyboard_input() || app_state.file_pick.is_open();
-    for action in commands::pressed(ctx, typing, app_state.avail()) {
+    let modal = app_state.file_pick.is_open();
+    for action in commands::pressed(ctx, modal, app_state.avail()) {
         run(action, app_state, dock, ctx);
     }
 }
@@ -2954,7 +2990,7 @@ fn build_ui(
             "view.playhead" => {
                 ui.label("Playhead line (over image)");
                 ui.add(egui_slider::SlimSlider::new(&mut *playhead_alpha, 0.0..=1.0).text("opacity").default_value(0.0).decimals(2))
-                    .on_hover_text("Thin white vertical line at the current frame, over the image. 0 = off.\nCtrl+click or right-click: reset to off.");
+                    .on_hover_text("Thin white vertical line at the current frame, over the image. 0 = off.\nCtrl+click: reset to off.");
             }
             "view.preload" => {
                 ui.label("Preload strategy");
@@ -3240,7 +3276,8 @@ fn run(action: Action, app_state: &mut AppState, dock: &mut Dock, ctx: &egui::Co
 fn section<R>(ui: &mut egui::Ui, label: &str, tint: egui::Color32, body: impl FnOnce(&mut egui::Ui) -> R) -> Option<R> {
     let key = ui.id().with(("section_open", label));
     let open = ui.data(|d| d.get_temp::<bool>(key)).unwrap_or(true);
-    let shown = egui_titlebar::CollapsingSection::new(label).id_salt(label).open(open).tint(tint, 0.16).show(ui, body);
+    // The labels are constant English names, so they serve as the caller-stable salt.
+    let shown = egui_titlebar::CollapsingSection::new(label, label).open(open).tint(tint, 0.16).show(ui, body);
     if shown.header.open != open {
         ui.data_mut(|d| d.insert_temp(key, shown.header.open));
     }
@@ -3261,7 +3298,7 @@ fn neighbour(files: &[PathBuf], cur: &Path, step: isize, own: &HashSet<PathBuf>)
 
 /// Settings > Memory.
 fn budgets_ui(ui: &mut egui::Ui, budgets: &mut Budgets) {
-    const RESET: &str = "\nCtrl+click or right-click: reset.";
+    const RESET: &str = "\nCtrl+click: reset.";
     let default = Budgets::default();
     egui_prefs2::section_header(ui, "Caches (next launch)");
     egui_prefs2::section_grid(ui, "budgets_launch", |ui| {
@@ -3293,7 +3330,7 @@ fn display_ui(ui: &mut egui::Ui, prefs: &mut crate::persist::DisplayPrefs, statu
         error: status.err.clone(),
         available: status.outputs.clone(),
     };
-    egui_display::settings_ui(ui, prefs, Some(&state));
+    egui_display::settings_ui(ui, "exr_view.display", prefs, Some(&state));
 }
 
 /// The Settings panel drawn with the viewer's text sizes (egui-prefs2 ships larger ones).
@@ -3321,7 +3358,7 @@ fn ui_prefs(ui: &mut egui::Ui, fonts: &mut crate::persist::Fonts, open_seq: &mut
     });
     egui_prefs2::section_header(ui, "Fonts & UI");
     egui_prefs2::section_grid(ui, "fonts", |ui| {
-        const RESET: &str = "\nCtrl+click or right-click: reset.";
+        const RESET: &str = "\nCtrl+click: reset.";
         let d = Fonts::default();
         for (label, tip, value, default) in [
             ("Heading", "Size of section titles.", &mut fonts.heading, d.heading),

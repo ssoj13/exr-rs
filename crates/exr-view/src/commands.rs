@@ -460,17 +460,27 @@ pub fn shortcut_text(ctx: &egui::Context, cmd: &Command) -> String {
     cmd.keys.first().map_or(String::new(), |k| ctx.format_shortcut(&k.shortcut))
 }
 
+impl Command {
+    /// Every key of it is a Ctrl/Cmd chord: the only keys that still run while a modal of the
+    /// viewer (the file dialog) is open, since bare keys there belong to the dialog.
+    fn chorded(&self) -> bool {
+        !self.keys.is_empty() && self.keys.iter().all(|k| k.shortcut.modifiers.command)
+    }
+}
+
 /// The actions whose keys were pressed this frame (the keys are consumed), routed by
 /// `egui-hotkeys`: global keys always, the others only for the [`Scope`] that owns the
-/// keyboard. While `typing` only Ctrl/Cmd chords fire (Space, arrows and letters are text);
-/// keys of a command that is not [`enabled`] are not consumed at all.
+/// keyboard. While a text field has the keyboard, egui-hotkeys leaves it the keys it acts on
+/// itself (Space, arrows, letters, Ctrl+A …); while a `modal` of the viewer is open only the
+/// Ctrl/Cmd chord commands fire. Keys of a command that is not [`enabled`] (or held back by the
+/// modal) are not consumed at all.
 ///
 /// Chords match exactly, so Shift+Z is "Hide panels" only and plain Z "Fullscreen" only, with
 /// no ordering between them. Panel ownership comes from the PREVIOUS frame's geometry, which is
 /// why this can run once at the top of the frame, before any panel is drawn.
-pub fn pressed(ctx: &egui::Context, typing: bool, avail: Avail) -> Vec<Action> {
-    let on = |id| find(id).is_some_and(|c| enabled(&c.action, avail));
-    let ids = egui_hotkeys::pressed(&*KEYS, ctx, typing, on);
+pub fn pressed(ctx: &egui::Context, modal: bool, avail: Avail) -> Vec<Action> {
+    let on = |id| find(id).is_some_and(|c| enabled(&c.action, avail) && (!modal || c.chorded()));
+    let ids = egui_hotkeys::pressed(&*KEYS, ctx, on);
     ids.into_iter().filter_map(find).map(|c| c.action.clone()).collect()
 }
 
@@ -483,7 +493,7 @@ mod tests {
             match n {
                 Item(id) => out.push(id),
                 Sub(_, children) => menu_items(children, out),
-                Sep | Dyn(_) => {}
+                Sep | Dyn(_) | MenuNode::Header(_) => {}
             }
         }
     }

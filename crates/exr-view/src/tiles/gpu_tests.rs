@@ -603,7 +603,7 @@ fn present_encodes_like_its_twin() {
         for v in values {
             // The canvas is f16: the twin gets the value the canvas holds.
             let canvas = [v, v * 0.5, v * 0.25].map(|c| Half::from(c).to_f32());
-            let canvas_view = pass.canvas(&device, w, h).clone();
+            let canvas_view = pass.canvas(&device, w, h).expect("the test canvas").clone();
             let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
             enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("present-test.canvas"),
@@ -724,7 +724,7 @@ fn emissive_texel_survives_the_backdrop_present() {
 
     let mut pass = PresentPass::new(&device, wgpu::TextureFormat::Rgba16Float, Output::Scrgb);
     pass.dither = false;
-    let canvas = pass.canvas(&device, w, h).clone();
+    let canvas = pass.canvas(&device, w, h).expect("the test canvas").clone();
     let frame = target(&device, wgpu::TextureFormat::Rgba16Float, w, h);
     let levels = Target { hdr: true, white: 80.0, peak: 1000.0 };
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w as f32, h as f32));

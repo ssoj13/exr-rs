@@ -344,7 +344,9 @@ pub fn show(ui: &mut egui::Ui, frame: &DecodedFrame, view: &Selection) -> Option
     let mut picked = None;
     for action in egui_outliner::show(ui, model, &built.config) {
         match action {
-            OutlinerAction::Select { id, .. } => picked = ids.get(&id).cloned(),
+            // One shown selection: the row the click / key landed on (the matte and the
+            // marquee have no lead and change nothing).
+            OutlinerAction::Select { lead: Some(id), .. } => picked = ids.get(&id).cloned(),
             OutlinerAction::Context { id, action } => {
                 let Some(sel) = ids.get(&id) else { continue };
                 match action.as_str() {
