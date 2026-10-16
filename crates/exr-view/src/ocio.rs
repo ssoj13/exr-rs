@@ -1194,8 +1194,8 @@ impl State {
                 reload = ui.button("Reload").on_hover_text("Read the config again (after it changed on disk).").clicked();
             });
             ui.end_row();
-            // A path (or `ocio://` URI) typed here applies on Enter, not per keystroke: every
-            // change loads the whole config. One that does not load shows the error below.
+            // A path (or `ocio://` URI) typed here applies when the edit ends, not per keystroke:
+            // every change loads the whole config. One that does not load shows the error below.
             ui.label("Config file").on_hover_text("An .ocio / .ocioz path or an ocio:// URI. Empty: $OCIO, else the built-in ACES 2.0 CG.");
             let typed = path_edit(ui, &mut self.field, &self.sel.config);
             *browse |= typed.browse;
@@ -1381,11 +1381,9 @@ fn config_combo(ui: &mut egui::Ui, config: &mut String) {
 struct PathEdit {
     /// Browse was clicked: the app runs the file dialog.
     browse: bool,
-    /// Enter was pressed in the field: the path (trimmed; empty = auto) to use.
+    /// A changed path was committed (Enter, a click away, a dropped file): the path (trimmed;
+    /// empty = auto) to use.
     apply: Option<String>,
-    /// The text the field shows (the draft while typing, else the current config); tests only.
-    #[cfg(test)]
-    shown: String,
     /// The text field's id (to focus it); tests only.
     #[cfg(test)]
     id: egui::Id,
@@ -1396,32 +1394,21 @@ struct PathEdit {
 /// in egui's temp memory under the field's own `Ui` id, so each instance keeps its own
 /// text; it is dropped when the field loses the keyboard.
 fn path_edit(ui: &mut egui::Ui, field: &mut egui_file_field::FileFieldState, current: &str) -> PathEdit {
-    let key = ui.id().with("ocio_config_draft");
-    let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or_else(|| current.to_owned());
+    // The field owns the typing draft (keyed by its id) and commits a changed text when the edit
+    // ends (Enter or a click away; Escape drops it): never per keystroke.
+    let mut text = current.to_owned();
     let shown = egui_file_field::FileField::new(&mut text, field)
+        .id(ui.id().with("ocio_config_path"))
         .hint("Auto: $OCIO, else the built-in ACES 2.0 CG")
         .tooltip("Load a config file (.ocio / .ocioz).")
         .desired_width(260.0)
         .show(ui);
-    let enter = shown.response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-    let out = PathEdit {
+    PathEdit {
         browse: shown.browse_clicked(),
-        apply: enter.then(|| text.trim().to_owned()),
-        #[cfg(test)]
-        shown: text.clone(),
+        apply: shown.changed().then(|| text.trim().to_owned()),
         #[cfg(test)]
         id: shown.response.id,
-    };
-    // Read the focus BEFORE taking the data lock: egui's context lock is not re-entrant.
-    let typing = shown.response.has_focus();
-    ui.data_mut(|d| {
-        if typing {
-            d.insert_temp(key, text);
-        } else {
-            d.remove::<String>(key);
-        }
-    });
-    out
+    }
 }
 
 /// A combo over `items` with an empty choice labelled `empty` (the default).
@@ -1499,8 +1486,9 @@ mod tests {
         (dir, file)
     }
 
-    /// The path field keeps one draft PER INSTANCE (keyed by its `Ui` id): typing in one neither
-    /// leaks into another nor is lost, and Enter applies the trimmed text once.
+    /// The path field keeps one draft PER INSTANCE (the field's draft, keyed by its `Ui`-salted
+    /// id): typing in one neither leaks into another nor is lost across frames, and Enter applies
+    /// the trimmed text once.
     #[test]
     fn each_path_field_keeps_its_own_draft() {
         let ctx = egui::Context::default();
@@ -1515,7 +1503,7 @@ mod tests {
                         if focus == Some(i) {
                             ui.memory_mut(|m| m.request_focus(e.id));
                         }
-                        out.push((e.shown, e.apply));
+                        out.push(e.apply);
                     });
                 }
             });
@@ -1523,21 +1511,24 @@ mod tests {
             out
         };
         let mut ids = [egui::Id::NULL; 2];
-        let idle = frame(vec![], None, &mut ids);
-        assert_eq!(idle[0].0, "current.ocio");
+        assert_eq!(frame(vec![], None, &mut ids), [None, None]);
+        assert_ne!(ids[0], ids[1], "one field id per instance");
         frame(vec![], Some(0), &mut ids);
         let typed = frame(vec![egui::Event::Text(" a.ocio ".into())], None, &mut ids);
-        assert_eq!(typed[0].0, "current.ocio a.ocio ", "the draft of the focused field grows");
-        assert_eq!(typed[1].0, "current.ocio", "the other field is untouched");
-        let still = frame(vec![], None, &mut ids);
-        assert_eq!(still[0].0, "current.ocio a.ocio ", "the draft survives the next frame");
-        assert_eq!(still[1].0, "current.ocio");
+        assert_eq!(typed, [None, None], "a keystroke applies nothing");
+        assert_eq!(frame(vec![], None, &mut ids), [None, None], "an idle frame applies nothing");
         let key = |pressed| egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: Default::default() };
         let done = frame(vec![key(true), key(false)], None, &mut ids);
-        assert_eq!(done[0].1.as_deref(), Some("current.ocio a.ocio"), "Enter applies the trimmed draft");
-        assert_eq!(done[1].1, None);
-        let after = frame(vec![], None, &mut ids);
-        assert_eq!(after[0].0, "current.ocio", "the draft is gone once applied");
+        assert_eq!(
+            done,
+            [Some("current.ocio a.ocio".to_owned()), None],
+            "Enter applies the trimmed draft, which survived the idle frame, to its own field only"
+        );
+        assert_eq!(frame(vec![], None, &mut ids), [None, None], "applied once");
+        // The other field never saw the typing: focused and ended unchanged, it applies nothing.
+        frame(vec![], Some(1), &mut ids);
+        frame(vec![], None, &mut ids);
+        assert_eq!(frame(vec![key(true), key(false)], None, &mut ids), [None, None], "no draft leaked into the other field");
     }
 
     /// A typed or browsed config path that does not load is an error on the state (the panel and

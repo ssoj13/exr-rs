@@ -790,9 +790,8 @@ mod tests {
         // The "Presets" group is closed by default: open it, then press the Preset File browse icon.
         harness.get_by_label("Presets").click();
         harness.run_steps(3);
-        eprintln!("DBGTREE {:#?}", harness.root());
         harness
-            .get_all_by_role_and_label(Role::Button, egui_widgets_config::icons::FILE)
+            .get_all_by_role_and_label(Role::Button, "Browse")
             .next()
             .expect("a browse button")
             .click();
