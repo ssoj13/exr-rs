@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # A GPU-first viewer for OpenEXR files, dogfooding the workspace `exr-core`
-# reader. winit + wgpu 29 + egui_dock window shell; no USD / 3-D / material /
+# reader. winit + wgpu 30 + egui-dock-layout window shell; no USD / 3-D / material /
 # tile-atlas layers — only the 2-D image window.
 #
 # wgpu is MANDATORY (always-on), NOT an optional feature — the viewer is
@@ -13,7 +13,7 @@
 [package]
 authors.workspace = true
 name = "exr-view"
-description = "Lightweight GPU EXR viewer (egui_dock + wgpu) over exr-core"
+description = "Lightweight GPU EXR viewer (egui-dock-layout + wgpu) over exr-core"
 keywords = ["exr", "openexr", "viewer", "wgpu", "vfx"]
 categories = ["multimedia::images", "rendering", "command-line-utilities"]
 version.workspace = true
@@ -50,9 +50,13 @@ scanseq = { git = "ssh://git@github.com/ssoj13/scanseq-rs.git", branch = "main",
 scancache = { git = "ssh://git@github.com/ssoj13/scancache-rs.git", branch = "main" }
 
 # GUI stack — versions pinned together so a single wgpu/naga copy builds:
-# wgpu 30 ↔ egui 0.36 ↔ egui-wgpu 0.36 ↔ egui_dock 0.21.
+# wgpu 30 ↔ egui 0.36 ↔ egui-wgpu 0.36.
 egui = "0.36"
 egui-display = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+# Display-referred output maths shared with egui-display and Playa (`export.rs`: the HLG curve and
+# reference peak, the PNG encoding labels). `export` only: no ffmpeg backend (the viewer encodes no
+# video). Pulls neither egui nor exr-rs (no cycle).
+video-io = { git = "ssh://git@github.com/ssoj13/video-io-rs.git", branch = "main", default-features = false, features = ["export"] }
 # Shared widget set (ssoj13/egui-widgets-rs, the one home of our egui widgets, also used by
 # Playa and vfx-view): design tokens (fonts/metrics), the timeline and status bar that started
 # in this viewer, the layer/channel tree, the read-only attribute grid, the command-table menu
@@ -81,7 +85,6 @@ egui-file-dialog = "0.15"
 png = "0.18"
 egui-wgpu = "0.36"
 egui-winit = "0.36"
-egui_dock = { version = "0.21", features = ["serde"] }
 wgpu = "30"
 winit = "0.30"
 
@@ -102,7 +105,7 @@ anyhow = "1"
 # the `exr-rs` binary's (`src/main.rs`); a library picks none.
 log = { workspace = true }
 
-# Dock layout (de)serialization for egui_dock's `serde` feature; also drives the
+# Dock layout (de)serialization (`DockTab` inside the egui-dock-layout blob); also drives the
 # viewer config (window geom + controls + recents) in `persist.rs`.
 serde = { version = "1", features = ["derive"] }
 
