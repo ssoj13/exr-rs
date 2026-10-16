@@ -72,7 +72,7 @@ impl Default for Look {
             ocio: None,
             src: transfer::Src::LINEAR,
             white: crate::present::SCRGB_NITS,
-            peak: egui_display::export::HLG_REFERENCE_PEAK_NITS,
+            peak: video_io::color::HLG_REF_PEAK,
         }
     }
 }
@@ -403,7 +403,7 @@ pub fn write_png(path: &Path, shot: &Shot) -> Result<()> {
     .with_context(|| format!("write {}", path.display()))
 }
 
-/// The signal of an HDR PNG: the HDR half of the shared `egui_display` PNG encodings
+/// The signal of an HDR PNG: the HDR half of the shared `video_io` PNG encodings
 /// (`PngEncoding`, Playa's), without the SDR case the HDR writer has no use for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HdrPng {
@@ -419,10 +419,10 @@ impl HdrPng {
     pub const ALL: [Self; 2] = [Self::Pq, Self::Hlg];
 
     /// The shared encoding, whose labels the UI shows.
-    pub fn encoding(self) -> egui_display::export::PngEncoding {
+    pub fn encoding(self) -> video_io::export::PngEncoding {
         match self {
-            Self::Pq => egui_display::export::PngEncoding::Hdr10,
-            Self::Hlg => egui_display::export::PngEncoding::Hlg,
+            Self::Pq => video_io::export::PngEncoding::Hdr10,
+            Self::Hlg => video_io::export::PngEncoding::Hlg,
         }
     }
 
@@ -435,7 +435,7 @@ impl HdrPng {
         }
     }
 
-    /// BT.2020 light in nits to the 0..1 codes, through the shared `egui_display` curves the
+    /// BT.2020 light in nits to the 0..1 codes, through the shared `video_io::color` curves the
     /// present pass also uses. HLG is encoded for a display of `peak` nits, the one the HLG
     /// window encodes for (`Look::peak`), so the file is what that window shows (at 1000 nits
     /// the BT.2408 SDR white lands at 75 %). Out-of-gamut (negative) BT.2020 components go in
@@ -445,7 +445,7 @@ impl HdrPng {
     fn codes(self, nits: [f32; 3], peak: f32) -> [f32; 3] {
         match self {
             Self::Pq => nits.map(crate::present::pq),
-            Self::Hlg => egui_display::hlg(nits, peak),
+            Self::Hlg => video_io::color::hlg(nits, peak),
         }
     }
 }

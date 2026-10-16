@@ -156,7 +156,7 @@ pub struct Fonts {
     pub monospace: f32,
     pub button: f32,
     pub small: f32,
-    /// egui_dock `TabBarStyle::height`.
+    /// The dock's tab strip height (`egui_dock_layout::DockStyle::tab_height`).
     pub dock_tab: f32,
     /// The Settings panel's category list (egui-prefs2 paints it with its own `FontId`).
     pub sidebar: f32,
@@ -186,7 +186,7 @@ impl Fonts {
 }
 
 impl Default for Fonts {
-    /// The viewer's compact look: Small 9, every other style 10, egui_dock's 24 px tab bar.
+    /// The viewer's compact look: Small 9, every other style 10, a 24 px dock tab strip.
     fn default() -> Self {
         Self { heading: 10.0, body: 10.0, monospace: 10.0, button: 10.0, small: 9.0, dock_tab: 24.0, sidebar: 10.0 }
     }

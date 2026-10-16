@@ -1,6 +1,6 @@
 //! `exr-view` — a GPU-first OpenEXR viewer with sequence playback and scopes.
 //!
-//! winit + wgpu 30 + egui/egui_dock drive the window. EXR files are loaded through
+//! winit + wgpu 30 + egui/egui-dock-layout drive the window. EXR files are loaded through
 //! the workspace `exr-core` reader. Eligible images use resident GPU display;
 //! other images use a bounded tile pyramid and atlas, including file-backed input.
 //! A shared display transform feeds the float canvas and SDR, PQ, HLG or scRGB output.
@@ -40,7 +40,7 @@ mod transfer;
 mod viewport;
 
 pub use app::{App, AppState, UserEvent, ViewControls, proxy_wake};
-pub use dock::{DockTab, default_dock_state};
+pub use dock::{Dock, DockTab, default_layout};
 pub use export::HdrPng;
 pub use gpu_ctx::GpuContext;
 pub use image::{ChannelDisplay, DecodedFrame, ImageBackend, ImageStage, LoadError};

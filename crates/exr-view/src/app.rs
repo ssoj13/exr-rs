@@ -1,8 +1,8 @@
 //! Application shell: winit `ApplicationHandler` + egui-winit/egui-wgpu glue +
-//! egui_dock layout + the flat GPU image viewport.
+//! egui-dock-layout dock + the flat GPU image viewport.
 //!
 //! A raw winit window drives a wgpu surface; egui renders each frame through
-//! `egui-wgpu` into an `egui_dock` dock space. No eframe: the viewer owns its
+//! `egui-wgpu` into an `egui-dock-layout` dock space. No eframe: the viewer owns its
 //! wgpu device/surface directly, which is why the image backend's `present()`
 //! takes device/queue/renderer as plain references rather than a `RenderState`.
 //!
@@ -20,7 +20,6 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use egui_attr_grid::{AttrField, AttrGridState, AttrValue};
 use cryptomatte::{Manifest, RankedLayer, discover_path, extract_coverage_with, load_manifest};
-use egui_dock::{DockArea, DockState, Style};
 use egui_widgets_config::reset;
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -29,7 +28,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
-use crate::dock::{self, DockTab, DockTabViewer, default_dock_state};
+use crate::dock::{self, Dock, DockTab, DockTabViewer};
 use crate::file_pick::{FilePick, Pick};
 use crate::gpu_ctx::GpuContext;
 use crate::channels;
@@ -2337,7 +2336,7 @@ struct Viewer {
     asked: crate::present::Output,
     /// The monitor the window is on (a move to another one re-reads its HDR figures).
     monitor: Option<String>,
-    dock_state: DockState<DockTab>,
+    dock: Dock,
     app_state: AppState,
     /// True until the first frame has run the pending-path load.
     first_frame: bool,
@@ -2379,6 +2378,8 @@ impl Viewer {
         };
 
         let egui_ctx = egui::Context::default();
+        // egui draws into the present pass's canvas (below): `show_backdrop` may clear it.
+        egui_display::set_renderer_target(&egui_ctx, egui_display::RendererTarget::CANVAS);
         theme::install_fonts(&egui_ctx);
         theme::set(&egui_ctx, &theme::Theme::dark_theme(), &config.fonts);
 
@@ -2405,7 +2406,7 @@ impl Viewer {
         });
         egui_renderer.callback_resources.insert(crate::tiles::render::TileGpu::new(&gpu.device, vram));
         let present = crate::present::PresentPass::new(&gpu.device, gpu.config.format, gpu.output);
-        let dock_state = dock::restore(config.dock.as_deref());
+        let dock = Dock::restore(config.dock.as_deref());
         let mut app_state = AppState::new(initial, config, auto_detect, wake);
         app_state
             .controls
@@ -2421,7 +2422,7 @@ impl Viewer {
             present,
             asked,
             monitor: None,
-            dock_state,
+            dock,
             gpu_status,
             app_state,
             first_frame: true,
@@ -2536,7 +2537,7 @@ impl Viewer {
             self.app_state.config.fps = s.playback.fps;
             self.app_state.config.loop_ = s.playback.loop_;
         }
-        match egui_dock_layout::to_blob(&self.dock_state) {
+        match self.dock.blob() {
             Ok(blob) => self.app_state.config.dock = Some(blob),
             Err(e) => log::warn!("dock layout not saved: {e}"),
         }
@@ -2573,13 +2574,13 @@ impl Viewer {
         self.app_state.tick_sequence();
 
         // Free the GPU resources of any scope panel whose tab is currently closed
-        // (closed via the dock's tab-close button). egui retains a
+        // (closed via the tab menu's Close). egui retains a
         // native texture until `free_texture`, so an idle scope would otherwise
         // keep its output texture + egui id resident. Safe: a closed scope is not
         // ticked this frame, so its id is not referenced by any paint job.
         // Idempotent — a no-op once released; the panel re-registers on reopen.
         for scope in DockTab::SCOPES {
-            if self.dock_state.find_tab(&scope).is_none() {
+            if !self.dock.contains(&scope) {
                 let panel: &mut dyn GpuPanel = match scope {
                     DockTab::Histogram => &mut self.app_state.scopes.histogram,
                     DockTab::Waveform => &mut self.app_state.scopes.waveform,
@@ -2616,7 +2617,7 @@ impl Viewer {
 
         // Split disjoint borrows so the egui closure can use the GPU bits while
         // egui_state is borrowed separately for input handling.
-        let dock_state = &mut self.dock_state;
+        let dock = &mut self.dock;
         let app_state = &mut self.app_state;
         let mut viewport_gpu = ViewportGpu {
             device: &self.gpu.device,
@@ -2626,7 +2627,7 @@ impl Viewer {
         let gpu_status = &self.gpu_status;
 
         let mut full_output = ctx.run_ui(raw_input, |ui| {
-            build_ui(ui, dock_state, app_state, &mut viewport_gpu, gpu_status);
+            build_ui(ui, dock, app_state, &mut viewport_gpu, gpu_status);
             // After every panel, on each exit path of `build_ui`: the modal paints on top.
             // The OpenFX panel asked for a dialog while the UI was built: it is this dialog.
             #[cfg(feature = "ofx")]
@@ -2663,7 +2664,7 @@ impl Viewer {
 
         // Every frame, even one that is skipped below: a frame that showed no backdrop must not
         // present the last one.
-        hand_backdrop(&ctx, &mut self.present.backdrop);
+        hand_backdrop(&ctx, &mut self.present.backdrops);
         self.egui_state
             .handle_platform_output(&self.window, full_output.platform_output);
 
@@ -2815,10 +2816,11 @@ impl Viewer {
     }
 }
 
-/// Give the present pass the backdrop the UI showed this frame (`viewport::show` publishes it
-/// through `egui_display::show_backdrop`), or clear it when the frame showed none.
-fn hand_backdrop(ctx: &egui::Context, slot: &mut Option<egui_display::BackdropUniform>) {
-    *slot = egui_display::take_backdrop(ctx);
+/// Give the present pass the backdrops the UI showed this frame (`viewport::show` publishes them
+/// through `egui_display::show_backdrop`), or none when the frame showed none. The viewer draws
+/// one egui viewport (the root: viewports stay embedded), so only its backdrops are presented.
+fn hand_backdrop(ctx: &egui::Context, slot: &mut Vec<egui_display::BackdropUniform>) {
+    *slot = egui_display::take_backdrops(ctx, egui::ViewportId::ROOT);
 }
 
 /// Release the egui textures this frame's output retired, draining the list.
@@ -2833,10 +2835,10 @@ fn free_textures(renderer: &mut egui_wgpu::Renderer, delta: &mut egui::TexturesD
 /// Run the keys pressed this frame. Every bare-letter shortcut is suppressed while a widget wants
 /// the keyboard (a text field, a slider being typed into): otherwise typing "z" in a filter box
 /// toggled fullscreen and " " played the sequence.
-fn read_keys(ctx: &egui::Context, app_state: &mut AppState, dock_state: &mut DockState<DockTab>) {
+fn read_keys(ctx: &egui::Context, app_state: &mut AppState, dock: &mut Dock) {
     let typing = ctx.egui_wants_keyboard_input() || app_state.file_pick.is_open();
     for action in commands::pressed(ctx, typing, app_state.avail()) {
-        run(action, app_state, dock_state, ctx);
+        run(action, app_state, dock, ctx);
     }
 }
 
@@ -2855,15 +2857,13 @@ fn transport_bar(ui: &mut egui::Ui, app_state: &mut AppState) {
 /// disjoint borrows before the egui closure captures them.
 fn build_ui(
     ui: &mut egui::Ui,
-    dock_state: &mut DockState<DockTab>,
+    dock: &mut Dock,
     app_state: &mut AppState,
     gpu: &mut dyn TabGpu,
     gpu_status: &GpuStatus,
 ) {
     let ctx = ui.ctx().clone();
-    app_state.viewport_active = app_state.panels_hidden || dock_state.iter_all_nodes().any(|(_, node)| {
-        node.get_leaf().is_some_and(|leaf| leaf.tabs.get(leaf.active.0) == Some(&DockTab::Viewport))
-    });
+    app_state.viewport_active = app_state.panels_hidden || dock.shown(&ctx, &DockTab::Viewport);
 
     // The OpenFX effect's questions, finished edits, dialogs and re-render requests (UI thread).
     #[cfg(feature = "ofx")]
@@ -2871,7 +2871,7 @@ fn build_ui(
 
     // Every key goes through the command registry, here, before any panel: so the
     // keys work with the panels hidden (cinema mode) and a panel click cannot eat them.
-    read_keys(&ctx, app_state, dock_state);
+    read_keys(&ctx, app_state, dock);
     // Panels hidden → draw ONLY the viewport (independent of fullscreen).
     if app_state.panels_hidden {
         egui::CentralPanel::default()
@@ -2894,11 +2894,11 @@ fn build_ui(
     let tabs: Vec<DockTab> = COMMANDS
         .iter()
         .filter_map(|c| match &c.action {
-            Action::Tab(tab) if dock_state.find_tab(tab).is_some() => Some(tab.clone()),
+            Action::Tab(tab) if dock.contains(tab) => Some(tab.clone()),
             _ => None,
         })
         .collect();
-    // The tab context menu (inside the dock, where `dock_state` is borrowed) lists what is closed.
+    // The tab context menu (inside the dock, where `dock` is borrowed) lists what is closed.
     app_state.open_tabs.clone_from(&tabs);
     let (fullscreen, panels_hidden, channel) =
         (app_state.fullscreen, app_state.panels_hidden, app_state.controls.channel);
@@ -2908,6 +2908,7 @@ fn build_ui(
     let crate::persist::Config { recents, playhead_alpha, preload_strategy, layouts, .. } = &mut app_state.config;
     let layout_bar = &mut app_state.layout_bar;
     let mut layout_pick = None;
+    let mut layouts_changed = false;
     let mut clicked = None;
     egui::Panel::top("menu_bar").show(ui, |ui| {
         let item = |id: &'static str| {
@@ -2969,19 +2970,26 @@ fn build_ui(
         // The named layouts sit at the right end of the menu row.
         let layouts_ui = |ui: &mut egui::Ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                match layout_bar.show(ui, layouts, dock_state) {
-                    Ok(pick) => layout_pick = pick,
+                match layout_bar.show(ui, layouts, &dock.layout) {
+                    Ok(out) => {
+                        layout_pick = out.restored;
+                        // Saved / deleted / renamed: the store changed, persist it now.
+                        layouts_changed = !out.actions.is_empty();
+                    }
                     Err(e) => log::warn!("dock layout: {e}"),
                 }
             });
         };
         clicked = egui_menubar::MenuBar::new(commands::MENU).show_full(ui, item, slot, layouts_ui);
     });
-    if let Some(state) = layout_pick {
-        *dock_state = state;
+    if let Some(layout) = layout_pick {
+        dock.replace(&ctx, layout);
+    }
+    if layouts_changed {
+        app_state.config.save();
     }
     if let Some(cmd) = clicked.and_then(commands::find) {
-        run(cmd.action.clone(), app_state, dock_state, &ctx);
+        run(cmd.action.clone(), app_state, dock, &ctx);
     }
     if let Some(path) = recent_to_open {
         app_state.open_chosen(path);
@@ -3143,28 +3151,17 @@ fn build_ui(
     }
 
     egui::CentralPanel::default_margins().show(ui, |ui| {
-        DockArea::new(dock_state)
-            .style({
-                let mut style = Style::from_egui(ui.style().as_ref());
-                style.tab_bar.height = app_state.config.fonts.clamped().dock_tab;
-                style
-            })
-            .show_inside(
-                ui,
-                &mut DockTabViewer {
-                    state: app_state,
-                    gpu,
-                },
-            );
+        let tab_height = app_state.config.fonts.clamped().dock_tab;
+        dock.show(ui, tab_height, &mut DockTabViewer { state: app_state, gpu });
     });
     // What the panels asked for while the dock was borrowed (snapshot menu, tab context menu).
     for action in std::mem::take(&mut app_state.queue) {
-        run(action, app_state, dock_state, &ctx);
+        run(action, app_state, dock, &ctx);
     }
 }
 
 /// Run `action` (a menu click or a key, `commands::COMMANDS`).
-fn run(action: Action, app_state: &mut AppState, dock_state: &mut DockState<DockTab>, ctx: &egui::Context) {
+fn run(action: Action, app_state: &mut AppState, dock: &mut Dock, ctx: &egui::Context) {
     match action {
         Action::Open => {
             // The dialog starts where the last pick was confirmed, else where the file shown last lives.
@@ -3226,18 +3223,14 @@ fn run(action: Action, app_state: &mut AppState, dock_state: &mut DockState<Dock
             let c = &mut app_state.controls.channel;
             *c = if *c == mode { ChannelDisplay::Rgba } else { mode };
         }
-        Action::ResetLayout => *dock_state = default_dock_state(),
-        // Open the tab (in the focused leaf), or bring an open one forward; closing is the tab's X.
-        Action::Tab(tab) => match dock_state.find_tab(&tab) {
-            Some(path) => {
-                let node = path.node_path();
-                if let Err(e) = dock_state.set_active_tab(path) {
-                    log::warn!("cannot bring {tab:?} forward: {e}");
-                }
-                dock_state.set_focused_node_and_surface(node);
+        Action::ResetLayout => dock.replace(ctx, dock::default_layout()),
+        // Open the tab (in the focused group), or bring an open one forward; closing is the tab
+        // menu's Close.
+        Action::Tab(tab) => {
+            if let Err(e) = dock.open(tab.clone()) {
+                log::warn!("cannot open {tab:?}: {e}");
             }
-            None => dock_state.push_to_focused_leaf(tab),
-        },
+        }
     }
 }
 
@@ -4023,26 +4016,23 @@ mod dock_action_tests {
     use super::*;
 
     /// Window menu / tab context menu actions open a tab or bring an open one forward; they
-    /// never close it (that is the tab's X), so no entry can remove the main view.
+    /// never close it (that is the tab menu's Close), so no entry can remove the main view.
     #[test]
     fn tab_action_opens_and_focuses_but_never_closes() {
         let mut app = AppState::new(None, Config::default(), true, Arc::new(|| {}));
-        let mut dock = default_dock_state();
+        let mut dock = Dock::default();
         let ctx = egui::Context::default();
         // Open: a closed tab comes back.
-        let path = dock.find_tab(&DockTab::Waveform).expect("default layout has a waveform");
-        dock.remove_tab(path);
-        assert!(dock.find_tab(&DockTab::Waveform).is_none());
+        dock.layout.apply(egui_dock_layout::Action::Close { panel: DockTab::Waveform }).expect("default layout has a waveform");
+        assert!(!dock.contains(&DockTab::Waveform));
         run(Action::Tab(DockTab::Waveform), &mut app, &mut dock, &ctx);
-        assert!(dock.find_tab(&DockTab::Waveform).is_some());
-        // Focus: the open Histogram becomes the active tab of its leaf, and stays open.
+        assert!(dock.contains(&DockTab::Waveform));
+        // Focus: the open Histogram becomes the active tab of its group, and stays open.
         run(Action::Tab(DockTab::Histogram), &mut app, &mut dock, &ctx);
-        let path = dock.find_tab(&DockTab::Histogram).expect("still open");
-        let leaf = dock.leaf(path.node_path()).expect("a leaf");
-        assert_eq!(leaf.active, path.tab, "brought forward");
+        assert!(dock.shown(&ctx, &DockTab::Histogram), "brought forward");
         // Viewport: the same action on the open main view keeps it.
         run(Action::Tab(DockTab::Viewport), &mut app, &mut dock, &ctx);
-        assert!(dock.find_tab(&DockTab::Viewport).is_some());
+        assert!(dock.contains(&DockTab::Viewport));
     }
 
     /// Every `.rs` under `dir`, recursively.
@@ -4197,7 +4187,7 @@ mod key_path_tests {
     /// dialog) that has the keyboard leaves bare keys alone while Ctrl chords still fire.
     #[test]
     fn read_keys_runs_the_pressed_keys_and_respects_typing() {
-        let (mut app, mut dock, ctx) = (app(), default_dock_state(), egui::Context::default());
+        let (mut app, mut dock, ctx) = (app(), Dock::default(), egui::Context::default());
         frame(&ctx, vec![press(Key::R, Modifiers::NONE)], |ui| read_keys(ui.ctx(), &mut app, &mut dock));
         assert_eq!(app.controls.channel, ChannelDisplay::R);
         frame(&ctx, vec![Event::Key { key: Key::R, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::NONE }], |_| {});
@@ -4286,11 +4276,11 @@ mod key_path_tests {
         let mut app = app();
         app.apply_open(open_blocking(name(1), true, u64::MAX));
         assert!(app.seq.is_some());
-        let mut dock = default_dock_state();
+        let mut dock = Dock::default();
         let ctx = egui::Context::default();
         // The scopes owned under the pointer over a grid of the window, with or without an overlay
         // on top of everything (`None`: the pointer is over a registered panel and an overlay).
-        let mut probe = |app: &mut AppState, dock: &mut DockState<DockTab>, overlay: bool| {
+        let mut probe = |app: &mut AppState, dock: &mut Dock, overlay: bool| {
             let mut seen = Vec::new();
             for y in (5..600).step_by(30) {
                 for x in (5..800).step_by(40) {
@@ -4312,11 +4302,9 @@ mod key_path_tests {
             }
             seen
         };
-        // Every tab, brought forward in turn, owns its scope somewhere; the transport bar too.
+        // Every tab, opened or brought forward in turn, owns its scope somewhere; the transport
+        // bar too.
         for tab in DockTab::ALL {
-            if dock.find_tab(&tab).is_none() {
-                dock.push_to_focused_leaf(tab.clone());
-            }
             run(Action::Tab(tab.clone()), &mut app, &mut dock, &ctx);
             assert!(probe(&mut app, &mut dock, false).contains(&Some(Scope::of(&tab))), "{tab:?} registers its scope");
         }
@@ -4386,8 +4374,10 @@ mod backdrop_tests {
         app
     }
 
-    /// One frame of the viewport tab content (no GPU: the tiles are not drawn, the backdrop is).
+    /// One frame of the viewport tab content (no GPU: the tiles are not drawn, the backdrop is),
+    /// on the present pass's canvas as the viewer declares it.
     fn show(app: &mut AppState, ctx: &egui::Context) {
+        egui_display::set_renderer_target(ctx, egui_display::RendererTarget::CANVAS);
         frame(ctx, vec![], |root| {
             egui::CentralPanel::default().show(root, |ui| app.display_viewport(ui, &mut NoGpu, viewport::Strip::NONE));
         });
@@ -4398,30 +4388,30 @@ mod backdrop_tests {
     #[test]
     fn the_viewport_shows_its_backdrop_and_the_host_hands_it_over() {
         let (mut app, ctx) = (with_image(), egui::Context::default());
-        let mut slot = None;
+        let mut slot = Vec::new();
         show(&mut app, &ctx);
         hand_backdrop(&ctx, &mut slot);
-        let checker = slot.expect("the viewport shows the default checker");
+        let [checker] = slot[..] else { panic!("the viewport shows the default checker, once: {slot:?}") };
         assert_eq!((checker.a, checker.cell_px), (Checker::default().a, 16.0), "the checker, in screen pixels");
         app.controls.backdrop = Backdrop { kind: BackdropKind::Black, ..Backdrop::default() };
         show(&mut app, &ctx);
         hand_backdrop(&ctx, &mut slot);
-        let black = slot.expect("black is a backdrop too");
+        let [black] = slot[..] else { panic!("black is a backdrop too: {slot:?}") };
         assert_eq!((black.a, black.cell_px), ([0.0, 0.0, 0.0, 1.0], 0.0), "a solid, not the checker");
         assert!(black.clip_px[2] > black.clip_px[0] && black.clip_px[3] > black.clip_px[1], "over the image's rect");
         // Nothing shown this frame: the pass is told so, not left with the last one.
         hand_backdrop(&ctx, &mut slot);
-        assert!(slot.is_none());
+        assert!(slot.is_empty());
     }
 
     /// No image, no backdrop: it is only ever under the image.
     #[test]
     fn an_empty_viewport_shows_no_backdrop() {
         let (mut app, ctx) = (app(), egui::Context::default());
-        let mut slot = None;
+        let mut slot = Vec::new();
         show(&mut app, &ctx);
         hand_backdrop(&ctx, &mut slot);
-        assert!(slot.is_none());
+        assert!(slot.is_empty());
     }
 
     /// The strip carries the backdrop button (the shared picker labels it "Backdrop: <kind>").

@@ -731,7 +731,7 @@ fn emissive_texel_survives_the_backdrop_present() {
     for kind in [BackdropKind::Black, BackdropKind::Gray50] {
         let backdrop = Backdrop { kind, ..Backdrop::default() };
         let uniform = backdrop.uniform(&BackdropView::new(egui::Pos2::ZERO, 1.0), rect);
-        pass.backdrop = Some(uniform);
+        pass.backdrops = vec![uniform];
         let bd = uniform.color_at([0.5, 0.5]).map(crate::transfer::eotf);
         let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         {
