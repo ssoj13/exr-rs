@@ -63,6 +63,7 @@ codec-simd = { git = "ssh://git@github.com/ssoj13/codec-simd-rs.git", branch = "
 # Locates the private test image set (EXR_TEST_DATA / ../exr-rs-tests); the tests that read it
 # are behind each crate's `test-data` feature, off by default.
 exr-test-data = { path = "crates/exr-test-data" }
+scanseq = { git = "ssh://git@github.com/ssoj13/scanseq-rs.git", branch = "main", default-features = false }
 
 # The root package is the future thin CLI (exrinfo-like). Keeps src/main.rs working.
 [package]
@@ -84,6 +85,8 @@ imath-rs = { path = "crates/imath-rs" }
 exr-import = { path = "crates/exr-import" }
 # OpenEXRUtil port: `check` (ImfCheckFile) and the whole-image tools.
 exr-util = { path = "crates/exr-util" }
+# Sequence detector (`name.####.ext` / numbered frames) shared with `exr-view`.
+scanseq = { workspace = true }
 # Logging facade + backend: the CLI is a BINARY, so it initialises env_logger
 # (default level info; `RUST_LOG` / `-v`/`-vv` override). Libraries only depend
 # on the `log` facade — the backend lives here.

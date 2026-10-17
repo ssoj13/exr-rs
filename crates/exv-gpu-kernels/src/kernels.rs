@@ -1413,9 +1413,9 @@ pub fn decode_tile_gpu_fast_vram(ctx: &GpuContext, payload: &[u8], dtype: Dtype,
 /// Replicates `exv_codec::bc6h::decode_bc6h_mono_block` + residual addition bit-for-bit on the GPU.
 ///
 /// Bindings:
-/// - `params`: `[tw, th, full_w, x0, y0, has_res]` (`has_res`: `0` = Lossy, `1` = BytePerWord residual from `reorder`,
-///   `2` = packed LE `u16` residual from `TAG_RAW`).
-/// - `blocks`: 4 `u32` words per 4x4 `BC6H_SF16` Mode 11 block (`nbx * nby * 4` words).
+/// - `params`: `[tw, th, full_w, x0, y0, has_res, blk_enc]` (`has_res`: `0` = Lossy, `1` = BytePerWord residual from `reorder`,
+///   `2` = packed LE `u16` residual from `TAG_RAW`; `blk_enc`: `0` = 4 packed `u32` words/block, `1` = 16 `BytePerWord` words/block).
+/// - `blocks`: `BC6H_SF16` Mode 11 block buffer (`nbx * nby * 4` words when `blk_enc == 0`, `nbx * nby * 16` words when `blk_enc == 1`).
 /// - `res`: optional residual words (`BytePerWord` when `has_res == 1`, packed `u32` words when `has_res == 2`).
 /// - `elems`: output `ElemPerWord(2)` buffer (`(y0 + y) * full_w + (x0 + x)`).
 pub(crate) const BC6H_SHADER: &str = r#"
@@ -1452,11 +1452,18 @@ fn weight4(idx: u32) -> i32 {
     return w[idx & 15u];
 }
 
+fn pack4(base: u32) -> u32 {
+    return (blocks[base] & 0xffu)
+         | ((blocks[base + 1u] & 0xffu) << 8u)
+         | ((blocks[base + 2u] & 0xffu) << 16u)
+         | ((blocks[base + 3u] & 0xffu) << 24u);
+}
+
 @compute @workgroup_size(WG)
 fn bc6h_decode(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>,
                @builtin(local_invocation_id) lid: vec3<u32>) {
     let tw = params[0]; let th = params[1]; let full_w = params[2];
-    let x0 = params[3]; let y0 = params[4]; let has_res = params[5];
+    let x0 = params[3]; let y0 = params[4]; let has_res = params[5]; let blk_enc = params[6];
     let count = tw * th;
     let px = (wid.y * nwg.x + wid.x) * WG + lid.x;
     if (px >= count) { return; }
@@ -1466,11 +1473,20 @@ fn bc6h_decode(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) n
     let nbx = (tw + 3u) >> 2u;
     let bx = x >> 2u;
     let by = y >> 2u;
-    let b_idx = (by * nbx + bx) * 4u;
-    let w0 = blocks[b_idx];
-    let w1 = blocks[b_idx + 1u];
-    let w2 = blocks[b_idx + 2u];
-    let w3 = blocks[b_idx + 3u];
+    var w0 = 0u; var w1 = 0u; var w2 = 0u; var w3 = 0u;
+    if (blk_enc == 0u) {
+        let b_idx = (by * nbx + bx) * 4u;
+        w0 = blocks[b_idx];
+        w1 = blocks[b_idx + 1u];
+        w2 = blocks[b_idx + 2u];
+        w3 = blocks[b_idx + 3u];
+    } else {
+        let b_idx = (by * nbx + bx) * 16u;
+        w0 = pack4(b_idx);
+        w1 = pack4(b_idx + 4u);
+        w2 = pack4(b_idx + 8u);
+        w3 = pack4(b_idx + 12u);
+    }
 
     let q0 = sign_ext_10(w0 >> 5u);
     let q1 = sign_ext_10(w1 >> 3u);
@@ -1527,19 +1543,53 @@ pub fn decode_bc6h_into(
     }
     let nbx = (tw.div_ceil(4)) as usize;
     let nby = (th.div_ceil(4)) as usize;
-    let blocks_bytes = nbx.checked_mul(nby).and_then(|n| n.checked_mul(16)).ok_or_else(|| corrupt("BC6H block size overflow"))?;
-    let mode = *payload.first().ok_or_else(|| corrupt("empty BC6H payload"))?;
-    let Some(blocks_slice) = payload.get(1..1usize.checked_add(blocks_bytes).ok_or_else(|| corrupt("BC6H blocks overflow"))?) else {
-        return Err(corrupt("BC6H payload truncated in block array"));
-    };
-    let tail = &payload[1 + blocks_bytes..];
+    let n_blocks = nbx.checked_mul(nby).ok_or_else(|| corrupt("BC6H block count overflow"))?;
+    let blocks_bytes = n_blocks.checked_mul(16).ok_or_else(|| corrupt("BC6H block size overflow"))?;
+    const BLOCKS_RANS_FLAG: u8 = 0x80; // == exv_codec::bc6h::BLOCKS_RANS_FLAG
+    let raw_mode = *payload.first().ok_or_else(|| corrupt("empty BC6H payload"))?;
+    let blocks_rans = (raw_mode & BLOCKS_RANS_FLAG) != 0;
+    let mode = raw_mode & !BLOCKS_RANS_FLAG;
 
     let device = &ctx.device;
     let no = wgpu::BufferUsages::empty();
-    let block_words = to_elems(blocks_slice, 4);
-    let b_blocks = storage_u32(device, &ctx.queue, "bc6h.blocks", &block_words, no);
-
     let mut enc = encoder(device, "bc6h.enc");
+
+    let (blk_enc, b_blocks, tail) = if !blocks_rans {
+        let end = 1usize.checked_add(blocks_bytes).ok_or_else(|| corrupt("BC6H blocks overflow"))?;
+        let Some(blocks_slice) = payload.get(1..end) else {
+            return Err(corrupt("BC6H payload truncated in block array"));
+        };
+        let block_words = to_elems(blocks_slice, 4);
+        let b_blocks = storage_u32(device, &ctx.queue, "bc6h.blocks", &block_words, no);
+        (0u32, b_blocks, &payload[end..])
+    } else {
+        let len_bytes: [u8; 4] = payload
+            .get(1..5)
+            .ok_or_else(|| corrupt("BC6H rANS block header truncated"))?
+            .try_into()
+            .map_err(|_| corrupt("BC6H rANS block header"))?;
+        let r_len = u32::from_le_bytes(len_bytes) as usize;
+        let end = 5usize.checked_add(r_len).ok_or_else(|| corrupt("BC6H rANS block length overflow"))?;
+        let Some(r_slice) = payload.get(5..end) else {
+            return Err(corrupt("BC6H payload truncated in rANS block stream"));
+        };
+        let prep = rans::parse(r_slice).ok_or_else(|| corrupt("bad BC6H block rANS container"))?;
+        if prep.n != blocks_bytes {
+            return Err(GpuError::Corrupt(format!("BC6H blocks size mismatch: n={} != {blocks_bytes}", prep.n)));
+        }
+        let nbytes = prep.n as u64 * 4;
+        ctx.check_buf("bc6h.blocks", nbytes)?;
+        let bufs = RansBufs::new(ctx, "bc6h.blk_r", &prep)?;
+        let b_rp = storage_u32(device, &ctx.queue, "bc6h.blk_rp", &[16, n_blocks as u32, nbx as u32, nbx as u32, 0, 0], no);
+        let b_sym = new_buf(device, "bc6h.blk_sym", nbytes, wgpu::BufferUsages::STORAGE);
+        let b_blocks = new_buf(device, "bc6h.blocks", nbytes, wgpu::BufferUsages::STORAGE);
+        let bg_rans = bufs.bind(ctx, &b_sym);
+        let bg_re = bind_bufs(device, &ctx.pipelines.reorder, "bc6h.blk_reorder", &[&b_rp, &b_sym, &b_blocks]);
+        pass(ctx, &mut enc, "bc6h.blk_rans", &ctx.pipelines.rans, &bg_rans, [(prep.cfg.lanes as u32).div_ceil(WG), 1, 1])?;
+        pass(ctx, &mut enc, "bc6h.blk_reorder", &ctx.pipelines.reorder, &bg_re, [1, 1, 1])?;
+        (1u32, b_blocks, &payload[end..])
+    };
+
     let (has_res, b_res) = match mode {
         0 => {
             if !tail.is_empty() {
@@ -1577,7 +1627,7 @@ pub fn decode_bc6h_into(
         _ => return Err(corrupt("BC6H payload has unknown mode byte")),
     };
 
-    let b_params = storage_u32(device, &ctx.queue, "bc6h.params", &[tw, th, full_w, x0, y0, has_res], no);
+    let b_params = storage_u32(device, &ctx.queue, "bc6h.params", &[tw, th, full_w, x0, y0, has_res, blk_enc], no);
     let bg_bc6h = bind_bufs(device, &ctx.pipelines.bc6h, "bc6h.bg", &[&b_params, &b_blocks, &b_res, dst_elem]);
     pass(ctx, &mut enc, "bc6h", &ctx.pipelines.bc6h, &bg_bc6h, ctx.split_1d("bc6h", (count as u64).div_ceil(WG as u64))?)?;
     ctx.queue.submit([enc.finish()]);

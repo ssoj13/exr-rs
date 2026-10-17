@@ -989,7 +989,7 @@ fn decode_bc6h_batched(
                     }
                     jobs[it.ci].push((it, payload));
                 }
-                Some(BlobKind::Raw(_)) => raw.push(it),
+                Some(BlobKind::Raw(_) | BlobKind::Rans(_) | BlobKind::Deflate(_)) => raw.push(it),
                 Some(other) => return Err(GpuError::Corrupt(format!("bc6h GPU: unexpected blob {other:?} in BC6H image (tile {}, ch {})", it.t, it.ci))),
                 None => return Err(GpuError::Corrupt(format!("bc6h GPU: bad blob tag (tile {}, ch {})", it.t, it.ci))),
             }

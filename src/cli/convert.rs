@@ -26,8 +26,9 @@ pub const EXAMPLES: &str = examples!(
     "exr-rs convert in.exr out.exr -c zip                 # lossless, zlib",
     "exr-rs convert in.exr out.exr -c dwaa                # lossy, small",
     "exr-rs convert in.exr out.exr -c htj2k256            # HTJ2K (OpenEXR 3.4)",
-    "exr-rs convert in.exr out.exv                        # EXV video (default: bc6h-lossless)",
-    "exr-rs convert in.exr out.exv --exv-codec bc6h-lossy # EXV hardware GPU BC6H",
+    "exr-rs convert seq.0001.exr clip.exv                 # pack EXR sequence to EXV (auto-detects frames)",
+    "exr-rs convert seq.0001.exr clip.exv --half          # downcast F32 -> F16 for hardware BC6H",
+    "exr-rs convert seq.0001.exr clip.exv --exv-codec bc6h-lossy --gop 8 # GPU BC6H + P-frames",
     "exr-rs convert clip.exv frame.####.exr -c zip        # unpack EXV clip to EXR sequence",
     "exr-rs convert plate.dpx plate.exr                   # any other still: values as read, colorInteropID tag",
 );
@@ -46,7 +47,7 @@ pub const EXV_CODECS: [&str; 7] = [
 /// `convert` arguments.
 #[derive(clap::Args)]
 pub struct Args {
-    /// Input: an EXR (single-part, not deep), an EXV clip, or a PNG/JPEG/TIFF/DPX/HDR/... still.
+    /// Input: an EXR file/sequence (`frame.0001.exr`, `frame.####.exr`, or folder), an EXV clip, or a still.
     pub input: PathBuf,
     /// Output: an EXR (`out.exr` or `out.####.exr` for multi-frame EXV clips) or an EXV (`out.exv`).
     pub output: PathBuf,
@@ -59,6 +60,12 @@ pub struct Args {
     /// GOP length when writing `.exv` (`1` = all-intra, `> 1` = temporal P-frames).
     #[arg(long)]
     pub gop: Option<u32>,
+    /// Convert 32-bit `FLOAT` channels to 16-bit `HALF` (`f16`), keeping `UINT` ID channels intact.
+    #[arg(short = 'H', long)]
+    pub half: bool,
+    /// Convert only the single input file even if numbered sibling frames exist in the same directory.
+    #[arg(long)]
+    pub single: bool,
 }
 
 /// The accepted codec names, from [`Compression::ALL`] + [`Compression::name`]: the parser and
@@ -79,44 +86,106 @@ fn expand_frame_pattern(pattern: &std::path::Path, frame: usize) -> Option<PathB
     Some(pattern.with_file_name(formatted))
 }
 
-/// Discover all numbered frame files on disk matching a `name.####.ext` pattern, sorted by frame number.
-fn collect_pattern_frames(pattern: &std::path::Path) -> Result<Option<Vec<PathBuf>>, CliError> {
-    let Some(name) = pattern.file_name().and_then(|n| n.to_str()) else {
+/// Resolve a `scanseq::Seq` into ordered frame paths on disk.
+fn seq_paths(seq: &scanseq::Seq) -> Vec<PathBuf> {
+    seq.indices
+        .iter()
+        .filter_map(|&f| seq.get_file(f).map(PathBuf::from))
+        .collect()
+}
+
+/// Discover all numbered frame files on disk via [`scanseq::Scanner::from_file`] from a numbered
+/// frame file (`robat.0001.exr`), a directory (`D:\_example_files\EXR\Robat`), or a `name.####.ext` pattern.
+fn collect_sequence_frames(input: &std::path::Path, single: bool) -> Result<Option<Vec<PathBuf>>, CliError> {
+    if single {
         return Ok(None);
-    };
-    let Some(start) = name.find('#') else {
-        return Ok(None);
-    };
-    let end = start + name[start..].bytes().take_while(|&b| b == b'#').count();
-    let prefix = &name[..start];
-    let suffix = &name[end..];
-    let dir = pattern
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| std::path::Path::new("."));
-    let mut matched: Vec<(u64, PathBuf)> = Vec::new();
-    for entry in std::fs::read_dir(dir).map_err(|e| CliError::Other(e.to_string()))? {
-        let entry = entry.map_err(|e| CliError::Other(e.to_string()))?;
-        let fname_os = entry.file_name();
-        let Some(fname) = fname_os.to_str() else { continue };
-        if fname.len() > prefix.len() + suffix.len()
-            && fname.starts_with(prefix)
-            && fname.ends_with(suffix)
-        {
-            let mid = &fname[prefix.len()..fname.len() - suffix.len()];
-            if let Ok(num) = mid.parse::<u64>() {
-                matched.push((num, entry.path()));
+    }
+    if input.is_dir() {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(input)
+            .map_err(|e| CliError::Other(e.to_string()))?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.is_file() && exr_import::is_image(p))
+            .collect();
+        files.sort();
+        for seed in &files {
+            if let Some(seq) = scanseq::Scanner::from_file(seed) {
+                let paths = seq_paths(&seq);
+                if !paths.is_empty() {
+                    return Ok(Some(paths));
+                }
             }
         }
-    }
-    matched.sort_by_key(|(n, _)| *n);
-    if matched.is_empty() {
         return Err(CliError::Other(format!(
-            "no frames found matching pattern {}",
-            pattern.display()
+            "no image sequence found in directory {}",
+            input.display()
         )));
     }
-    Ok(Some(matched.into_iter().map(|(_, p)| p).collect()))
+    if let Some(name) = input.file_name().and_then(|n| n.to_str())
+        && let Some(start) = name.find('#')
+    {
+        let end = start + name[start..].bytes().take_while(|&b| b == b'#').count();
+        let prefix = &name[..start];
+        let suffix = &name[end..];
+        let dir = input
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let mut seeds: Vec<PathBuf> = std::fs::read_dir(dir)
+            .map_err(|e| CliError::Other(e.to_string()))?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name().and_then(|n| n.to_str()).is_some_and(|fname| {
+                    fname.len() > prefix.len() + suffix.len()
+                        && fname.starts_with(prefix)
+                        && fname.ends_with(suffix)
+                        && fname[prefix.len()..fname.len() - suffix.len()]
+                            .bytes()
+                            .all(|b| b.is_ascii_digit())
+                })
+            })
+            .collect();
+        seeds.sort();
+        if let Some(seed) = seeds.first()
+            && let Some(seq) = scanseq::Scanner::from_file(seed)
+        {
+            let paths = seq_paths(&seq);
+            if !paths.is_empty() {
+                return Ok(Some(paths));
+            }
+        }
+        return Err(CliError::Other(format!(
+            "no frames found matching pattern {}",
+            input.display()
+        )));
+    }
+    if let Some(seq) = scanseq::Scanner::from_file(input) {
+        let paths = seq_paths(&seq);
+        if paths.len() > 1 {
+            return Ok(Some(paths));
+        }
+    }
+    Ok(None)
+}
+
+/// Downcast all 32-bit `FLOAT` channels of `image` to 16-bit `HALF`, leaving `HALF` and `UINT` channels untouched.
+fn downcast_float_channels_to_half(image: Image) -> Result<Image, CliError> {
+    use exr_core::api::ChannelData;
+    use imath_rs::Half;
+
+    let mut out = Image::new(image.data_window);
+    out.display_window = image.display_window;
+    out.compression = image.compression;
+    out.line_order = image.line_order;
+    out.set_tiling(image.tiling());
+    *out.attributes_mut() = image.attributes().clone();
+    for (name, data) in image.into_channels()? {
+        let converted = match data {
+            ChannelData::Float(v) => ChannelData::Half(v.into_iter().map(Half::from_f32).collect()),
+            other => other,
+        };
+        out.insert_channel(name, converted)?;
+    }
+    Ok(out)
 }
 
 /// Run the `convert` subcommand. Deep / multipart inputs come back from the facade as a clear
@@ -126,25 +195,38 @@ pub fn run(args: Args) -> CliResult {
 
     if exr_import::is_exv(&args.output) {
         let codec_name = args.exv_codec.as_deref().unwrap_or("bc6h-lossless");
-        let gop = args.gop.unwrap_or(1);
         let profile = exr_import::parse_exv_profile(codec_name).map_err(other)?;
+        // `bc6h-lossy` and `rt` are explicitly F16 GPU block codecs: convert F32 float channels to F16
+        // automatically so their hardware block encoders engage instead of falling back to uncompressed RAW.
+        let force_half = args.half
+            || matches!(
+                codec_name.trim().to_ascii_lowercase().as_str(),
+                "bc6h-lossy" | "bc6h_lossy" | "rt" | "exvrt" | "exv-rt"
+            );
         let load_one = |p: &std::path::Path| -> Result<Image, CliError> {
-            if exr_import::is_foreign(p) {
-                exr_import::load(p).map_err(other)?.to_exr().map_err(other)
+            let img = if exr_import::is_foreign(p) {
+                exr_import::load(p).map_err(other)?.to_exr().map_err(other)?
             } else {
-                Ok(Image::read_all(p)?)
+                Image::read_all(p)?
+            };
+            if force_half {
+                downcast_float_channels_to_half(img)
+            } else {
+                Ok(img)
             }
         };
-        let frames = if let Some(paths) = collect_pattern_frames(&args.input)? {
+        let frames = if let Some(paths) = collect_sequence_frames(&args.input, args.single)? {
             paths.iter().map(|p| load_one(p)).collect::<Result<Vec<_>, _>>()?
         } else {
             vec![load_one(&args.input)?]
         };
+        let gop = args.gop.unwrap_or(if frames.len() > 1 { 8 } else { 1 });
         exr_import::write_exr_frames_as_exv(&args.output, &frames, profile, gop).map_err(other)?;
         outln!(
-            "converted {} ({} frame(s)) -> {} (exv codec: {})",
+            "converted {} ({} frame(s), gop={}) -> {} (exv codec: {})",
             args.input.display(),
             frames.len(),
+            gop,
             args.output.display(),
             codec_name,
         );
@@ -159,7 +241,10 @@ pub fn run(args: Args) -> CliResult {
         for f in 0..count {
             let out_path = expand_frame_pattern(&args.output, f)
                 .ok_or_else(|| CliError::Other("invalid output frame pattern".to_owned()))?;
-            let image = clip.load_frame(f).map_err(other)?.to_exr().map_err(other)?;
+            let mut image = clip.load_frame(f).map_err(other)?.to_exr().map_err(other)?;
+            if args.half {
+                image = downcast_float_channels_to_half(image)?;
+            }
             let compression = args.compress.unwrap_or(image.compression);
             image.write(&out_path, compression)?;
         }
@@ -173,11 +258,14 @@ pub fn run(args: Args) -> CliResult {
 
     // Any other still comes in through the viewer's loader (`exr-import`) and leaves as a
     // scanline EXR holding its values and its colour tag.
-    let image = if exr_import::is_foreign(&args.input) {
+    let mut image = if exr_import::is_foreign(&args.input) {
         exr_import::load(&args.input).map_err(other)?.to_exr().map_err(other)?
     } else {
         Image::read_all(&args.input)?
     };
+    if args.half {
+        image = downcast_float_channels_to_half(image)?;
+    }
     let compression = args.compress.unwrap_or(image.compression);
     image.write(&args.output, compression)?;
     outln!(
@@ -234,6 +322,8 @@ mod tests {
                 compress: Some(codec),
                 exv_codec: None,
                 gop: None,
+                half: false,
+                single: false,
             })
             .unwrap();
             let (a, b) = (Image::read_all(&input).unwrap(), Image::read_all(&output).unwrap());
@@ -279,8 +369,8 @@ mod tests {
 
         let sample = |img: &Image, ch: &str| img.channel(ch).and_then(|c| c.sample_f32(0)).unwrap();
         let (out_png, out_hdr) = (tmp.join("a.exr"), tmp.join("b.exr"));
-        run(Args { input: png, output: out_png.clone(), compress: None, exv_codec: None, gop: None }).unwrap();
-        run(Args { input: hdr, output: out_hdr.clone(), compress: None, exv_codec: None, gop: None }).unwrap();
+        run(Args { input: png, output: out_png.clone(), compress: None, exv_codec: None, gop: None, half: false, single: false }).unwrap();
+        run(Args { input: hdr, output: out_hdr.clone(), compress: None, exv_codec: None, gop: None, half: false, single: false }).unwrap();
         let (p, h) = (Image::read_all(&out_png).unwrap(), Image::read_all(&out_hdr).unwrap());
         let a = 128.0 / 255.0;
         assert!((sample(&p, "R") - a * a).abs() < 2e-4, "{}", sample(&p, "R"));
@@ -320,11 +410,13 @@ mod tests {
 
         let exv = tmp.join("clip.exv");
         run(Args {
-            input: tmp.join("in.####.exr"),
+            input: f0.clone(),
             output: exv.clone(),
             compress: None,
             exv_codec: Some("bc6h-lossless".to_owned()),
             gop: Some(2),
+            half: false,
+            single: false,
         })
         .unwrap();
         run(Args {
@@ -333,6 +425,8 @@ mod tests {
             compress: Some(Compression::Zip),
             exv_codec: None,
             gop: None,
+            half: false,
+            single: false,
         })
         .unwrap();
 

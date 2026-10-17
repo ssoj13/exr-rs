@@ -313,12 +313,25 @@ impl TileCodec for Bc6h {
                     pick_into(out, plane, &[]);
                     Ok(())
                 }
-                Bc6hMode::LosslessResidual => FAST.encode_chan(plane, dtype, w, h, p, out),
+                Bc6hMode::LosslessResidual => {
+                    let max_p = (*p).max_ratio();
+                    FAST.encode_chan(plane, dtype, w, h, &max_p, out)
+                }
             };
         }
         let start = out.len();
         out.push(TAG_BC6H);
         bc6h::encode_plane_into(plane, w, h, mode, p.rans, out)?;
+        if mode == Bc6hMode::LosslessResidual {
+            let mut fast_cand = Vec::new();
+            let max_p = (*p).max_ratio();
+            FAST.encode_chan(plane, dtype, w, h, &max_p, &mut fast_cand)?;
+            if fast_cand.len() < out.len() - start {
+                out.truncate(start);
+                out.extend_from_slice(&fast_cand);
+                return Ok(());
+            }
+        }
         keep_or_raw(out, start, plane);
         Ok(())
     }
@@ -327,7 +340,7 @@ impl TileCodec for Bc6h {
         let Transform::Bc6h(mode) = p.transform else { return Err(DecodeError::Unsupported(MISMATCH_TXT)) };
         match (kind, dtype) {
             (BlobKind::Bc6h(payload), Dtype::F16) => bc6h::decode_plane_into(payload, w, h, mode, out),
-            (BlobKind::Rans(_) | BlobKind::Deflate(_), dt) if dt != Dtype::F16 && mode == Bc6hMode::LosslessResidual => {
+            (BlobKind::Rans(_) | BlobKind::Deflate(_), dt) if mode == Bc6hMode::LosslessResidual => {
                 FAST.decode_chan(kind, dt, w, h, p, out)
             }
             _ => Err(DecodeError::Unsupported("blob tag / dtype not produced by this codec")),

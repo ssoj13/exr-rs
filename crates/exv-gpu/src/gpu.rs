@@ -2058,6 +2058,7 @@ mod tests {
 
     #[test]
     fn bc6h_gpu_matches_cpu_lossy_and_lossless() {
+        use exv_codec::bc6h::{Bc6hMode, decode_plane_into, encode_plane_into};
         use exv_codec::Profile;
         use exv_video::{read_still, write_still};
 
@@ -2065,6 +2066,18 @@ mod tests {
             return;
         };
         let img = f16_image(37, 23, 16, 16, &["R", "G", "B", "A"], 7);
+        for mode in [Bc6hMode::Lossy, Bc6hMode::LosslessResidual] {
+            let mut payload = Vec::new();
+            encode_plane_into(&img.planes[0], 37, 23, mode, RansConfig::default(), &mut payload).expect("bc6h encode plane");
+            let mut cpu_plane = vec![0u8; img.planes[0].len()];
+            decode_plane_into(&payload, 37, 23, mode, &mut cpu_plane).expect("bc6h cpu decode plane");
+            let gpu_tile = exv_gpu_kernels::decode_tile_bc6h_vram(&ctx, &payload, Dtype::F16, 37, 23).expect("bc6h gpu tile decode");
+            let gpu_plane = read_back(&ctx, &gpu_tile).expect("read_back bc6h tile");
+            assert_eq!(gpu_plane, cpu_plane, "GPU decode_tile_bc6h_vram ({mode:?}) must match CPU bit-for-bit");
+            if mode == Bc6hMode::LosslessResidual {
+                assert_eq!(gpu_plane, img.planes[0], "GPU decode_tile_bc6h_vram LosslessResidual must be bit-exact");
+            }
+        }
         for (prof, is_lossless) in [(Profile::bc6h_lossy(), false), (Profile::bc6h_lossless(), true)] {
             let bytes = write_still(&img, &prof).expect("encode bc6h");
             let cpu = read_still(&bytes).expect("cpu decode bc6h");

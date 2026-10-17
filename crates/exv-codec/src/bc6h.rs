@@ -288,9 +288,13 @@ pub fn bc6h_blocks_len(w: u32, h: u32) -> Option<usize> {
     nbx.checked_mul(nby)?.checked_mul(16)
 }
 
+/// Mode-byte flag indicating that the `nbx * nby * 16` hardware `BC6H_SF16` block array is compressed with
+/// `reorder::split_delta(.., 16)` + `rANS`, prefixed by its `u32` LE byte length (`[mode | 0x80][r_len: u32 LE][r_blocks]`).
+pub const BLOCKS_RANS_FLAG: u8 = 0x80;
+
 /// Extract the contiguous hardware `BC6H_SF16` blocks (`ceil(w/4) * ceil(h/4) * 16` bytes) from a `TAG_BC6H`
-/// payload in O(1) zero-copy time. Works for **both** `Bc6hMode::Lossy` and `Bc6hMode::LosslessResidual`, enabling
-/// instant 0.0 ms hardware `Bc6hRgbFloat` GPU texture upload even on lossless `.exv` files!
+/// payload in O(1) zero-copy time when stored raw (`(mode & BLOCKS_RANS_FLAG) == 0`). When `BLOCKS_RANS_FLAG` is set,
+/// use [`decode_bc6h_blocks_into`] to unpack the hardware block array.
 pub fn extract_bc6h_blocks(payload: &[u8], w: u32, h: u32) -> Option<&[u8]> {
     let need = bc6h_blocks_len(w, h)?;
     let mode = *payload.first()?;
@@ -298,6 +302,52 @@ pub fn extract_bc6h_blocks(payload: &[u8], w: u32, h: u32) -> Option<&[u8]> {
         return None;
     }
     payload.get(1..1usize.checked_add(need)?)
+}
+
+/// Unpack the contiguous `nbx * nby * 16` hardware `BC6H_SF16` block array from `payload` into `out_blocks`,
+/// returning the byte offset in `payload` immediately following the block section (the residual tail).
+pub fn decode_bc6h_blocks_into(
+    payload: &[u8],
+    w: u32,
+    h: u32,
+    mode: Bc6hMode,
+    out_blocks: &mut [u8],
+) -> Result<usize, DecodeError> {
+    let blocks_bytes = bc6h_blocks_len(w, h).ok_or(DecodeError::Request("BC6H block count overflows"))?;
+    if out_blocks.len() != blocks_bytes {
+        return Err(DecodeError::Request("BC6H block output slice length != nbx*nby*16"));
+    }
+    let raw_mode = *payload.first().ok_or(DecodeError::Corrupt("BC6H empty payload"))?;
+    let blocks_rans = (raw_mode & BLOCKS_RANS_FLAG) != 0;
+    if (raw_mode & !BLOCKS_RANS_FLAG) != mode.byte() {
+        return Err(DecodeError::Corrupt("BC6H blob header mode disagrees with profile"));
+    }
+    if !blocks_rans {
+        let end = 1usize.checked_add(blocks_bytes).ok_or(DecodeError::Corrupt("BC6H blocks overflow"))?;
+        let Some(slice) = payload.get(1..end) else {
+            return Err(DecodeError::Corrupt("BC6H payload truncated in block array"));
+        };
+        out_blocks.copy_from_slice(slice);
+        Ok(end)
+    } else {
+        let len_bytes: [u8; 4] = payload
+            .get(1..5)
+            .ok_or(DecodeError::Corrupt("BC6H rANS block header truncated"))?
+            .try_into()
+            .map_err(|_| DecodeError::Corrupt("BC6H rANS block header"))?;
+        let r_len = u32::from_le_bytes(len_bytes) as usize;
+        let end = 5usize.checked_add(r_len).ok_or(DecodeError::Corrupt("BC6H rANS block length overflow"))?;
+        let Some(r_slice) = payload.get(5..end) else {
+            return Err(DecodeError::Corrupt("BC6H payload truncated in rANS block stream"));
+        };
+        with_bytes(blocks_bytes, |dec_delta| -> Result<(), DecodeError> {
+            rans::decode_into(r_slice, dec_delta).ok_or(DecodeError::Corrupt("BC6H block rANS"))?;
+            reorder::join_undelta_into(dec_delta, 16, out_blocks);
+            Ok(())
+        })
+        .map_err(|_| DecodeError::Alloc(blocks_bytes as u64))??;
+        Ok(end)
+    }
 }
 
 /// Encode a `w x h` `F16` plane (`w * h * 2` LE bytes) as a `TAG_BC6H` payload into `out` (after the caller
@@ -323,9 +373,6 @@ pub fn encode_plane_into(
     let w_us = w as usize;
     let h_us = h as usize;
 
-    out.reserve(1 + blocks_bytes);
-    out.push(mode.byte());
-
     let sample_at = |x: usize, y: usize| -> u16 {
         let cx = x.min(w_us.saturating_sub(1));
         let cy = y.min(h_us.saturating_sub(1));
@@ -333,6 +380,7 @@ pub fn encode_plane_into(
         u16::from_le_bytes([plane[off], plane[off + 1]])
     };
 
+    let mut blocks = Vec::with_capacity(blocks_bytes);
     for by in 0..nby {
         for bx in 0..nbx {
             let mut texels = [0u16; 16];
@@ -342,18 +390,33 @@ pub fn encode_plane_into(
                 }
             }
             let blk = encode_bc6h_mono_block(&texels);
-            out.extend_from_slice(&blk);
+            blocks.extend_from_slice(&blk);
         }
     }
 
+    let delta_blocks = reorder::split_delta(&blocks, 16);
+    let mut r_blocks = Vec::new();
+    rans::encode_into(&delta_blocks, rans_cfg, &mut r_blocks)?;
+    if 4usize.saturating_add(r_blocks.len()) < blocks.len()
+        && let Ok(r_len) = u32::try_from(r_blocks.len())
+    {
+        out.reserve(5 + r_blocks.len());
+        out.push(mode.byte() | BLOCKS_RANS_FLAG);
+        out.extend_from_slice(&r_len.to_le_bytes());
+        out.extend_from_slice(&r_blocks);
+    } else {
+        out.reserve(1 + blocks.len());
+        out.push(mode.byte());
+        out.extend_from_slice(&blocks);
+    }
+
     if mode == Bc6hMode::LosslessResidual {
-        let blocks_start = out.len() - blocks_bytes;
         with_bytes(expected, |res_plane| -> Result<(), CodecError> {
             for by in 0..nby {
                 for bx in 0..nbx {
-                    let b_off = blocks_start + (by * nbx + bx) * 16;
+                    let b_off = (by * nbx + bx) * 16;
                     let mut blk = [0u8; 16];
-                    blk.copy_from_slice(&out[b_off..b_off + 16]);
+                    blk.copy_from_slice(&blocks[b_off..b_off + 16]);
                     let dec = decode_bc6h_mono_block(&blk);
                     for dy in 0..4 {
                         let y = by * 4 + dy;
@@ -407,13 +470,9 @@ pub fn decode_plane_into(
         return Err(DecodeError::Request("BC6H output slice length != w*h*2"));
     }
     let blocks_bytes = bc6h_blocks_len(w, h).ok_or(DecodeError::Request("BC6H block count overflows"))?;
-    if payload.first().copied() != Some(mode.byte()) {
-        return Err(DecodeError::Corrupt("BC6H blob header mode disagrees with profile"));
-    }
-    let Some(blocks_slice) = payload.get(1..1usize.checked_add(blocks_bytes).ok_or(DecodeError::Corrupt("BC6H blocks overflow"))?) else {
-        return Err(DecodeError::Corrupt("BC6H payload truncated in block array"));
-    };
-    let tail = &payload[1 + blocks_bytes..];
+    let mut blocks_buf = vec![0u8; blocks_bytes];
+    let tail_off = decode_bc6h_blocks_into(payload, w, h, mode, &mut blocks_buf)?;
+    let tail = &payload[tail_off..];
     if mode == Bc6hMode::Lossy && !tail.is_empty() {
         return Err(DecodeError::Corrupt("BC6H lossy blob has unexpected trailing bytes"));
     }
@@ -427,7 +486,7 @@ pub fn decode_plane_into(
         for bx in 0..nbx {
             let b_off = (by * nbx + bx) * 16;
             let mut blk = [0u8; 16];
-            blk.copy_from_slice(&blocks_slice[b_off..b_off + 16]);
+            blk.copy_from_slice(&blocks_buf[b_off..b_off + 16]);
             let dec = decode_bc6h_mono_block(&blk);
             for dy in 0..4 {
                 let y = by * 4 + dy;
@@ -510,7 +569,8 @@ mod tests {
         let plane: Vec<u8> = (0..=u16::MAX).flat_map(u16::to_le_bytes).collect();
         let mut encoded = Vec::new();
         encode_plane_into(&plane, w, h, Bc6hMode::LosslessResidual, RansConfig::default(), &mut encoded).expect("encode");
-        assert!(extract_bc6h_blocks(&encoded, w, h).is_some(), "O(1) hardware BC6H block slice must succeed");
+        let mut blocks = vec![0u8; bc6h_blocks_len(w, h).unwrap()];
+        decode_bc6h_blocks_into(&encoded, w, h, Bc6hMode::LosslessResidual, &mut blocks).expect("decode blocks");
         let mut decoded = vec![0u8; plane.len()];
         decode_plane_into(&encoded, w, h, Bc6hMode::LosslessResidual, &mut decoded).expect("decode");
         assert_eq!(decoded, plane, "LosslessResidual must reconstruct all 65,536 u16 bit patterns bit-exact");
