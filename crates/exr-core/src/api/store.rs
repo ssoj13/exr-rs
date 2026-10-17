@@ -213,6 +213,18 @@ impl ReadPlan {
     /// [`Unsupported::Subsampled`] (the strict `Image::read` contract); with `true`
     /// it is laid out at its own sampling.
     pub fn new(header: &Header, window: Box2i, native: bool) -> Result<Self> {
+        Self::new_filtered(header, window, native, None)
+    }
+
+    /// Like [`Self::new`], but when `channels` is `Some`, only channels whose names
+    /// are in `channels` are laid out in the buffer and [`FrameBuffer`]. Subsampled
+    /// channels still fail with [`Unsupported::Subsampled`] when `native == false`.
+    pub fn new_filtered(
+        header: &Header,
+        window: Box2i,
+        native: bool,
+        channels: Option<&[&str]>,
+    ) -> Result<Self> {
         let mut chans = Vec::new();
         let mut total = 0usize;
         for (name, ch) in header.channels()?.iter() {
@@ -225,6 +237,11 @@ impl ReadPlan {
             let name = name
                 .to_str()
                 .ok_or_else(|| ExrError::Input(format!("non-UTF-8 channel name \"{name}\" (api facade)")))?;
+            if let Some(want) = channels
+                && !want.contains(&name)
+            {
+                continue;
+            }
             let (cols, rows) = sample_dims(window, ch.x_sampling, ch.y_sampling)?;
             let size = pixel_type_size(ch.type_)?;
             let len = cols
@@ -269,4 +286,53 @@ impl ReadPlan {
         }
         Ok(Planes { chans })
     }
+
+    /// Split the filled buffer into typed planes cropped to `crop` (which must lie
+    /// inside `self.window`, with full-resolution channels `sampling == (1, 1)`).
+    pub fn into_planes_cropped(self, buffer: &[u8], crop: Box2i) -> Result<Planes> {
+        if crop == self.window {
+            return self.into_planes(buffer);
+        }
+        let (crop_w, crop_h) = sample_dims(crop, 1, 1)?;
+        let x_off = usize::try_from(i64::from(crop.min.x) - i64::from(self.window.min.x))
+            .map_err(|_| ExrError::Arg("Crop x-origin precedes read window.".into()))?;
+        let y_off = usize::try_from(i64::from(crop.min.y) - i64::from(self.window.min.y))
+            .map_err(|_| ExrError::Arg("Crop y-origin precedes read window.".into()))?;
+        let mut chans = BTreeMap::new();
+        for c in self.chans {
+            if c.sampling != (1, 1) {
+                return Err(ExrError::Unsupported(Unsupported::Subsampled));
+            }
+            if x_off + crop_w > c.cols || y_off + crop_h > c.rows {
+                return Err(ExrError::Arg("Crop window exceeds read window.".into()));
+            }
+            let plane = buffer
+                .get(c.offset..c.offset + c.len)
+                .ok_or_else(|| ExrError::Logic(format!("Read buffer too small for channel \"{}\" plane.", c.name)))?;
+            let size = pixel_type_size(c.type_)?;
+            let row_bytes = c.cols * size;
+            let crop_row_bytes = crop_w * size;
+            let data = if x_off == 0 && crop_w == c.cols {
+                let start = y_off * row_bytes;
+                let end = start + crop_h * row_bytes;
+                let sub = plane
+                    .get(start..end)
+                    .ok_or_else(|| ExrError::Logic(format!("Read buffer row range out of bounds for \"{}\".", c.name)))?;
+                ChannelData::from_ne_bytes(c.type_, sub, crop_w * crop_h)?
+            } else {
+                let mut cropped = Vec::with_capacity(crop_h * crop_row_bytes);
+                for r in 0..crop_h {
+                    let start = (y_off + r) * row_bytes + x_off * size;
+                    let row = plane
+                        .get(start..start + crop_row_bytes)
+                        .ok_or_else(|| ExrError::Logic(format!("Read buffer crop row out of bounds for \"{}\".", c.name)))?;
+                    cropped.extend_from_slice(row);
+                }
+                ChannelData::from_ne_bytes(c.type_, &cropped, crop_w * crop_h)?
+            };
+            chans.insert(c.name, Chan { data, xs: 1, ys: 1 });
+        }
+        Ok(Planes { chans })
+    }
 }
+

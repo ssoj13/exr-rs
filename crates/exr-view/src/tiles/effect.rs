@@ -41,6 +41,99 @@ impl PixelAdmission for HostPixels {
     }
 }
 
+/// GPU OpenFX device renderer context shared with `EffectSource` workers.
+pub(crate) struct DeviceContext {
+    pub(crate) renderer: Arc<ofx_runtime::DeviceRenderer<u32>>,
+    pub(crate) queue: wgpu::Queue,
+    pub(crate) last_site: Arc<Mutex<ofx_runtime::ofx_host::RenderSite>>,
+}
+
+struct OwnedRenderInputs {
+    inputs: Arc<Inputs>,
+    anchor: CanonicalAnchor,
+    view: Selection,
+    decoder: Arc<crate::ocio::Decoder>,
+    context: ProductionContext,
+    budget: RegionBudget,
+    owners: Mutex<Vec<super::effect_frames::FrameOwner>>,
+    outcome: Mutex<Option<RegionError>>,
+}
+
+impl ofx_runtime::FrameInput<u32> for OwnedRenderInputs {
+    fn frame(&self, request: &ofx_runtime::InputRequest<'_, u32>) -> ofx_runtime::InputFrame {
+        let borrowed = RenderInputs {
+            inputs: &self.inputs,
+            anchor: self.anchor,
+            view: &self.view,
+            decoder: &self.decoder,
+            context: &self.context,
+            budget: &self.budget,
+            owners: Mutex::new(Vec::new()),
+            outcome: Mutex::new(None),
+            #[cfg(test)]
+            trace: None,
+        };
+        let out = borrowed.frame(request);
+        let err = borrowed.take_error();
+        let new_owners = borrowed
+            .owners
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !new_owners.is_empty() {
+            let mut owners = self
+                .owners
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for owner in new_owners {
+                if !owners.iter().any(|h| h.frame().id == owner.frame().id) {
+                    owners.push(owner);
+                }
+            }
+        }
+        if let Some(err) = err {
+            let mut outcome = self
+                .outcome
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if outcome.is_none() || matches!(outcome.as_ref(), Some(RegionError::Pending)) {
+                *outcome = Some(err);
+            }
+        }
+        out
+    }
+
+    fn region_of_definition(
+        &self,
+        clip: &ofx_runtime::ofx_host::ClipName,
+        source: &InputSource<u32>,
+        time: f64,
+    ) -> Option<ofx_runtime::ofx_host::OfxRectD> {
+        let borrowed = RenderInputs {
+            inputs: &self.inputs,
+            anchor: self.anchor,
+            view: &self.view,
+            decoder: &self.decoder,
+            context: &self.context,
+            budget: &self.budget,
+            owners: Mutex::new(Vec::new()),
+            outcome: Mutex::new(None),
+            #[cfg(test)]
+            trace: None,
+        };
+        let out = borrowed.region_of_definition(clip, source, time);
+        if let Some(err) = borrowed.take_error() {
+            let mut outcome = self
+                .outcome
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if outcome.is_none() || matches!(outcome.as_ref(), Some(RegionError::Pending)) {
+                *outcome = Some(err);
+            }
+        }
+        out
+    }
+}
+
 /// Immutable lazy tile source for one effect/input/time/project snapshot.
 /// Demand reads original channels through checked ROI providers; rendering owns charged
 /// Float RGBA work in TileState's existing RAM map. Tileable effects plan actual windows;
@@ -60,6 +153,7 @@ pub(crate) struct EffectSource {
     budget: RegionBudget,
     canvas: Box2i,
     lineage: Arc<ProcessedLineage>,
+    device: Option<Arc<DeviceContext>>,
     #[cfg(test)]
     trace: super::effect_frames::ProviderTrace,
 }
@@ -94,8 +188,12 @@ impl EffectSource {
         let anchor=CanonicalAnchor::new(canvas,aspect)?;
         Grid::on_lattice(w,h,(0,-i64::from(h)))?.with_aspect(aspect.value())?;
         Ok(Self{effect,inputs,primary_window:primary.data_window,view,decoder,anchor,project:EffectProject{geometry,frame_rate,frame_range},
-            time,budget,canvas,lineage,
+            time,budget,canvas,lineage,device:None,
             #[cfg(test)] trace: Default::default()})
+    }
+    pub(crate) fn with_device(mut self, device: Option<Arc<DeviceContext>>) -> Self {
+        self.device = device;
+        self
     }
     pub(crate) fn grid(&self)->Result<Grid,RegionError> {
         let (w,h)=checked_extent(self.canvas)?;
@@ -173,16 +271,123 @@ impl EffectSource {
         }
         Err("effect has no bounded proxy level".into())
     }
+    #[allow(clippy::too_many_arguments)]
+    fn render_bounds_device(
+        &self,
+        dev: &DeviceContext,
+        level: u32,
+        bounds: OfxRectI,
+        full: OfxRectI,
+        upload_bytes: usize,
+        context: &ProductionContext,
+        budget: &RegionBudget,
+        dispatched: &mut bool,
+    ) -> Result<Option<Arc<ProcessedWork>>, RegionError> {
+        let scale = 2.0_f64.powi(-(level as i32));
+        let owned_frames = Arc::new(OwnedRenderInputs {
+            inputs: self.inputs.clone(),
+            anchor: self.anchor,
+            view: self.view.clone(),
+            decoder: self.decoder.clone(),
+            context: context.clone(),
+            budget: budget.clone(),
+            owners: Mutex::new(Vec::new()),
+            outcome: Mutex::new(None),
+        });
+        let mut job = ofx_runtime::DeviceJob::new(
+            self.effect.clone(),
+            self.time,
+            self.project,
+            bounds,
+            RenderContext::interactive(),
+        )
+        .with_frames(owned_frames.clone());
+        job.render_scale = [scale, scale];
+        job.output_meta = ofx_runtime::FrameMeta {
+            rod: full,
+            pixel_aspect: self.anchor.aspect().value(),
+            premultiplication: Premultiplication::Premultiplied,
+        };
+        job.abort = Some(context.cancelled.clone());
+        for clip in self.effect.described().clips.iter() {
+            if clip.primary || !clip.optional {
+                job = job.with_input(
+                    clip.name.clone(),
+                    InputSource::Primary,
+                    ofx_runtime::DeviceInputAt::Fetched,
+                );
+            }
+        }
+        match dev.renderer.render(job) {
+            Ok(out) => {
+                *dispatched = true;
+                *dev.last_site
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = out.report.site;
+                budget.clear_workspace();
+                if context.is_cancelled() {
+                    return Err(RegionError::Cancelled);
+                }
+                if let Some(err) = owned_frames
+                    .outcome
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take()
+                {
+                    return Err(err);
+                }
+                budget.can_temporary(upload_bytes)?;
+                let storage = ChargedPixelStorage::readback_texture(
+                    dev.renderer.device(),
+                    &dev.queue,
+                    &out.texture,
+                    bounds,
+                    budget,
+                )?;
+                let frame = output_frame(storage, bounds, full, self.anchor.aspect().value())?;
+                ProcessedWork::from_rendered(frame, level, self.time, budget.clone(), self.lineage.clone())
+                    .map(Some)
+                    .map_err(RegionError::from)
+            }
+            Err(ofx_runtime::Fallback::CpuChosen | ofx_runtime::Fallback::SiteUnsupported(_)) => {
+                budget.clear_workspace();
+                Ok(None)
+            }
+            Err(ofx_runtime::Fallback::Unavailable(why)) => Err(why.into()),
+            Err(fallback) => {
+                *dispatched = true;
+                budget.clear_workspace();
+                if context.is_cancelled() {
+                    return Err(RegionError::Cancelled);
+                }
+                if let Some(err) = owned_frames
+                    .outcome
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take()
+                {
+                    return Err(err);
+                }
+                Err(RegionError::Failed(fallback.to_string()))
+            }
+        }
+    }
     fn render_bounds(&self, level:u32, rect:Option<super::grid::PixRect>,
         context:&ProductionContext, budget: &RegionBudget, policy: &Arc<dyn PixelAdmission>,
         dispatched: &mut bool)->Result<Arc<ProcessedWork>,RegionError> {
         if context.is_cancelled() {return Err(RegionError::Cancelled)}
         budget.clear_workspace();
-        match self.effect.target() {
-            Target::Cpu=>{},
-            Target::Site(_)=>return Err(RegionError::Unsupported),
+        let use_device = match self.effect.target() {
+            Target::Cpu => false,
+            Target::Site(_) => {
+                if self.device.is_some() {
+                    true
+                } else {
+                    return Err(RegionError::Unsupported);
+                }
+            }
             Target::Unavailable(error)=>return Err(error.into()),
-        }
+        };
         let full=self.anchor.scaled_bounds(self.canvas,self.anchor.aspect(),level)?;
         let rect=rect.unwrap_or(super::grid::PixRect{x:0,y:0,w:u32::try_from(full.x2-full.x1).map_err(|_|"effect canvas width overflows")?,
             h:u32::try_from(full.y2-full.y1).map_err(|_|"effect canvas height overflows")?});
@@ -202,6 +407,21 @@ impl EffectSource {
         let upload_bytes = ProcessedWork::upload_bytes(&upload_grid, first_upload, level)?;
         if output_bytes > budget.retained_limit() {
             return Err(RegionError::Budget { needed: output_bytes, limit: budget.retained_limit() });
+        }
+        if use_device
+            && let Some(dev) = &self.device
+            && let Some(work) = self.render_bounds_device(
+                dev,
+                level,
+                bounds,
+                full,
+                upload_bytes,
+                context,
+                budget,
+                dispatched,
+            )?
+        {
+            return Ok(work);
         }
         let frames=RenderInputs{inputs:&self.inputs,anchor:self.anchor,view:&self.view,decoder:&self.decoder,
             context,budget,owners:Mutex::new(Vec::new()),outcome:Mutex::new(None),
@@ -238,6 +458,12 @@ impl EffectSource {
         let rendered=rendered.map_err(|error|Self::error(error,&frames,context))?;
         if !frames.valid() {return Err(RegionError::Cancelled)}
         if let Some(error)=frames.take_error() {return Err(error)}
+        if let Some(dev) = &self.device {
+            *dev.last_site
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                ofx_runtime::ofx_host::RenderSite::Cpu;
+        }
         budget.can_temporary(upload_bytes)?;
         ProcessedWork::from_rendered(rendered,level,self.time,budget.clone(),self.lineage.clone()).map_err(RegionError::from)
     }

@@ -582,7 +582,21 @@ impl Decode {
             return;
         }
         let (px, _) = rgba.as_chunks_mut::<4>();
+        if px.len() <= DECODE_CHUNK * 4 {
+            self.apply_pixels(px);
+            return;
+        }
         px.par_chunks_mut(DECODE_CHUNK).for_each(|chunk| self.chunk(chunk));
+    }
+
+    /// Decode `px` in place on the calling thread (for cache-sized blocks inside a parallel pass).
+    pub(crate) fn apply_pixels(&self, px: &mut [[f32; 4]]) {
+        if self.is_identity() {
+            return;
+        }
+        for chunk in px.chunks_mut(DECODE_CHUNK) {
+            self.chunk(chunk);
+        }
     }
 
     fn chunk(&self, px: &mut [[f32; 4]]) {
@@ -869,7 +883,7 @@ pub struct State {
     pub err: Option<String>,
     /// The path field's widget state. Only the field's own bookkeeping: where the config dialog
     /// starts is the dialog memory's (`file_pick::DialogMemory`, key `"ocio"`).
-    field: egui_file_field::FileFieldState,
+    field: soluwell_controls::file_field::FileFieldState,
 }
 
 impl State {
@@ -882,7 +896,7 @@ impl State {
     /// [`Self::new`] over an already loaded config (`for_srgb_file` shares it, so its stage 1 is
     /// the same decode, by key, as the viewport's).
     fn with_cfg(sel: Sel, cfg: Option<(String, Result<Arc<Ocio>, String>)>) -> Self {
-        let field = egui_file_field::FileFieldState::default();
+        let field = soluwell_controls::file_field::FileFieldState::default();
         let mut s = Self {
             sel,
             filterable: true,
@@ -1393,11 +1407,11 @@ struct PathEdit {
 /// the whole config; one that does not load shows the error under the panel). The draft lives
 /// in egui's temp memory under the field's own `Ui` id, so each instance keeps its own
 /// text; it is dropped when the field loses the keyboard.
-fn path_edit(ui: &mut egui::Ui, field: &mut egui_file_field::FileFieldState, current: &str) -> PathEdit {
+fn path_edit(ui: &mut egui::Ui, field: &mut soluwell_controls::file_field::FileFieldState, current: &str) -> PathEdit {
     // The field owns the typing draft (keyed by its id) and commits a changed text when the edit
     // ends (Enter or a click away; Escape drops it): never per keystroke.
     let mut text = current.to_owned();
-    let shown = egui_file_field::FileField::new(&mut text, field)
+    let shown = soluwell_controls::file_field::FileField::new(&mut text, field)
         .id(ui.id().with("ocio_config_path"))
         .hint("Auto: $OCIO, else the built-in ACES 2.0 CG")
         .tooltip("Load a config file (.ocio / .ocioz).")
@@ -1492,7 +1506,7 @@ mod tests {
     #[test]
     fn each_path_field_keeps_its_own_draft() {
         let ctx = egui::Context::default();
-        let mut states = [egui_file_field::FileFieldState::default(), egui_file_field::FileFieldState::default()];
+        let mut states = [soluwell_controls::file_field::FileFieldState::default(), soluwell_controls::file_field::FileFieldState::default()];
         let mut frame = |events: Vec<egui::Event>, focus: Option<usize>, ids: &mut [egui::Id; 2]| {
             let mut out = Vec::new();
             let mut o = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {

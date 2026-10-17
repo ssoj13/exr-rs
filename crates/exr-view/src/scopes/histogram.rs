@@ -8,7 +8,8 @@ use super::pipe::{
     scatter_bg, scatter_bgl, write_panel_params,
 };
 use super::{
-    BucketSizer, GpuPanel, PanelCtx, make_bins_buffer, make_params_buffer, sync_egui_texture,
+    BucketSizer, GpuPanel, PanelCtx, RenderedScope, make_bins_buffer, make_params_buffer,
+    sync_egui_texture,
 };
 
 /// Three planes of 256 bins (R, G, B) plus one slot holding the draw normaliser.
@@ -38,16 +39,32 @@ struct Params { src_w: u32, src_h: u32, out_w: u32, out_h: u32 }
 @group(0) @binding(0) var               src_tex: texture_2d<f32>;
 @group(0) @binding(1) var<storage, read_write> bins: array<atomic<u32>>;
 @group(0) @binding(2) var<uniform>      params: Params;
+var<workgroup> local_bins: array<atomic<u32>, 768>;
 @compute @workgroup_size(16, 16, 1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= params.src_w || gid.y >= params.src_h) { return; }
-    let px = textureLoad(src_tex, vec2i(i32(gid.x), i32(gid.y)), 0);
-    let r = clamp(px.r, 0.0, 1.0);
-    let g = clamp(px.g, 0.0, 1.0);
-    let b = clamp(px.b, 0.0, 1.0);
-    atomicAdd(&bins[       u32(r * 255.0)], 1u);
-    atomicAdd(&bins[256u + u32(g * 255.0)], 1u);
-    atomicAdd(&bins[512u + u32(b * 255.0)], 1u);
+fn main(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(local_invocation_index) lid: u32,
+) {
+    atomicStore(&local_bins[lid], 0u);
+    atomicStore(&local_bins[256u + lid], 0u);
+    atomicStore(&local_bins[512u + lid], 0u);
+    workgroupBarrier();
+    if (gid.x < params.src_w && gid.y < params.src_h) {
+        let px = textureLoad(src_tex, vec2i(i32(gid.x), i32(gid.y)), 0);
+        let r = clamp(px.r, 0.0, 1.0);
+        let g = clamp(px.g, 0.0, 1.0);
+        let b = clamp(px.b, 0.0, 1.0);
+        atomicAdd(&local_bins[       u32(r * 255.0)], 1u);
+        atomicAdd(&local_bins[256u + u32(g * 255.0)], 1u);
+        atomicAdd(&local_bins[512u + u32(b * 255.0)], 1u);
+    }
+    workgroupBarrier();
+    let cr = atomicLoad(&local_bins[lid]);
+    if (cr > 0u) { atomicAdd(&bins[lid], cr); }
+    let cg = atomicLoad(&local_bins[256u + lid]);
+    if (cg > 0u) { atomicAdd(&bins[256u + lid], cg); }
+    let cb = atomicLoad(&local_bins[512u + lid]);
+    if (cb > 0u) { atomicAdd(&bins[512u + lid], cb); }
 }
 "#;
 
@@ -114,6 +131,7 @@ struct Pipes {
 pub struct GpuHistogramPanel {
     pipes: Option<Pipes>,
     texture_id: Option<egui::TextureId>,
+    rendered: Option<RenderedScope>,
 }
 
 fn init_pipelines(device: &wgpu::Device) -> Pipes {
@@ -163,7 +181,7 @@ fn init_pipelines(device: &wgpu::Device) -> Pipes {
 }
 
 impl GpuHistogramPanel {
-    fn ensure_output(&mut self, device: &wgpu::Device, logical_w: u32, logical_h: u32) {
+    fn ensure_output(&mut self, device: &wgpu::Device, logical_w: u32, logical_h: u32) -> bool {
         let p = self.pipes.get_or_insert_with(|| init_pipelines(device));
         let ((bucket_w, bucket_h), reallocated) = p.bucket.update(logical_w, logical_h);
         if reallocated || p.output.is_none() {
@@ -177,7 +195,9 @@ impl GpuHistogramPanel {
                 &output.view,
             ));
             p.output = Some(output);
+            return true;
         }
+        false
     }
 }
 
@@ -194,7 +214,15 @@ impl GpuPanel for GpuHistogramPanel {
         if src_w == 0 || src_h == 0 || out_w == 0 || out_h == 0 {
             return;
         }
-        self.ensure_output(ctx.device, out_w, out_h);
+        let reallocated = self.ensure_output(ctx.device, out_w, out_h);
+        if !reallocated
+            && self.texture_id.is_some()
+            && ctx
+                .source_key
+                .is_some_and(|key| self.rendered == Some((key, src_w, src_h, out_w, out_h)))
+        {
+            return;
+        }
         let Some(p) = self.pipes.as_mut() else {
             return;
         };
@@ -251,7 +279,10 @@ impl GpuPanel for GpuHistogramPanel {
             cp.dispatch_workgroups(out_w.div_ceil(8), out_h.div_ceil(8), 1);
         }
         ctx.queue.submit(std::iter::once(enc.finish()));
-        sync_egui_texture(ctx, &out.view, &mut self.texture_id);
+        if reallocated || self.texture_id.is_none() {
+            sync_egui_texture(ctx, &out.view, &mut self.texture_id);
+        }
+        self.rendered = ctx.source_key.map(|key| (key, src_w, src_h, out_w, out_h));
     }
 
     fn release(&mut self, renderer: &mut egui_wgpu::Renderer) {
@@ -260,6 +291,7 @@ impl GpuPanel for GpuHistogramPanel {
         }
         // Drop the pipelines + output texture; rebuilt lazily on the next tick.
         self.pipes = None;
+        self.rendered = None;
     }
 
     fn texture_id(&self) -> Option<egui::TextureId> {
@@ -301,8 +333,10 @@ mod tests {
     #[test]
     fn luma_plane_is_gone() {
         // The scatter used to fill bins 768..1023 with a luma series that neither
-        // REDUCE nor DRAW read. One atomic per channel plane, three planes, no more.
-        assert_eq!(count(SCATTER_WGSL, "atomicAdd("), 3);
+        // REDUCE nor DRAW read. One workgroup atomic + one global flush per channel
+        // plane, three planes, no more.
+        assert_eq!(count(SCATTER_WGSL, "atomicAdd(&local_bins["), 3);
+        assert_eq!(count(SCATTER_WGSL, "atomicAdd(&bins["), 3);
         assert!(!SCATTER_WGSL.contains("768u"));
         assert!(!SCATTER_WGSL.contains("0.2126"));
         for wgsl in [CLEAR_WGSL, SCATTER_WGSL, REDUCE_WGSL, DRAW_WGSL] {

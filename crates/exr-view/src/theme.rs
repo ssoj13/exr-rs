@@ -117,10 +117,10 @@ pub fn set(ctx: &egui::Context, theme: &Theme, fonts: &crate::persist::Fonts) {
         // selection over lists that are meant to be clicked.
         style.interaction.selectable_labels = false;
     });
-    let fonts = egui_widgets_config::Fonts::from_text_styles(&ctx.global_style());
-    egui_widgets_config::WidgetsConfig::install(
+    let fonts = soluwell_config::Fonts::from_text_styles(&ctx.global_style());
+    soluwell_config::WidgetsConfig::install(
         ctx,
-        egui_widgets_config::WidgetsConfig {
+        soluwell_config::WidgetsConfig {
             fonts,
             ..Default::default()
         },
@@ -131,7 +131,7 @@ pub fn set(ctx: &egui::Context, theme: &Theme, fonts: &crate::persist::Fonts) {
 /// egui's default fonts. Once per context.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+    soluwell_config::phosphor::add_to_fonts(&mut fonts, soluwell_config::phosphor::Variant::Regular);
     ctx.set_fonts(fonts);
 }
 

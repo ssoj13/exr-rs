@@ -1033,3 +1033,63 @@ fn facade_tiled_writes_never_buffer_out_of_order_tiles() {
     }
     assert!(probe::get(Probe::TileBuffered) > 0, "the probe must fire for an out-of-turn tile");
 }
+
+#[test]
+fn read_spec_filters_channels_levels_and_regions() {
+    use super::ReadSpec;
+
+    // 1. Scanline image: selective channel + pixel region.
+    let mut out = MemOStream::new();
+    sample_image().write_to(&mut out, Compression::Zip).expect("write scanline");
+    let scan_bytes = out.into_data();
+
+    let roi = Box2i { min: V2i { x: 1, y: 1 }, max: V2i { x: 2, y: 2 } };
+    let spec = ReadSpec::channels(&["Z"]).with_region(roi);
+    let mut is = MemIStream::new(scan_bytes);
+    let sub = Image::read_spec_from(&mut is, &spec).expect("read_spec scanline");
+    assert_eq!(sub.data_window, roi);
+    assert!(sub.channel("R").is_none(), "R was not requested");
+    let full = sample_image();
+    let ChannelData::Float(full_z) = full.channel("Z").unwrap() else { panic!("Z float") };
+    let ChannelData::Float(sub_z) = sub.channel("Z").unwrap() else { panic!("Z float") };
+    let w = full.width() as usize;
+    let want_z = vec![
+        full_z[w + 1],
+        full_z[w + 2],
+        full_z[2 * w + 1],
+        full_z[2 * w + 2],
+    ];
+    assert_eq!(sub_z, &want_z);
+
+    // 2. Tiled MIPMAP image: selective level + clamp_level + region.
+    let dw = Box2i { min: V2i { x: 0, y: 0 }, max: V2i { x: 15, y: 15 } };
+    let tiled = level_image(
+        dw,
+        TileDescription {
+            x_size: 4,
+            y_size: 4,
+            mode: LevelMode::MipmapLevels,
+            rounding_mode: LevelRoundingMode::RoundDown,
+        },
+    );
+    let mut tout = MemOStream::new();
+    tiled.write_to(&mut tout, Compression::Zip).expect("write tiled");
+    let tiled_bytes = tout.into_data();
+
+    let mip_roi = Box2i { min: V2i { x: 1, y: 1 }, max: V2i { x: 5, y: 4 } };
+    let mip_spec = ReadSpec::channels(&["R"]).with_level(1, 1).with_region(mip_roi);
+    let mut tis = MemIStream::new(tiled_bytes.clone());
+    let mip_sub = Image::read_spec_from(&mut tis, &mip_spec).expect("read_spec tiled mip");
+    assert_eq!(mip_sub.data_window, mip_roi);
+    assert_eq!(mip_sub.width(), 5);
+    assert_eq!(mip_sub.height(), 4);
+    let ChannelData::Float(mip_r) = mip_sub.channel("R").unwrap() else { panic!("R float") };
+    assert!(mip_r.iter().all(|&v| v == 9.0), "level (1, 1) filled with 1 + 1*8 = 9.0");
+
+    // Clamping level beyond max level succeeds when clamp_level = true.
+    let clamp_spec = ReadSpec::channels(&["R"]).with_level(99, 99).with_clamp_level(true);
+    let mut tis2 = MemIStream::new(tiled_bytes);
+    let coarsest = Image::read_spec_from(&mut tis2, &clamp_spec).expect("clamped level");
+    assert_eq!((coarsest.width(), coarsest.height()), (1, 1));
+}
+

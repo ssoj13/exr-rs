@@ -50,6 +50,87 @@ impl ChargedPixelStorage {
         pixels.resize(bytes / 4, 0.0);
         Ok(Self { pixels, _permit: permit })
     }
+
+    /// Single GPU-to-CPU readback from a `Rgba32Float` device Output texture (`row 0` at the top)
+    /// into a budgeted [`ChargedPixelStorage`] allocation (`TileState` RAM cache).
+    pub(crate) fn readback_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        tex: &wgpu::Texture,
+        bounds: OfxRectI,
+        budget: &RegionBudget,
+    ) -> Result<Self, RegionError> {
+        let mut storage = Self::allocate(bounds, budget)?;
+        let w = u32::try_from(i64::from(bounds.x2) - i64::from(bounds.x1))
+            .map_err(|_| RegionError::Failed("output width overflows".into()))?;
+        let h = u32::try_from(i64::from(bounds.y2) - i64::from(bounds.y1))
+            .map_err(|_| RegionError::Failed("output height overflows".into()))?;
+        let unpadded = w
+            .checked_mul(16)
+            .ok_or_else(|| RegionError::Failed("output row bytes overflow".into()))?;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded = unpadded.div_ceil(align) * align;
+        let buf_size = u64::from(padded)
+            .checked_mul(u64::from(h))
+            .ok_or_else(|| RegionError::Failed("readback buffer size overflows".into()))?;
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("exr_view.ofx_device_readback"),
+            size: buf_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("exr_view.ofx_device_readback_enc"),
+        });
+        enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &staging,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded),
+                    rows_per_image: Some(h),
+                },
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(Some(enc.finish()));
+        let slice = staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+        rx.recv()
+            .map_err(|e| RegionError::Failed(format!("device readback channel closed: {e}")))?
+            .map_err(|e| RegionError::Failed(format!("device readback map_async failed: {e}")))?;
+        {
+            let mapped = slice
+                .get_mapped_range()
+                .map_err(|e| RegionError::Failed(format!("device readback get_mapped_range failed: {e}")))?;
+            let dst: &mut [u8] = bytemuck::cast_slice_mut(&mut storage.pixels);
+            let row_len = unpadded as usize;
+            let stride = padded as usize;
+            for y in 0..h as usize {
+                dst[y * row_len..(y + 1) * row_len]
+                    .copy_from_slice(&mapped[y * stride..y * stride + row_len]);
+            }
+        }
+        staging.unmap();
+        Ok(storage)
+    }
 }
 impl PixelStorage for ChargedPixelStorage {
     fn bytes(&self)->&[u8] { bytemuck::cast_slice(&self.pixels) }

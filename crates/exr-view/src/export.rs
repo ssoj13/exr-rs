@@ -235,13 +235,6 @@ impl Look {
     }
 }
 
-/// [`shade`] over flat stored RGBA samples (`4 * n` floats), in place.
-pub(crate) fn shade_flat(rgba: &mut [f32], look: &Look) -> Result<()> {
-    let px: &mut [[f32; 4]] = bytemuck::try_cast_slice_mut(rgba).map_err(|_| anyhow::anyhow!("RGBA samples are not whole pixels"))?;
-    let mut alpha = vec![0.0; px.len()];
-    shade(px, &mut alpha, look)
-}
-
 /// The one CPU display transform of every export path: stored RGBA `px` to canvas values in
 /// place, through the shown frame's OCIO transform (colour mode) or the built-in twin of the tile
 /// shader; `alpha` is the OCIO twin's per-pixel scratch (`px.len()` long).

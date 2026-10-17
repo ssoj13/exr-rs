@@ -12,9 +12,9 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use egui_outliner::{ContextItem, OutlinerAction, OutlinerConfig, OutlinerModel, TreeNode};
-use egui_phosphor::regular as ph;
-use egui_widgets_config::icons;
+use soluwell_panels::outliner::{ContextItem, OutlinerAction, OutlinerConfig, OutlinerModel, TreeNode};
+use soluwell_config::phosphor::regular as ph;
+use soluwell_config::icons;
 use exr_core::attr::{LayerGroup, PixelType};
 
 use crate::image::{DecodedFrame, Selection};
@@ -295,7 +295,7 @@ fn open_key(base: egui::Id, id: u64) -> egui::Id {
 /// lacking the layer falls back to main for display, and that must neither re-open
 /// main nor undo the user's fold of it. Manual folds are otherwise left alone.
 fn reveal(ctx: &egui::Context, base: egui::Id, model: &OutlinerModel, view: &Selection) {
-    use egui_widgets_config::state;
+    use soluwell_config::state;
     let (init_key, last_key) = (base.with("channel_tree_init"), base.with("channel_tree_last_layer"));
     if !state::get::<bool>(ctx, init_key).unwrap_or(false) {
         for root in &model.roots {
@@ -316,10 +316,10 @@ pub fn show(ui: &mut egui::Ui, frame: &DecodedFrame, view: &Selection) -> Option
     // back is a refcount, not a copy of the tree, and the caller owns nothing.
     let base_id = ui.id();
     let cache_id = base_id.with("channel_tree_cache");
-    let old: Option<Arc<Built>> = egui_widgets_config::state::get(ui.ctx(), cache_id);
+    let old: Option<Arc<Built>> = soluwell_config::state::get(ui.ctx(), cache_id);
     let built = fresh(old.clone(), frame, view);
     if !old.is_some_and(|o| Arc::ptr_eq(&o, &built)) {
-        egui_widgets_config::state::set(ui.ctx(), cache_id, built.clone());
+        soluwell_config::state::set(ui.ctx(), cache_id, built.clone());
     }
     let (model, ids) = (&built.model, &built.ids);
     reveal(ui.ctx(), base_id, model, view);
@@ -338,11 +338,11 @@ pub fn show(ui: &mut egui::Ui, frame: &DecodedFrame, view: &Selection) -> Option
     });
     if let Some(open) = expand_all {
         for root in &model.roots {
-            egui_widgets_config::state::set(ui.ctx(), open_id(root.id), open);
+            soluwell_config::state::set(ui.ctx(), open_id(root.id), open);
         }
     }
     let mut picked = None;
-    for action in egui_outliner::show(ui, model, &built.config) {
+    for action in soluwell_panels::outliner::show(ui, model, &built.config) {
         match action {
             // One shown selection: the row the click / key landed on (the matte and the
             // marquee have no lead and change nothing).
@@ -429,7 +429,7 @@ mod tests {
     fn reveal_follows_the_request_not_the_fallback() {
         let ctx = egui::Context::default();
         let base = egui::Id::new("channels-test");
-        let flag = |id: u64| egui_widgets_config::state::get::<bool>(&ctx, open_key(base, id));
+        let flag = |id: u64| soluwell_config::state::get::<bool>(&ctx, open_key(base, id));
         let (main_id, n_id) = (hash_id("", None), hash_id("N", None));
         let full = frame_with(&["R", "G", "B", "N.x"]);
         let lacking = frame_with(&["R", "G", "B"]);
@@ -441,7 +441,7 @@ mod tests {
         show(&full, "");
         assert_eq!((flag(main_id), flag(n_id)), (Some(true), Some(false)));
         // The user folds main.
-        egui_widgets_config::state::set(&ctx, open_key(base, main_id), false);
+        soluwell_config::state::set(&ctx, open_key(base, main_id), false);
         // N is requested on a frame without it: main is shown, but stays folded.
         show(&lacking, "N");
         assert_eq!(flag(main_id), Some(false));
@@ -449,7 +449,7 @@ mod tests {
         show(&full, "N");
         assert_eq!((flag(main_id), flag(n_id)), (Some(false), Some(true)));
         // A manual fold of N survives later frames with the same request.
-        egui_widgets_config::state::set(&ctx, open_key(base, n_id), false);
+        soluwell_config::state::set(&ctx, open_key(base, n_id), false);
         show(&full, "N");
         assert_eq!(flag(n_id), Some(false));
     }

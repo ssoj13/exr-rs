@@ -79,21 +79,24 @@ pub(crate) struct OfxEffectsSnapshot {
     time: f64,
     frame_rate: Option<f64>,
     frame_range: Option<[f64; 2]>,
+    device: Option<Arc<crate::tiles::effect::DeviceContext>>,
 }
 impl OfxEffectsSnapshot {
     fn source(self, frame: Arc<DecodedFrame>, view: Selection, decoder: Arc<crate::ocio::Decoder>, budget: RegionBudget)
         -> Result<Arc<dyn TileSource>, String> {
         EffectSource::new(self.effect, self.inputs, frame, view, decoder, self.time,
             self.frame_rate, self.frame_range, budget)
-            .map(|source| Arc::new(source) as Arc<dyn TileSource>)
+            .map(|source| Arc::new(source.with_device(self.device)) as Arc<dyn TileSource>)
             .map_err(|error| error.to_string())
     }
 }
 /// The viewer's OpenFX effect (see the module doc).
 pub struct OfxEffects {
-    // `ui` before `effect` and `runtime`: the instance's interacts go first.
+    // `ui` before `effect`, `device` and `runtime`: the instance's interacts go first.
     ui: Option<EffectUi>,
     effect: Option<Arc<Effect<u32>>>,
+    device: Option<Arc<crate::tiles::effect::DeviceContext>>,
+    last_site: Arc<std::sync::Mutex<RenderSite>>,
     runtime: Arc<Runtime<u32>>,
     events: Arc<UiEvents>,
     chosen: Option<PluginKey>,
@@ -127,6 +130,72 @@ impl OfxEffects {
     /// installed bundle (`ofx-effects.ofx.bundle`), not linked in.
     pub fn new() -> Self {
         Self::with_scan(ScanSpec::standard())
+    }
+
+    /// Start the host with GPU OpenFX sites opened via [`ofx_runtime::DeviceRenderer`] over
+    /// `(adapter, device, queue)`. Falls back to CPU-only if no interop site can open on this device.
+    pub fn with_device(
+        adapter: wgpu::Adapter,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        scan: ScanSpec,
+    ) -> Self {
+        let info = Self::host_info();
+        let last_site = Arc::new(std::sync::Mutex::new(RenderSite::Cpu));
+        let mut scan = Some(scan);
+        let (runtime, device_ctx) = match ofx_runtime::DeviceRenderer::open(
+            adapter,
+            device,
+            queue.clone(),
+            ofx_runtime::RendererConfig::default(),
+            |specs| {
+                Runtime::with_sites(
+                    info.clone(),
+                    scan.take().unwrap_or_default(),
+                    ofx_runtime::RuntimeConfig::default(),
+                    specs,
+                )
+            },
+        ) {
+            Ok((runtime, renderer)) => (
+                runtime,
+                Some(Arc::new(crate::tiles::effect::DeviceContext {
+                    renderer: Arc::new(renderer),
+                    queue,
+                    last_site: Arc::clone(&last_site),
+                })),
+            ),
+            Err(fallback) => {
+                log::info!("OpenFX GPU sites unavailable ({fallback}); running on CPU site");
+                (Runtime::new(info, scan.unwrap_or_default()), None)
+            }
+        };
+        let events = Arc::new(UiEvents::new());
+        runtime.inbox().set_observer(Some(events.clone()));
+        let adapter = Arc::new(crate::file_pick::OfxPicker::default());
+        Self {
+            ui: None,
+            effect: None,
+            device: device_ctx,
+            last_site,
+            runtime,
+            events,
+            chosen: None,
+            enabled: true,
+            collapsed: false,
+            time: 0.0,
+            revision: 0,
+            inputs: None,
+            input_identity: None,
+            input_error: None,
+            accepted: None,
+            frame_rate: None,
+            frame_range: None,
+            wake: None,
+            adapter,
+            error: None,
+            blocked: None,
+        }
     }
 
     /// Tests only: the crate's linked fixture plug-ins as a scan with no search directory.
@@ -193,6 +262,8 @@ impl OfxEffects {
         Self {
             ui: None,
             effect: None,
+            device: None,
+            last_site: Arc::new(std::sync::Mutex::new(RenderSite::Cpu)),
             runtime,
             events,
             chosen: None,
@@ -274,12 +345,14 @@ impl OfxEffects {
     }
 
     /// Where the effect's last COMPLETED render ran and what computed it, in ofx-runtime's words
-    /// ([`ofx_runtime::RenderedOn`]: "CPU images, WGPU compute"). The viewer renders on the CPU site only (its
-    /// host opens no GPU site), so the delivery is always the CPU's; the compute backend is what the plug-in
-    /// reported - the host settles the report when each render ends, so this is never an earlier render's.
+    /// ([`ofx_runtime::RenderedOn`]: "CPU images, WGPU compute").
     /// `None` before the first render; `Err` when the report is not in the vocabulary (shown, not guessed).
     fn rendered(&self) -> Option<Result<String, String>> {
-        match self.effect.as_ref()?.rendered_on(RenderSite::Cpu) {
+        let site = *self
+            .last_site
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match self.effect.as_ref()?.rendered_on(site) {
             Ok(on) => Some(Ok(on.to_string())),
             Err(RuntimeError::NoInstance) => None,
             Err(error) => Some(Err(error.to_string())),
@@ -490,7 +563,8 @@ impl OfxEffects {
             frame: primary, index: 0,
         }));
         Ok(OfxEffectsSnapshot { effect, inputs, time: self.time,
-            frame_rate: self.frame_rate, frame_range: self.frame_range })
+            frame_rate: self.frame_rate, frame_range: self.frame_range,
+            device: self.device.clone() })
     }
     fn attach_ui(&mut self) {
         let Some(effect) = &self.effect else { return; };

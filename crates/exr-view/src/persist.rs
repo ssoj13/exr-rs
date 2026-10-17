@@ -101,13 +101,13 @@ pub struct Config {
     /// Status-bar section widths (draggable splitters). Empty = the bar fills it
     /// with the section defaults on first draw.
     #[serde(default)]
-    pub status_bar_layout: egui_statusbar::StatusBarLayout,
+    pub status_bar_layout: soluwell_chrome::statusbar::StatusBarLayout,
     /// The status bar's splitters are locked (right-click menu): the widths stay as they are.
     #[serde(default)]
     pub status_bar_locked: bool,
     /// The viewport toolbar strip: rolled out or up, and its vertical offset.
     #[serde(default)]
-    pub toolbar: egui_viewport_toolbar::ToolbarState,
+    pub toolbar: soluwell_viewport::toolbar::ToolbarState,
     /// Opacity (0..=1) of the thin white vertical playhead line drawn over the
     /// IMAGE during sequence playback/scrub. `0` (default) = off.
     #[serde(default)]
@@ -115,12 +115,12 @@ pub struct Config {
     /// Frame-cache preload strategy (which frames load first around the playhead).
     #[serde(default)]
     pub preload_strategy: scancache::Strategy,
-    /// The dock layout at exit (`egui_dock_layout::to_blob`), restored at launch.
+    /// The dock layout at exit (`soluwell_chrome::dock_layout::to_blob`), restored at launch.
     #[serde(default)]
     pub dock: Option<String>,
     /// The user's named dock layouts (the layout bar in the menu row).
     #[serde(default)]
-    pub layouts: egui_dock_layout::LayoutStore,
+    pub layouts: soluwell_chrome::dock_layout::LayoutStore,
     /// Memory budgets (the Settings tab).
     #[serde(default)]
     pub budgets: Budgets,
@@ -134,7 +134,7 @@ pub struct Config {
     /// What shows under the image's alpha (toolbar drop-up): the shared viewer backdrop,
     /// composited in the present pass so it is right on every output.
     #[serde(default)]
-    pub backdrop: egui_display::Backdrop,
+    pub backdrop: soluwell_viewport::display::Backdrop,
     /// The OCIO display transform choice (the Colour panel).
     #[serde(default)]
     pub ocio: crate::ocio::Sel,
@@ -156,7 +156,7 @@ pub struct Fonts {
     pub monospace: f32,
     pub button: f32,
     pub small: f32,
-    /// The dock's tab strip height (`egui_dock_layout::DockStyle::tab_height`).
+    /// The dock's tab strip height (`soluwell_chrome::dock_layout::DockStyle::tab_height`).
     pub dock_tab: f32,
     /// The Settings panel's category list (egui-prefs2 paints it with its own `FontId`).
     pub sidebar: f32,
@@ -193,7 +193,7 @@ impl Default for Fonts {
 }
 
 /// Shared application display preferences; preserves the viewer's config representation.
-pub use egui_display::DisplayPrefs;
+pub use soluwell_viewport::display::DisplayPrefs;
 
 /// How much memory the viewer may take (the Settings tab). The shares are of the
 /// machine's INSTALLED RAM / the adapter's VRAM, not of what is free at the moment
@@ -278,17 +278,17 @@ impl Default for Config {
             open_seq: default_open_seq(),
             recents: Vec::new(),
             dialogs: Default::default(),
-            status_bar_layout: egui_statusbar::StatusBarLayout::default(),
+            status_bar_layout: soluwell_chrome::statusbar::StatusBarLayout::default(),
             status_bar_locked: false,
-            toolbar: egui_viewport_toolbar::ToolbarState::default(),
+            toolbar: soluwell_viewport::toolbar::ToolbarState::default(),
             playhead_alpha: 0.0,
             preload_strategy: scancache::Strategy::default(),
             dock: None,
-            layouts: egui_dock_layout::LayoutStore::default(),
+            layouts: soluwell_chrome::dock_layout::LayoutStore::default(),
             budgets: Budgets::default(),
             tonemap: 0,
             scope_display: false,
-            backdrop: egui_display::Backdrop::default(),
+            backdrop: soluwell_viewport::display::Backdrop::default(),
             ocio: crate::ocio::Sel::default(),
             display: DisplayPrefs::default(),
             fonts: Fonts::default(),
@@ -514,13 +514,13 @@ mod tests {
         // What was fine is kept...
         assert_eq!((c.exposure, c.gamma, c.fps, c.recents.len()), (2.0, 1.8, 30.0, 1));
         // ...a foreign type, one of ours and scalars each fall back alone.
-        assert_eq!(c.toolbar, egui_viewport_toolbar::ToolbarState::default());
-        assert_eq!(c.status_bar_layout, egui_statusbar::StatusBarLayout::default());
+        assert_eq!(c.toolbar, soluwell_viewport::toolbar::ToolbarState::default());
+        assert_eq!(c.status_bar_layout, soluwell_chrome::statusbar::StatusBarLayout::default());
         assert!(c.dialogs.dirs.is_empty(), "a malformed ocio_dir migrates nothing");
         assert_eq!(c.display, DisplayPrefs::default());
         assert_eq!(c.fonts, Fonts::default());
         assert_eq!(c.budgets, Budgets::default());
-        assert_eq!(c.backdrop, egui_display::Backdrop::default());
+        assert_eq!(c.backdrop, soluwell_viewport::display::Backdrop::default());
         assert_eq!(c.ocio, crate::ocio::Sel::default());
         assert!(c.window.is_none() && c.dock.is_none() && c.last_file.is_none());
         assert_eq!(c.channel, 0);
@@ -531,7 +531,7 @@ mod tests {
     /// A config with EVERY field off its default (a new field left at its default fails
     /// `a_full_config_round_trips`'s guard until it is set here).
     fn full_config() -> Config {
-        let mut layouts = egui_dock_layout::LayoutStore::default();
+        let mut layouts = soluwell_chrome::dock_layout::LayoutStore::default();
         layouts.save("Wide", "{}").expect("a free layout name");
         Config {
             window: Some(WindowGeom { x: -3, y: 7, w: 1200, h: 800 }),
@@ -552,9 +552,9 @@ mod tests {
                     .collect(),
                 filters: [("open".to_owned(), "PNG".to_owned())].into_iter().collect(),
             },
-            status_bar_layout: egui_statusbar::StatusBarLayout::new(vec![111.0, 222.0]),
+            status_bar_layout: soluwell_chrome::statusbar::StatusBarLayout::new(vec![111.0, 222.0]),
             status_bar_locked: true,
-            toolbar: egui_viewport_toolbar::ToolbarState { expanded: false, vertical_offset: 40.0 },
+            toolbar: soluwell_viewport::toolbar::ToolbarState { expanded: false, vertical_offset: 40.0 },
             playhead_alpha: 0.5,
             preload_strategy: scancache::Strategy::Forward,
             dock: Some("blob".to_owned()),
@@ -562,7 +562,7 @@ mod tests {
             budgets: Budgets { ram: 0.5, vram: 0.25, upload_mib: 128 },
             tonemap: 2,
             scope_display: true,
-            backdrop: egui_display::Backdrop { kind: egui_display::BackdropKind::Color, color: [0.2, 0.4, 0.6, 1.0], ..Default::default() },
+            backdrop: soluwell_viewport::display::Backdrop { kind: soluwell_viewport::display::BackdropKind::Color, color: [0.2, 0.4, 0.6, 1.0], ..Default::default() },
             ocio: crate::ocio::Sel { on: true, config: "x.ocio".into(), display: "d".into(), scene_view: "v".into(), video_view: "w".into(), scene_look: "l".into(), video_look: "m".into() },
             display: DisplayPrefs { output: crate::present::Output::Hlg, white: Some(250.0), peak: Some(1200.0) },
             fonts: Fonts { heading: 12.0, body: 13.0, monospace: 11.0, button: 12.5, small: 8.0, dock_tab: 30.0, sidebar: 14.0 },
@@ -594,11 +594,11 @@ mod tests {
         let mut json = serde_json::to_value(&full).unwrap();
         json["toolbar"] = serde_json::json!({"expanded": "maybe"});
         let back = Config::parse(&json.to_string()).unwrap();
-        assert_eq!(back.toolbar, egui_viewport_toolbar::ToolbarState::default());
+        assert_eq!(back.toolbar, soluwell_viewport::toolbar::ToolbarState::default());
         assert_eq!(back.fonts, full.fonts);
         assert_eq!(back.layouts, full.layouts);
         assert_eq!(back.preload_strategy, full.preload_strategy);
-        let expect = Config { toolbar: egui_viewport_toolbar::ToolbarState::default(), ..full };
+        let expect = Config { toolbar: soluwell_viewport::toolbar::ToolbarState::default(), ..full };
         assert_eq!(back, expect, "nothing else changed");
     }
 
@@ -632,9 +632,9 @@ mod tests {
     #[test]
     fn backdrop_defaults_to_the_checker_and_persists() {
         let c = Config::parse("{}").unwrap();
-        assert_eq!(c.backdrop.kind, egui_display::BackdropKind::Checker);
+        assert_eq!(c.backdrop.kind, soluwell_viewport::display::BackdropKind::Checker);
         let mut c = Config::default();
-        c.backdrop.kind = egui_display::BackdropKind::Gray50;
+        c.backdrop.kind = soluwell_viewport::display::BackdropKind::Gray50;
         c.backdrop.checker.size_px = 40.0;
         let back = Config::parse(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!(back.backdrop, c.backdrop);

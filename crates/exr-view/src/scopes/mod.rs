@@ -26,6 +26,9 @@ pub use histogram::GpuHistogramPanel;
 pub use vectorscope::GpuVectorscopePanel;
 pub use waveform::GpuWaveformPanel;
 
+/// `(source_key, src_w, src_h, out_w, out_h)` of the last scope compute dispatch.
+pub(crate) type RenderedScope = ((bool, u64, u32, u64), u32, u32, u32, u32);
+
 /// Context passed to GPU panel operations: the device/queue plus the egui-wgpu
 /// renderer (used to register/update the panel's output texture as an egui
 /// `TextureId`).
@@ -33,6 +36,10 @@ pub struct PanelCtx<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
     pub renderer: &'a mut egui_wgpu::Renderer,
+    /// Optional content key of the source texture (`DisplayTarget::scope_source_key`).
+    /// When unchanged along with `(src_w, src_h, out_w, out_h)`, `tick()` skips
+    /// re-running the clear/scatter/reduce/draw compute passes.
+    pub source_key: Option<(bool, u64, u32, u64)>,
 }
 
 /// A scope panel that runs entirely on the GPU.

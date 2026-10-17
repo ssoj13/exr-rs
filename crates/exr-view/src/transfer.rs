@@ -25,10 +25,10 @@
 //! body, so the chain is verified numerically without a GPU.
 
 // Shared canvas encoding and gamut conversion; image operators remain viewer-owned.
-pub use egui_display::transfer::{oetf, eotf, oetf_wgsl, eotf_wgsl};
+pub use soluwell_viewport::display::transfer::{oetf, eotf, oetf_wgsl, eotf_wgsl};
 #[cfg(test)]
-use egui_display::transfer::{SRGB_CUT, SRGB_SLOPE, SRGB_SCALE, SRGB_OFFSET, SRGB_EXP};
-pub(crate) use egui_display::transfer::{SRGB_TO_REC2020, REC2020_TO_SRGB};
+use soluwell_viewport::display::transfer::{SRGB_CUT, SRGB_SLOPE, SRGB_SCALE, SRGB_OFFSET, SRGB_EXP};
+pub(crate) use soluwell_viewport::display::transfer::{SRGB_TO_REC2020, REC2020_TO_SRGB};
 
 /// Format an `f32` as a WGSL float literal that round-trips exactly (`{:?}`
 /// prints the shortest representation that parses back to the same `f32`, and

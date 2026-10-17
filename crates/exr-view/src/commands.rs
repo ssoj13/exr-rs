@@ -14,8 +14,8 @@
 use std::sync::LazyLock;
 
 use egui::{Key, KeyboardShortcut, Modifiers, Rect, Ui};
-use egui_hotkeys::{Binding, Keymap};
-use egui_menubar::MenuNode::{self, Dyn, Item, Sep, Sub};
+use soluwell_chrome::hotkeys::{Binding, Keymap};
+use soluwell_chrome::menubar::MenuNode::{self, Dyn, Item, Sep, Sub};
 
 use crate::dock::DockTab;
 use crate::image::ChannelDisplay;
@@ -132,7 +132,7 @@ pub enum NavCmd {
     ZoomOut,
 }
 
-/// How a [`Chord`] is matched (see `egui_hotkeys::Binding`).
+/// How a [`Chord`] is matched (see `soluwell_chrome::hotkeys::Binding`).
 #[derive(Clone, Copy, Debug)]
 enum Kind {
     /// The key as the layout reports it, with exactly the stated modifiers.
@@ -324,7 +324,7 @@ static KEYS: LazyLock<Keys> = LazyLock::new(Keys::build);
 /// Declare a keyboard panel for this frame. Every dock tab, the timeline and the viewport drawn
 /// alone (panels hidden) call it every frame, keys or not; see [`Scope`].
 pub fn register(ui: &Ui, scope: Scope, rect: Rect) {
-    egui_hotkeys::register(&*KEYS, ui, scope, rect);
+    soluwell_chrome::hotkeys::register(&*KEYS, ui, scope, rect);
 }
 
 /// One keyboard panel filling `ui`: declare it, then draw `body`. The dock tabs and the viewport
@@ -337,14 +337,14 @@ pub fn panel<R>(ui: &mut Ui, scope: Scope, body: impl FnOnce(&mut Ui) -> R) -> R
 
 /// The viewport's toolbar strip. It floats on a layer of its own (an `egui::Area`), so the
 /// pointer over it would otherwise hit no panel; it is part of the viewport.
-pub fn strip(ctx: &egui::Context, bar: &egui_viewport_toolbar::ToolbarResponse) {
-    egui_hotkeys::register_at(&*KEYS, ctx, bar.layer, Scope::Viewport, bar.rect);
+pub fn strip(ctx: &egui::Context, bar: &soluwell_viewport::toolbar::ToolbarResponse) {
+    soluwell_chrome::hotkeys::register_at(&*KEYS, ctx, bar.layer, Scope::Viewport, bar.rect);
 }
 
 /// Who owns the keyboard right now (what [`pressed`] routes to).
 #[cfg(test)]
 pub fn active(ctx: &egui::Context) -> Option<Scope> {
-    egui_hotkeys::active(&*KEYS, ctx)
+    soluwell_chrome::hotkeys::active(&*KEYS, ctx)
 }
 
 /// The menu bar. `Dyn` slots are drawn by the host: `file.recent` (the recent files),
@@ -481,7 +481,7 @@ impl Command {
 /// why this can run once at the top of the frame, before any panel is drawn.
 pub fn pressed(ctx: &egui::Context, modal: bool, avail: Avail) -> Vec<Action> {
     let on = |id| find(id).is_some_and(|c| enabled(&c.action, avail) && (!modal || c.chorded()));
-    let ids = egui_hotkeys::pressed(&*KEYS, ctx, on);
+    let ids = soluwell_chrome::hotkeys::pressed(&*KEYS, ctx, on);
     ids.into_iter().filter_map(find).map(|c| c.action.clone()).collect()
 }
 
@@ -619,7 +619,7 @@ mod tests {
     /// is not checked here (there is none today).
     #[test]
     fn no_chord_overlaps_inside_a_table() {
-        assert_eq!(egui_hotkeys::conflicts(&*KEYS, &Scope::ALL), []);
+        assert_eq!(soluwell_chrome::hotkeys::conflicts(&*KEYS, &Scope::ALL), []);
     }
 
     /// Each binding resolves to its own command in its own table, and the tables do not shadow
@@ -629,14 +629,14 @@ mod tests {
         let km = &*KEYS;
         for scope in Scope::ALL {
             for b in km.bindings(scope) {
-                let hit = egui_hotkeys::resolve(km, Some(scope), b.key, Some(b.key), b.modifiers, false);
-                assert_eq!(hit, Some((egui_hotkeys::Route::Scope(scope), b.command)), "{scope:?}: {}", b.command);
+                let hit = soluwell_chrome::hotkeys::resolve(km, Some(scope), b.key, Some(b.key), b.modifiers, false);
+                assert_eq!(hit, Some((soluwell_chrome::hotkeys::Route::Scope(scope), b.command)), "{scope:?}: {}", b.command);
             }
         }
         for b in km.global() {
             for scope in Scope::ALL {
-                let hit = egui_hotkeys::resolve(km, Some(scope), b.key, Some(b.key), b.modifiers, false);
-                assert_eq!(hit, Some((egui_hotkeys::Route::Global, b.command)), "global {} over {scope:?}", b.command);
+                let hit = soluwell_chrome::hotkeys::resolve(km, Some(scope), b.key, Some(b.key), b.modifiers, false);
+                assert_eq!(hit, Some((soluwell_chrome::hotkeys::Route::Global, b.command)), "global {} over {scope:?}", b.command);
             }
         }
         // The first-listed key of a command is what its menu prints: it has a binding.

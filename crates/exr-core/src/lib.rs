@@ -113,7 +113,10 @@ pub use chunk::{ChunkCoord, RawChunk, RawImage, RawPart};
 
 // Idiomatic image facade — the ergonomic common-case API over
 // the verified low-level core. Deep / multipart use the low-level types above.
-pub use api::{ChannelData, Image, Unsupported, classify_unsupported, read, write_rgba_file};
+pub use api::{
+    ChannelData, Image, ReadSpec, Unsupported, classify_unsupported, read, read_spec,
+    write_rgba_file,
+};
 
 // Deep data model + deep I/O
 pub use deep::{

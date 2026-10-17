@@ -53,6 +53,7 @@ use crate::transfer;
 /// Bytes per texel of the linear source texture (`Rgba32Float`) — the sizing
 /// input for the shared [`UploadLayout`] check.
 const LINEAR_TEXEL_SIZE: u32 = 16;
+const HALF_TEXEL_SIZE: u32 = 8;
 
 // ── Channel display ───────────────────────────────────────────────────────────
 
@@ -248,16 +249,55 @@ impl DecodedFrame {
     /// decoded per tile band (`tiles::file::FileSource`). An unreadable header
     /// uses the same decode path as [`Self::load`], whose typed error the UI shows.
     pub fn open(path: &Path, budget: u64) -> Result<DecodedFrame, LoadError> {
+        Self::open_spec(path, budget, &exr_core::api::ReadSpec::default())
+    }
+
+    /// Open `path` with a selective [`exr_core::api::ReadSpec`] (channel subset, MIP/RIP level, or
+    /// crop region). Fits `budget` against the requested subset before falling back to file-backed.
+    pub fn open_spec(
+        path: &Path,
+        budget: u64,
+        spec: &exr_core::api::ReadSpec<'_>,
+    ) -> Result<DecodedFrame, LoadError> {
         let version = source_version(path);
         let frame = if exr_import::is_foreign(path) {
             Self::import(path).map(Self::warmed)
         } else {
             match peek_header(path) {
-                Some(header) if needs_file_backing(&header, budget) => Self::open_backed(path, &header),
-                header => Self::decode(path, header.as_ref()).map(Self::warmed),
+                Some(header) if needs_file_backing_spec(&header, budget, spec) => {
+                    Self::open_backed(path, &header)
+                }
+                header => Self::decode_spec(path, header.as_ref(), spec).map(Self::warmed),
             }
         };
         frame.map(|f| Self { version, ..f })
+    }
+
+    /// Open `path` decoding only the channels required by `selection` (active layer or solo
+    /// channel). Falls back to all channels if the header cannot be peeked.
+    pub fn open_selection(
+        path: &Path,
+        budget: u64,
+        selection: &Selection,
+    ) -> Result<DecodedFrame, LoadError> {
+        if !exr_import::is_foreign(path)
+            && let Some(header) = peek_header(path)
+            && let Some(selected) = header_selection_channels(&header, selection)
+        {
+            let refs: Vec<&str> = selected.iter().map(String::as_str).collect();
+            let spec = exr_core::api::ReadSpec {
+                channels: Some(&refs),
+                ..Default::default()
+            };
+            let version = source_version(path);
+            let frame = if needs_file_backing_spec(&header, budget, &spec) {
+                Self::open_backed(path, &header)
+            } else {
+                Self::decode_spec(path, Some(&header), &spec).map(Self::warmed)
+            };
+            return frame.map(|f| Self { version, ..f });
+        }
+        Self::open(path, budget)
     }
 
     /// `frame` with its channel spans computed here, on the loading thread.
@@ -305,11 +345,19 @@ impl DecodedFrame {
 
     /// Decode the whole file (every channel resident).
     pub fn load(path: &Path) -> Result<DecodedFrame, LoadError> {
+        Self::load_spec(path, &exr_core::api::ReadSpec::default())
+    }
+
+    /// Decode `path` according to `spec` (channel subset, MIP/RIP level, or crop region).
+    pub fn load_spec(
+        path: &Path,
+        spec: &exr_core::api::ReadSpec<'_>,
+    ) -> Result<DecodedFrame, LoadError> {
         let version = source_version(path);
         let frame = if exr_import::is_foreign(path) {
             Self::import(path).map(Self::warmed)
         } else {
-            Self::decode(path, peek_header(path).as_ref()).map(Self::warmed)
+            Self::decode_spec(path, peek_header(path).as_ref(), spec).map(Self::warmed)
         };
         frame.map(|f| Self { version, ..f })
     }
@@ -409,12 +457,16 @@ impl DecodedFrame {
         })
     }
 
-    /// [`Self::load`] with the header already read (`None`: unreadable as a
+    /// [`Self::load_spec`] with the header already read (`None`: unreadable as a
     /// single flat part; the decode below then reports why).
-    fn decode(path: &Path, header: Option<&Header>) -> Result<DecodedFrame, LoadError> {
+    fn decode_spec(
+        path: &Path,
+        header: Option<&Header>,
+        spec: &exr_core::api::ReadSpec<'_>,
+    ) -> Result<DecodedFrame, LoadError> {
         // Lifecycle milestone (info): a load is starting (the #1 thing to see).
         log::info!("load start {}", path.display());
-        let img = match exr_core::api::read(path) {
+        let img = match exr_core::api::read_spec(path, spec) {
             Ok(img) => img,
             // The facade takes one sample grid; a subsampled file is read as stored.
             Err(ExrError::Unsupported(exr_core::api::Unsupported::Subsampled)) => {
@@ -701,6 +753,9 @@ pub struct DisplayTarget {
     tiles: TileState,
     decode_key: Option<String>,
     scope: Option<ScopeTex>,
+    scope_shaded: Option<ScopeShadedTex>,
+    scope_shaper: Option<crate::tiles::render::ScopeShaper>,
+    scope_source_key: Option<(bool, u64, u32, u64)>,
     direct_frame: Option<u64>,
     blocked_frame: Option<u64>,
     retired_scopes: crate::tiles::retire::RetiredTextures,
@@ -716,13 +771,26 @@ struct ScopeTex {
     tex: wgpu::Texture,
     view: wgpu::TextureView,
     cap: (u32, u32),
-    /// `(processed, source generation or accepted revision, level, display look)` uploaded; the
-    /// look is `export::Look::id` of the display transform the texels went through, 0 for the
-    /// stored values.
+    /// `(processed, source generation or accepted revision, level, 0)` uploaded.
+    key: Option<(bool, u64, u32, u64)>,
+}
+
+/// The scopes' display-transformed `Rgba16Float` source (`Display values` mode),
+/// shaded on the GPU from the linear scope source by [`crate::tiles::render::ScopeShaper`].
+struct ScopeShadedTex {
+    tex: wgpu::Texture,
+    view: wgpu::TextureView,
+    cap: (u32, u32),
+    /// `(processed, source generation or accepted revision, level, Look::id)` shaded.
     key: Option<(bool, u64, u32, u64)>,
 }
 
 impl DisplayTarget {
+    /// Identity of the linear texture returned by the last `ensure_linear` call.
+    pub(crate) fn scope_source_key(&self) -> Option<(bool, u64, u32, u64)> {
+        self.scope_source_key
+    }
+
     #[cfg(feature = "ofx")]
     pub(crate) fn sync_worker(&mut self, worker: bool) {
         if !worker && self.accepted_pixels().is_some() {
@@ -734,6 +802,8 @@ impl DisplayTarget {
         if self.decode_key.as_deref().is_some_and(|old| old != key) {
             self.clear_presentation();
             if let Some(scope) = &mut self.scope { scope.key = None; }
+            if let Some(shaded) = &mut self.scope_shaded { shaded.key = None; }
+            self.scope_source_key = None;
         }
         self.decode_key = Some(key.to_owned());
     }
@@ -741,6 +811,46 @@ impl DisplayTarget {
     #[cfg(test)]
     pub(crate) fn scope_texture(&self) -> Option<&wgpu::Texture> {
         self.scope.as_ref().map(|scope| &scope.tex)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn shade_scope(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        linear_view: &wgpu::TextureView,
+        w: u32,
+        h: u32,
+        key: (bool, u64, u32, u64),
+        look: &crate::export::Look,
+    ) -> Option<(wgpu::TextureView, u32, u32)> {
+        if self.scope_shaded.as_ref().is_some_and(|s| s.key == Some(key)) {
+            self.scope_source_key = Some(key);
+            return self.scope_shaded.as_ref().map(|s| (s.view.clone(), w, h));
+        }
+        let max_dim = device.limits().max_texture_dimension_2d;
+        self.retired_scopes.reap();
+        if !self.scope_shaded.as_ref().is_some_and(|s| fits(s.cap, (w, h))) {
+            let next = ScopeShadedTex::new(device, w, h, max_dim)?;
+            if let Some(old) = self.scope_shaded.replace(next) {
+                let bytes = UploadLayout::compute(old.cap.0, old.cap.1, HALF_TEXEL_SIZE, max_dim)
+                    .ok()?
+                    .byte_size;
+                self.retired_scopes.retire(queue, old.tex, bytes);
+            }
+        }
+        let shaper = self
+            .scope_shaper
+            .get_or_insert_with(|| crate::tiles::render::ScopeShaper::new(device));
+        let dst_view = self.scope_shaded.as_ref()?.view.clone();
+        if let Err(e) = shaper.shade(device, queue, linear_view, &dst_view, w, h, look) {
+            log::error!("scope shaper display transform: {e}");
+            return None;
+        }
+        let shaded = self.scope_shaded.as_mut()?;
+        shaded.key = Some(key);
+        self.scope_source_key = Some(key);
+        Some((dst_view, w, h))
     }
 
     #[cfg(feature = "ofx")]
@@ -760,69 +870,69 @@ impl DisplayTarget {
         queue: &wgpu::Queue,
         pixels: crate::consumers::AcceptedPixels,
         display: Option<&crate::export::Look>,
-    ) -> Option<(&wgpu::TextureView, u32, u32)> {
+    ) -> Option<(wgpu::TextureView, u32, u32)> {
         let max_dim = device.limits().max_texture_dimension_2d;
         let level = pixels.level(SCOPE_MAX_PIXELS, max_dim);
         let (w, h) = pixels.grid().level_size(level);
-        let key = (true, pixels.revision(), level, display.map_or(0, crate::export::Look::id));
-        if self.scope.as_ref().is_some_and(|scope| scope.key == Some(key)) {
-            return self.scope.as_ref().map(|scope| (&scope.view, w, h));
+        let base_key = (true, pixels.revision(), level, 0);
+        let want_key = (true, pixels.revision(), level, display.map_or(0, crate::export::Look::id));
+        if display.is_some()
+            && self.scope_shaded.as_ref().is_some_and(|s| s.key == Some(want_key))
+        {
+            self.scope_source_key = Some(want_key);
+            return self.scope_shaded.as_ref().map(|s| (s.view.clone(), w, h));
         }
-        // A failed admission consumes the temporary snapshot, so a scope never
-        // waits for scratch while pinning a previous presentation.
-        let mut rows = match crate::consumers::PixelRows::new(pixels, level) {
-            Ok(rows) => rows,
-            Err(crate::tiles::region::RegionError::Pending) => return None,
-            Err(error) => {
-                log::error!("processed scope source: {error}");
-                return None;
-            }
-        };
-        let (w, h) = rows.size();
-        self.retired_scopes.reap();
-        if !self.scope.as_ref().is_some_and(|scope| fits(scope.cap, (w, h))) {
-            let next = ScopeTex::new(device, w, h, max_dim)?;
-            if let Some(old) = self.scope.replace(next) {
-                let bytes = UploadLayout::compute(old.cap.0, old.cap.1, LINEAR_TEXEL_SIZE, max_dim).ok()?.byte_size;
-                self.retired_scopes.retire(queue, old.tex, bytes);
-            }
-        }
-        let scope = self.scope.as_mut()?;
-        scope.key = None;
-        let mut shaded = Vec::new();
-        for y in 0..h {
-            let row = match rows.row(y) {
-                Ok(row) => row,
+        if self.scope.as_ref().is_none_or(|scope| scope.key != Some(base_key)) {
+            // A failed admission consumes the temporary snapshot, so a scope never
+            // waits for scratch while pinning a previous presentation.
+            let mut rows = match crate::consumers::PixelRows::new(pixels, level) {
+                Ok(rows) => rows,
+                Err(crate::tiles::region::RegionError::Pending) => return None,
                 Err(error) => {
-                    log::error!("processed scope row: {error}");
+                    log::error!("processed scope source: {error}");
                     return None;
                 }
             };
-            let row = match display {
-                Some(look) => {
-                    shaded.clear();
-                    shaded.extend_from_slice(row);
-                    if let Err(e) = crate::export::shade_flat(&mut shaded, look) {
-                        log::error!("processed scope row display transform: {e:#}");
+            let (w, h) = rows.size();
+            self.retired_scopes.reap();
+            if !self.scope.as_ref().is_some_and(|scope| fits(scope.cap, (w, h))) {
+                let next = ScopeTex::new(device, w, h, max_dim)?;
+                if let Some(old) = self.scope.replace(next) {
+                    let bytes = UploadLayout::compute(old.cap.0, old.cap.1, LINEAR_TEXEL_SIZE, max_dim).ok()?.byte_size;
+                    self.retired_scopes.retire(queue, old.tex, bytes);
+                }
+            }
+            let scope = self.scope.as_mut()?;
+            scope.key = None;
+            for y in 0..h {
+                let row = match rows.row(y) {
+                    Ok(row) => row,
+                    Err(error) => {
+                        log::error!("processed scope row: {error}");
                         return None;
                     }
-                    &shaded[..]
-                }
-                None => row,
-            };
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &scope.tex, mip_level: 0,
-                    origin: wgpu::Origin3d { x: 0, y, z: 0 },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                bytemuck::cast_slice(row),
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: None, rows_per_image: None },
-                wgpu::Extent3d { width: w, height: 1, depth_or_array_layers: 1 },
-            );
+                };
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &scope.tex, mip_level: 0,
+                        origin: wgpu::Origin3d { x: 0, y, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    bytemuck::cast_slice(row),
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: None, rows_per_image: None },
+                    wgpu::Extent3d { width: w, height: 1, depth_or_array_layers: 1 },
+                );
+            }
+            scope.key = Some(base_key);
         }
-        scope.key = Some(key);
-        Some((&scope.view, w, h))
+        let linear_view = self.scope.as_ref()?.view.clone();
+        match display {
+            Some(look) => self.shade_scope(device, queue, &linear_view, w, h, want_key, look),
+            None => {
+                self.scope_source_key = Some(base_key);
+                Some((linear_view, w, h))
+            }
+        }
     }
 
     /// Whether playback may replace this frame's backend without cancelling an
@@ -837,6 +947,7 @@ impl DisplayTarget {
     pub(crate) fn clear_presentation(&mut self) {
         self.direct_frame = None;
         self.blocked_frame = None;
+        self.scope_source_key = None;
         self.tiles.clear_presentation();
     }
     /// A display state whose RAM tile cache holds at most `ram_budget` bytes.
@@ -845,6 +956,9 @@ impl DisplayTarget {
             tiles: TileState::new(ram_budget),
             decode_key: None,
             scope: None,
+            scope_shaded: None,
+            scope_shaper: None,
+            scope_source_key: None,
             direct_frame: None,
             blocked_frame: None,
             retired_scopes: Default::default(),
@@ -865,7 +979,11 @@ impl DisplayTarget {
             UploadLayout::compute(s.cap.0, s.cap.1, LINEAR_TEXEL_SIZE, max_dim)
                 .map_or(u64::MAX, |l| l.byte_size)
         });
-        let current = current.saturating_add(self.retired_scopes.bytes());
+        let shaded = self.scope_shaded.as_ref().map_or(0, |s| {
+            UploadLayout::compute(s.cap.0, s.cap.1, HALF_TEXEL_SIZE, max_dim)
+                .map_or(u64::MAX, |l| l.byte_size)
+        });
+        let current = current.saturating_add(shaded).saturating_add(self.retired_scopes.bytes());
         let Some(grid) = self.tiles.grid() else {
             return current;
         };
@@ -1320,15 +1438,16 @@ impl ImageBackend {
         }
         // Fill IN PLACE: the buffer's capacity is reused across frames and layer
         // switches (see `set_frame`) instead of a fresh ~132 MB allocation each time.
-        materialize_into(
+        // Stage-1 colour decode is fused into each cache-local block during fill.
+        let decode = layer_decode(&self.decode, &self.frame, group);
+        let names = names_of(&self.frame.channels);
+        Mapping::of(&names, group).fill_with_decode(
             Arc::make_mut(&mut self.pixels),
-            &self.frame,
+            &self.frame.channels,
             self.width,
             self.height,
-            group,
+            Some(&decode),
         )?;
-        let decoded: &mut Vec<f32> = Arc::make_mut(&mut self.pixels);
-        layer_decode(&self.decode, &self.frame, group).apply(decoded);
         if let Some(ref cov) = self.coverage_overlay {
             let n = (self.width as usize) * (self.height as usize);
             if cov.len() == n && self.pixels.len() == n * 4 {
@@ -1797,7 +1916,7 @@ impl ImageBackend {
         target.sync_worker(stage.as_ref().is_some_and(|stage| stage.uses_worker()));
         #[cfg(feature = "ofx")]
         if let Some(pixels) = target.accepted_pixels() {
-            return target.ensure_processed_linear(device, queue, pixels, display).map(|(view, w, h)| (view.clone(), w, h));
+            return target.ensure_processed_linear(device, queue, pixels, display);
         }
         if self.width == 0 || self.height == 0 {
             return None;
@@ -1818,14 +1937,19 @@ impl ImageBackend {
         let grid = *target.tiles.grid()?;
         let level = crate::tiles::source::finest_level(&grid, SCOPE_MAX_PIXELS, max_dim);
         let (lw, lh) = grid.level_size(level);
-        let key = (false, target.tiles.generation(), level, display.map_or(0, crate::export::Look::id));
+        let base_key = (false, target.tiles.generation(), level, 0);
+        let want_key = (false, target.tiles.generation(), level, display.map_or(0, crate::export::Look::id));
+        if display.is_some()
+            && target.scope_shaded.as_ref().is_some_and(|s| s.key == Some(want_key))
+        {
+            target.scope_source_key = Some(want_key);
+            return target.scope_shaded.as_ref().map(|s| (s.view.clone(), lw, lh));
+        }
 
         // While the resident display shows this content, its original texture
         // is level 0 of the same source: read it instead of uploading the frame
         // a second time (whichever of viewport and scopes runs first uploads).
-        // Display values are the scopes' own (the CPU twin of the tile shader).
         if level == 0
-            && display.is_none()
             && matches!(target.path, Some(DisplayPath::Direct { .. }))
             && self.direct_eligible(false, max_dim)
             && let Some(gpu) = renderer.callback_resources.get_mut::<TileGpu>()
@@ -1837,7 +1961,13 @@ impl ImageBackend {
             match direct.upload(device, queue, &desc, level0.texels(), (self.width, self.height), allowance) {
                 Ok(true) => {
                     if let Some(view) = direct.original_view(&desc) {
-                        return Some((view, lw, lh));
+                        return match display {
+                            Some(look) => target.shade_scope(device, queue, &view, lw, lh, want_key, look),
+                            None => {
+                                target.scope_source_key = Some(base_key);
+                                Some((view, lw, lh))
+                            }
+                        };
                     }
                 }
                 Ok(false) => {}
@@ -1854,31 +1984,26 @@ impl ImageBackend {
                 target.retired_scopes.retire(queue, old.tex, bytes);
             }
         }
-        if target.scope.as_ref()?.key != Some(key) {
+        if target.scope.as_ref()?.key != Some(base_key) {
             // `None` while a file-backed level is still streaming in; the scope
             // shows its placeholder and asks again next frame.
             let (_, pixels) = target.tiles.scope_level(SCOPE_MAX_PIXELS, max_dim)?;
             log::debug!("scope source: level {level} ({lw}x{lh})");
-            let pixels = match display {
-                Some(look) => {
-                    let mut shaded = pixels.to_vec();
-                    if let Err(e) = crate::export::shade_flat(&mut shaded, look) {
-                        log::error!("scope source display transform: {e:#}");
-                        return None;
-                    }
-                    Arc::new(shaded)
-                }
-                None => pixels,
-            };
             let scope = target.scope.as_mut()?;
             let mut lap = crate::timing::Lap::start("scope upload");
             lap.bytes(u64::from(lw) * u64::from(lh) * u64::from(LINEAR_TEXEL_SIZE));
             upload_linear(queue, &scope.tex, &pixels, lw, lh);
             drop(lap);
-            scope.key = Some(key);
+            scope.key = Some(base_key);
         }
-        let scope = target.scope.as_ref()?;
-        Some((scope.view.clone(), lw, lh))
+        let linear_view = target.scope.as_ref()?.view.clone();
+        match display {
+            Some(look) => target.shade_scope(device, queue, &linear_view, lw, lh, want_key, look),
+            None => {
+                target.scope_source_key = Some(base_key);
+                Some((linear_view, lw, lh))
+            }
+        }
     }
 }
 
@@ -2001,6 +2126,33 @@ impl ScopeTex {
     }
 }
 
+impl ScopeShadedTex {
+    /// Allocate a `w x h` display-transformed `Rgba16Float` scope source texture.
+    fn new(device: &wgpu::Device, w: u32, h: u32, max_dim: u32) -> Option<Self> {
+        let layout = match UploadLayout::compute(w.max(1), h.max(1), HALF_TEXEL_SIZE, max_dim) {
+            Ok(l) => l,
+            Err(e) => {
+                log::error!("scope shaded {w}x{h} not allocated: {e}");
+                return None;
+            }
+        };
+        log::debug!("scope shaded texture {w}x{h} ({} MiB)", layout.byte_size >> 20);
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("exr_view.scope_shaded"),
+            size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: crate::present::CANVAS_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+                | if cfg!(test) { wgpu::TextureUsages::COPY_SRC } else { wgpu::TextureUsages::empty() },
+            view_formats: &[],
+        });
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        Some(Self { tex, view, cap: (w.max(1), h.max(1)), key: None })
+    }
+}
+
 // ── EXR seam: channels → linear RGBA f32 ───────────────────────────────────────
 
 /// Read one channel's sample at flat index `i` as an f32 (the display value).
@@ -2046,7 +2198,7 @@ fn uint_display(u: u32) -> f32 {
 fn channel_span(ch: &ChannelData, n: usize) -> Option<Span> {
     match ch {
         ChannelData::Half(v) => Span::of_halves(v.iter().take(n).map(|h| h.bits())),
-        ChannelData::Float(v) => Span::of(v.iter().take(n).copied()),
+        ChannelData::Float(v) => Span::of_slice(v.get(..n).unwrap_or(v)),
         ChannelData::Uint(v) => Span::of(v.iter().take(n).map(|&u| uint_display(u))),
     }
 }
@@ -2180,6 +2332,22 @@ impl Mapping {
         width: u32,
         height: u32,
     ) -> Result<(), ExrError> {
+        self.fill_with_decode(out, channels, width, height, None)
+    }
+
+    /// Like [`Self::fill`], optionally running stage-1 `decode` on each cache-local
+    /// `BLOCK` of pixels immediately after filling its four RGBA slots. Fusing the
+    /// fill and decode avoids a second 132 MB DRAM pass on 4K frames and runs
+    /// across rayon workers when `n > BLOCK`.
+    pub(crate) fn fill_with_decode(
+        &self,
+        out: &mut Vec<f32>,
+        channels: &[(String, ChannelData)],
+        width: u32,
+        height: u32,
+        decode: Option<&crate::ocio::Decode>,
+    ) -> Result<(), ExrError> {
+        use rayon::prelude::*;
         let n = resize(out, width, height)?;
         let bound = self.bind(channels)?;
         // The first index the per-sample path would fail at, with its message.
@@ -2189,11 +2357,11 @@ impl Mapping {
             )));
         }
         let lut = half_lut();
-        // Blocks small enough that all four slot passes hit the cache. Every
-        // source holds at least `n` samples (checked above), so `v[at..]` is
-        // in bounds.
+        // Blocks small enough that all four slot passes + decode hit L1/L2 cache.
+        // Every source holds at least `n` samples (checked above), so `v[at..]`
+        // is in bounds.
         const BLOCK: usize = 4096;
-        for (b, pixels) in out.as_chunks_mut::<4>().0.chunks_mut(BLOCK).enumerate() {
+        let fill_block = |b: usize, pixels: &mut [[f32; 4]]| {
             let at = b * BLOCK;
             for (slot, (src, &konst)) in bound.src.iter().zip(&bound.konst).enumerate() {
                 match src {
@@ -2211,6 +2379,20 @@ impl Mapping {
                         .for_each(|(px, &u)| px[slot] = uint_display(u)),
                 }
             }
+            if let Some(dec) = decode {
+                dec.apply_pixels(pixels);
+            }
+        };
+        let chunks = out.as_chunks_mut::<4>().0;
+        if n <= BLOCK {
+            for (b, pixels) in chunks.chunks_mut(BLOCK).enumerate() {
+                fill_block(b, pixels);
+            }
+        } else {
+            chunks
+                .par_chunks_mut(BLOCK)
+                .enumerate()
+                .for_each(|(b, pixels)| fill_block(b, pixels));
         }
         Ok(())
     }
@@ -2374,21 +2556,65 @@ fn peek_header(path: &Path) -> Option<Header> {
     Some(file.header().clone())
 }
 
-/// Whether a file with `header` is too large to hold within `budget` bytes
-/// (every channel plus the 16 B/px materialized RGBA). Subsampled files never
-/// are: they are always decoded whole.
-fn needs_file_backing(header: &Header, budget: u64) -> bool {
+/// Channel names in `header` required to display `selection` (active layer or solo channel).
+fn header_selection_channels(header: &Header, selection: &Selection) -> Option<Vec<String>> {
+    let list = header.channels().ok()?;
+    let names: Vec<String> = list.iter().map(|(n, _)| n.to_string()).collect();
+    let types: Vec<PixelType> = list.iter().map(|(_, c)| c.type_).collect();
+    if let Some(ch) = &selection.channel
+        && names.iter().any(|n| n == ch)
+    {
+        return Some(vec![ch.clone()]);
+    }
+    let layers = group_layers(names.iter().map(String::as_str).zip(types));
+    let group = layers
+        .iter()
+        .find(|g| g.name == selection.layer)
+        .or_else(|| layers.first())?;
+    let selected: Vec<String> = group
+        .channels
+        .iter()
+        .filter_map(|&i| names.get(i).cloned())
+        .collect();
+    (!selected.is_empty()).then_some(selected)
+}
+
+/// Whether a file with `header` decoded under `spec` is too large to hold within `budget` bytes
+/// (selected channels plus the 16 B/px materialized RGBA). Subsampled files never are: they are
+/// always decoded whole.
+fn needs_file_backing_spec(
+    header: &Header,
+    budget: u64,
+    spec: &exr_core::api::ReadSpec<'_>,
+) -> bool {
     let (Ok(dw), Ok(list)) = (header.data_window(), header.channels()) else { return false };
-    let w = (i64::from(dw.max.x) - i64::from(dw.min.x) + 1).max(0) as u64;
-    let h = (i64::from(dw.max.y) - i64::from(dw.min.y) + 1).max(0) as u64;
+    let window = match spec.region {
+        Some(crop) => imath_rs::Box2i::from_min_max(
+            imath_rs::V2i::new(crop.min.x.max(dw.min.x), crop.min.y.max(dw.min.y)),
+            imath_rs::V2i::new(crop.max.x.min(dw.max.x), crop.max.y.min(dw.max.y)),
+        ),
+        None => dw,
+    };
+    let w = (i64::from(window.max.x) - i64::from(window.min.x) + 1).max(0) as u64;
+    let h = (i64::from(window.max.y) - i64::from(window.min.y) + 1).max(0) as u64;
     let mut bytes = w * h * 16;
-    for (_, c) in list.iter() {
+    for (name, c) in list.iter() {
         if (c.x_sampling, c.y_sampling) != (1, 1) {
             return false;
+        }
+        if let Some(filter) = spec.channels
+            && !filter.iter().any(|&f| f.as_bytes() == name.as_bytes())
+        {
+            continue;
         }
         bytes += w * h * exr_core::misc::pixel_type_size(c.type_).unwrap_or(4) as u64;
     }
     bytes > budget
+}
+
+#[cfg(test)]
+fn needs_file_backing(header: &Header, budget: u64) -> bool {
+    needs_file_backing_spec(header, budget, &exr_core::api::ReadSpec::default())
 }
 
 // ── Load error ─────────────────────────────────────────────────────────────────
@@ -3592,4 +3818,84 @@ pub(crate) mod tests {
         let (px, _) = shown(&mut img, Selection::channel("P", "P.x"));
         assert_eq!(px, [6.0, 2.0, 1.0, 0.0], "absent layer -> main");
     }
+
+    #[test]
+    fn fused_fill_with_decode_matches_two_pass_across_multiple_blocks() {
+        let w = 128u32;
+        let h = 80u32;
+        let n = (w * h) as usize;
+        let mut frame = super::tests_support::frame_of(
+            w,
+            h,
+            vec![
+                ("R".into(), ChannelData::Float((0..n).map(|i| (i % 251) as f32 / 250.0).collect())),
+                ("G".into(), ChannelData::Half((0..n).map(|i| imath_rs::Half::from_f32((i % 127) as f32 / 126.0)).collect())),
+                ("B".into(), ChannelData::Float((0..n).map(|i| ((i * 7) % 199) as f32 / 198.0).collect())),
+                ("A".into(), ChannelData::Float((0..n).map(|i| 0.25 + (i % 4) as f32 * 0.25).collect())),
+            ],
+        );
+        frame.tag = exr_import::ColorTag {
+            space: "srgb_rec709_display".into(),
+            origin: exr_import::TagOrigin::File,
+        };
+        frame.straight = true;
+        let decode = crate::ocio::Decoder::builtin_only().decode(&frame).unwrap();
+        let group = frame.resolve(&Selection::default());
+        let names = super::names_of(&frame.channels);
+        let mapping = Mapping::of(&names, group.as_deref());
+
+        let mut expected = Vec::new();
+        mapping.fill(&mut expected, &frame.channels, w, h).unwrap();
+        decode.apply(&mut expected);
+
+        let mut fused = Vec::new();
+        mapping
+            .fill_with_decode(&mut fused, &frame.channels, w, h, Some(&decode))
+            .unwrap();
+        assert_eq!(fused.len(), expected.len());
+        for (a, b) in fused.iter().zip(&expected) {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+    }
+
+    #[test]
+    fn open_selection_and_load_spec_decode_only_requested_channels_and_region() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi_aov.exr");
+        let dw = Box2i::from_min_max(imath_rs::V2i::new(0, 0), imath_rs::V2i::new(7, 7));
+        let n = 64usize;
+        exr_core::api::Image::new(dw)
+            .with_channel("R", ChannelData::Float(vec![1.0; n]))
+            .with_channel("G", ChannelData::Float(vec![2.0; n]))
+            .with_channel("B", ChannelData::Float(vec![3.0; n]))
+            .with_channel("diffuse.R", ChannelData::Float(vec![0.25; n]))
+            .with_channel("diffuse.G", ChannelData::Float(vec![0.5; n]))
+            .with_channel("diffuse.B", ChannelData::Float(vec![0.75; n]))
+            .with_channel("depth.Z", ChannelData::Float((0..n).map(|i| i as f32).collect()))
+            .write(&path, exr_core::Compression::Zip)
+            .unwrap();
+
+        let diffuse = DecodedFrame::open_selection(&path, u64::MAX, &Selection::layer("diffuse")).unwrap();
+        assert_eq!(
+            diffuse.channel_names,
+            vec!["diffuse.B", "diffuse.G", "diffuse.R"]
+        );
+        assert_eq!(diffuse.byte_size(), n * 3 * 4);
+
+        let crop = Box2i::from_min_max(imath_rs::V2i::new(2, 3), imath_rs::V2i::new(5, 6));
+        let roi = DecodedFrame::load_spec(
+            &path,
+            &exr_core::api::ReadSpec {
+                channels: Some(&["depth.Z"]),
+                region: Some(crop),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!((roi.width, roi.height), (4, 4));
+        assert_eq!(roi.data_window, crop);
+        assert_eq!(roi.channel_names, vec!["depth.Z"]);
+        assert_eq!(roi.channels[0].1.sample_f32(0), Some((3 * 8 + 2) as f32));
+    }
 }
+

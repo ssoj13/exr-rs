@@ -31,7 +31,8 @@ impl Span {
             return Some(self);
         }
         let exponent = (bits >> 23) & 255;
-        if exponent == 0 || exponent == 255 || v.abs() > 65504.0 {
+        // 0x477fe000 is 65504.0f32.to_bits(); exponent == 255 (Inf/NaN) has bits >= 0x7f800000.
+        if exponent == 0 || bits > 0x477fe000 {
             return None;
         }
         let mantissa = (bits & 0x7fffff) | 0x800000;
@@ -42,9 +43,31 @@ impl Span {
         })
     }
 
+    /// Combine two spans over the same domain.
+    #[inline]
+    pub fn merge(self, other: Self) -> Self {
+        Self {
+            low: self.low.min(other.low),
+            high: self.high.max(other.high),
+        }
+    }
+
     /// The span of `values`; `None` when any is outside the domain.
     pub fn of(values: impl IntoIterator<Item = f32>) -> Option<Self> {
         values.into_iter().try_fold(Self::EMPTY, Self::add)
+    }
+
+    /// The span of a contiguous `f32` slice, parallelised across chunks for large planes.
+    pub fn of_slice(values: &[f32]) -> Option<Self> {
+        use rayon::prelude::*;
+        const CHUNK: usize = 16_384;
+        if values.len() <= CHUNK {
+            return Self::of(values.iter().copied());
+        }
+        values
+            .par_chunks(CHUNK)
+            .map(|chunk| Self::of(chunk.iter().copied()))
+            .try_reduce(|| Self::EMPTY, |a, b| Some(a.merge(b)))
     }
 
     /// The span of half-float bit patterns, from the distinct patterns only:
@@ -86,15 +109,38 @@ pub fn finish(spans: [Option<Span>; 4]) -> Option<[i32; 4]> {
     Some(low)
 }
 
-/// The profile of an interleaved RGBA buffer (the reference the per-channel
-/// spans must reproduce).
-pub fn profile(rgba: &[f32]) -> Option<[i32; 4]> {
+fn profile_chunk(rgba: &[f32]) -> Option<[Span; 4]> {
     let mut spans = [Span::EMPTY; 4];
     for px in rgba.chunks(4) {
         for (span, &v) in spans.iter_mut().zip(px) {
             *span = span.add(v)?;
         }
     }
+    Some(spans)
+}
+
+/// The profile of an interleaved RGBA buffer (the reference the per-channel
+/// spans must reproduce).
+pub fn profile(rgba: &[f32]) -> Option<[i32; 4]> {
+    use rayon::prelude::*;
+    const CHUNK: usize = 4096 * 4;
+    let spans = if rgba.len() <= CHUNK {
+        profile_chunk(rgba)?
+    } else {
+        rgba.par_chunks(CHUNK)
+            .map(profile_chunk)
+            .try_reduce(
+                || [Span::EMPTY; 4],
+                |a, b| {
+                    Some([
+                        a[0].merge(b[0]),
+                        a[1].merge(b[1]),
+                        a[2].merge(b[2]),
+                        a[3].merge(b[3]),
+                    ])
+                },
+            )?
+    };
     finish(spans.map(Some))
 }
 
@@ -146,5 +192,19 @@ mod tests {
         let values = mixed.map(|b| imath_rs::Half::from_bits(b).to_f32());
         assert_eq!(Span::of_halves(mixed), Span::of(values));
         assert_eq!(Span::of_halves([0x3c00, 0x7c00]), None, "an infinity leaves the domain");
+    }
+
+    #[test]
+    fn parallel_profile_and_slice_span_match_sequential() {
+        let mut rgba = Vec::with_capacity(10_000 * 4);
+        for i in 0..10_000u32 {
+            let h = imath_rs::Half::from_f32((i as f32 + 1.0) * 0.0625).to_f32();
+            rgba.extend_from_slice(&[h, h * 0.5, -h, 1.0]);
+        }
+        assert_eq!(profile(&rgba), finish(profile_chunk(&rgba).unwrap().map(Some)));
+        assert_eq!(Span::of_slice(&rgba), Span::of(rgba.iter().copied()));
+        rgba[9_999 * 4 + 2] = 70_000.0;
+        assert_eq!(profile(&rgba), None);
+        assert_eq!(Span::of_slice(&rgba), None);
     }
 }

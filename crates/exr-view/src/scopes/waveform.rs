@@ -8,7 +8,8 @@ use super::pipe::{
     scatter_bg, scatter_bgl, write_panel_params,
 };
 use super::{
-    BucketSizer, GpuPanel, PanelCtx, make_bins_buffer, make_params_buffer, sync_egui_texture,
+    BucketSizer, GpuPanel, PanelCtx, RenderedScope, make_bins_buffer, make_params_buffer,
+    sync_egui_texture,
 };
 
 /// 3 planes of 256 columns x 256 rows, plus 3 planes of 256 per-column maxima.
@@ -121,6 +122,7 @@ struct Pipes {
 pub struct GpuWaveformPanel {
     pipes: Option<Pipes>,
     texture_id: Option<egui::TextureId>,
+    rendered: Option<RenderedScope>,
 }
 
 fn init_pipelines(device: &wgpu::Device) -> Pipes {
@@ -170,7 +172,7 @@ fn init_pipelines(device: &wgpu::Device) -> Pipes {
 }
 
 impl GpuWaveformPanel {
-    fn ensure_output(&mut self, device: &wgpu::Device, logical_w: u32, logical_h: u32) {
+    fn ensure_output(&mut self, device: &wgpu::Device, logical_w: u32, logical_h: u32) -> bool {
         let p = self.pipes.get_or_insert_with(|| init_pipelines(device));
         let ((bucket_w, bucket_h), reallocated) = p.bucket.update(logical_w, logical_h);
         if reallocated || p.output.is_none() {
@@ -184,7 +186,9 @@ impl GpuWaveformPanel {
                 &output.view,
             ));
             p.output = Some(output);
+            return true;
         }
+        false
     }
 }
 
@@ -201,7 +205,15 @@ impl GpuPanel for GpuWaveformPanel {
         if src_w == 0 || src_h == 0 || out_w == 0 || out_h == 0 {
             return;
         }
-        self.ensure_output(ctx.device, out_w, out_h);
+        let reallocated = self.ensure_output(ctx.device, out_w, out_h);
+        if !reallocated
+            && self.texture_id.is_some()
+            && ctx
+                .source_key
+                .is_some_and(|key| self.rendered == Some((key, src_w, src_h, out_w, out_h)))
+        {
+            return;
+        }
         let Some(p) = self.pipes.as_mut() else {
             return;
         };
@@ -258,7 +270,10 @@ impl GpuPanel for GpuWaveformPanel {
             cp.dispatch_workgroups(out_w.div_ceil(8), out_h.div_ceil(8), 1);
         }
         ctx.queue.submit(std::iter::once(enc.finish()));
-        sync_egui_texture(ctx, &out.view, &mut self.texture_id);
+        if reallocated || self.texture_id.is_none() {
+            sync_egui_texture(ctx, &out.view, &mut self.texture_id);
+        }
+        self.rendered = ctx.source_key.map(|key| (key, src_w, src_h, out_w, out_h));
     }
 
     fn release(&mut self, renderer: &mut egui_wgpu::Renderer) {
@@ -267,6 +282,7 @@ impl GpuPanel for GpuWaveformPanel {
         }
         // Drop the pipelines + output texture; rebuilt lazily on the next tick.
         self.pipes = None;
+        self.rendered = None;
     }
 
     fn texture_id(&self) -> Option<egui::TextureId> {

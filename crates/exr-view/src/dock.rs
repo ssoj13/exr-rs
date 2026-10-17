@@ -6,7 +6,7 @@
 //! (to run the colour pass + register the display texture), so the tab content also carries a
 //! [`TabGpu`] handle alongside the shared [`AppState`].
 
-use egui_dock_layout::{
+use soluwell_chrome::dock_layout::{
     Action as DockAction, DockArea, DockContent, DockError, DockStyle, Layout, Node, SplitAxis, SplitSize,
 };
 use serde::{Deserialize, Serialize};
@@ -116,7 +116,7 @@ impl Dock {
     /// reads (another build's tabs, or an `egui_dock`-era blob: there is no compatibility) is
     /// logged and replaced by the default: the viewer must open either way.
     pub fn restore(blob: Option<&str>) -> Self {
-        match blob.map(egui_dock_layout::from_blob) {
+        match blob.map(soluwell_chrome::dock_layout::from_blob) {
             Some(Ok(layout)) => Self::new(layout),
             Some(Err(e)) => {
                 log::warn!("saved dock layout ignored: {e}");
@@ -127,8 +127,8 @@ impl Dock {
     }
 
     /// The layout as a blob for the config.
-    pub fn blob(&self) -> Result<String, egui_dock_layout::Error> {
-        egui_dock_layout::to_blob(&self.layout)
+    pub fn blob(&self) -> Result<String, soluwell_chrome::dock_layout::Error> {
+        soluwell_chrome::dock_layout::to_blob(&self.layout)
     }
 
     /// Whether `tab` is docked or floating anywhere.
@@ -139,7 +139,7 @@ impl Dock {
     /// Replace the whole arrangement (Window > Reset layout, a named layout): a drag in flight
     /// and a maximized panel belong to the old one, so both are dropped.
     pub fn replace(&mut self, ctx: &egui::Context, layout: Layout<DockTab>) {
-        egui_dock_layout::cancel_drag::<DockTab>(ctx, area_id());
+        soluwell_chrome::dock_layout::cancel_drag::<DockTab>(ctx, area_id());
         DockArea::<DockTab>::set_maximized(ctx, area_id(), None);
         *self = Self::new(layout);
     }

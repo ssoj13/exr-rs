@@ -60,6 +60,11 @@ impl Fails {
         self.map().remove(&frame);
     }
 
+    /// Whether `frame` has a recorded failure.
+    pub(crate) fn has(&self, frame: i32) -> bool {
+        self.map().contains_key(&frame)
+    }
+
     /// The error of `frame`, for the UI.
     pub(crate) fn msg(&self, frame: i32) -> Option<Arc<str>> {
         self.map().get(&frame).map(|f| Arc::clone(&f.msg))

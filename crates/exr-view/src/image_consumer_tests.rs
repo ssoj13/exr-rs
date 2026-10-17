@@ -104,6 +104,7 @@ impl Plugin for ConsumerEffect {
         supported_pixel_depths: &[ofx::PixelDepth::Float],
         render_thread_safety: ofx::RenderThreadSafety::InstanceSafe,
         cpu_render_supported: ofx::GpuSupport::True,
+        error_message: false,
         ..ofx::PluginTraits::DEFAULT
     };
     fn new() -> Self {

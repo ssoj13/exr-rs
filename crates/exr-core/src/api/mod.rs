@@ -86,12 +86,83 @@ pub fn classify_unsupported(e: &ExrError) -> Option<Unsupported> {
     }
 }
 
+/// Selective read specification for view-driven / Nuke-style decoding:
+/// - `channels`: when `Some`, only channels whose names are in this slice are
+///   allocated and scattered into the returned [`Image`]; unselected channels in
+///   the file are skipped during frame-buffer scatter without allocating plane RAM.
+/// - `level`: target `(lx, ly)` MIP/RIP level (`(0, 0)` by default).
+/// - `clamp_level`: when `true`, clamps `level` to the finest/coarsest available
+///   level in the file (`(0, 0)` for scanline or `ONE_LEVEL` files) instead of
+///   returning an error when the file has fewer levels.
+/// - `region`: optional pixel sub-window (`Box2i`, inclusive `min..=max` in the
+///   selected level's coordinates). When `Some`, only the scanline chunks or tiles
+///   overlapping the region are decoded and the returned [`Image`]'s `data_window`
+///   is the intersection of `region` with the level's data window.
+#[derive(Clone, Debug, Default)]
+pub struct ReadSpec<'a> {
+    /// Subset of channel names to decode (`None` = all channels in the header).
+    pub channels: Option<&'a [&'a str]>,
+    /// Target `(lx, ly)` level (`(0, 0)` = full resolution).
+    pub level: (i32, i32),
+    /// Clamp `level` to the levels present in the file instead of failing.
+    pub clamp_level: bool,
+    /// Optional pixel region of interest (inclusive `min..=max` in level coordinates).
+    pub region: Option<Box2i>,
+}
+
+impl<'a> ReadSpec<'a> {
+    /// Read only the named `channels` at full resolution (`level = (0, 0)`).
+    pub fn channels(channels: &'a [&'a str]) -> Self {
+        Self {
+            channels: Some(channels),
+            ..Self::default()
+        }
+    }
+
+    /// Builder: restrict decoding to `channels`.
+    #[must_use]
+    pub fn with_channels(mut self, channels: &'a [&'a str]) -> Self {
+        self.channels = Some(channels);
+        self
+    }
+
+    /// Builder: select MIP/RIP `level` `(lx, ly)`.
+    #[must_use]
+    pub fn with_level(mut self, lx: i32, ly: i32) -> Self {
+        self.level = (lx, ly);
+        self
+    }
+
+    /// Builder: clamp `level` to the levels present in the file.
+    #[must_use]
+    pub fn with_clamp_level(mut self, clamp: bool) -> Self {
+        self.clamp_level = clamp;
+        self
+    }
+
+    /// Builder: restrict decoding to pixel `region` (inclusive `min..=max`).
+    #[must_use]
+    pub fn with_region(mut self, region: Box2i) -> Self {
+        self.region = Some(region);
+        self
+    }
+}
+
 /// Read a single-part scanline or tiled (non-deep) EXR file into an [`Image`].
 ///
 /// Free-function convenience wrapper over [`Image::read`], re-exported at the
 /// crate root as `exr_core::read`.
 pub fn read<P: AsRef<Path>>(path: P) -> Result<Image> {
     Image::read(path)
+}
+
+/// Read a single-part scanline or tiled (non-deep) EXR file selectively
+/// according to `spec` (active channels, MIP/RIP level, and/or pixel region).
+///
+/// Free-function convenience wrapper over [`Image::read_spec`], re-exported at
+/// the crate root as `exr_core::read_spec`.
+pub fn read_spec<P: AsRef<Path>>(path: P, spec: &ReadSpec<'_>) -> Result<Image> {
+    Image::read_spec(path, spec)
 }
 
 /// Convenience: write a 4-channel **RGBA `Float`** single-part scanline EXR by
@@ -840,6 +911,97 @@ impl Image {
         }
     }
 
+    /// Read a single-part scanline or tiled (non-deep) EXR file selectively
+    /// according to `spec` (channel subset, MIP/RIP level, and/or pixel region).
+    ///
+    /// Subsampled files return [`ExrError::Unsupported(Unsupported::Subsampled)`],
+    /// matching [`Image::read`].
+    pub fn read_spec<P: AsRef<Path>>(path: P, spec: &ReadSpec<'_>) -> Result<Image> {
+        Image::read_spec_from(&mut open_path(path.as_ref())?, spec)
+    }
+
+    /// Stream form of [`Image::read_spec`].
+    pub fn read_spec_from(stream: &mut dyn IStream, spec: &ReadSpec<'_>) -> Result<Image> {
+        match peek_kind(stream)? {
+            Kind::Scanline => {
+                let (lx, ly) = if spec.clamp_level { (0, 0) } else { spec.level };
+                if (lx, ly) != (0, 0) {
+                    return Err(ExrError::Arg(format!(
+                        "Level ({lx}, {ly}) does not exist in a scanline file."
+                    )));
+                }
+                let mut input = scanline::InputFile::new(stream)?;
+                let header = input.header().clone();
+                let dw = header.data_window()?;
+                let crop = spec.region.map_or(Ok(dw), |r| intersect_window(dw, r))?;
+                let read_win = Box2i {
+                    min: imath_rs::V2i { x: dw.min.x, y: crop.min.y },
+                    max: imath_rs::V2i { x: dw.max.x, y: crop.max.y },
+                };
+                let plan = ReadPlan::new_filtered(&header, read_win, false, spec.channels)?;
+                let mut buffer = vec![0u8; plan.total];
+                if plan.total > 0 {
+                    input.set_frame_buffer(&plan.frame_buffer()?)?;
+                    input.read_pixels(crop.min.y, crop.max.y, &mut buffer)?;
+                }
+                Self::from_header(&header, crop, plan.into_planes_cropped(&buffer, crop)?)
+            }
+            Kind::Tiled => {
+                let mut input = TiledInputFile::new(stream)?;
+                let header = input.header().clone();
+                let td = header.tile_description()?;
+                let dw = header.data_window()?;
+                let (lx, ly) = if spec.clamp_level {
+                    let nx = level_math::num_x_levels(&td, dw.min.x, dw.max.x, dw.min.y, dw.max.y)?;
+                    let ny = level_math::num_y_levels(&td, dw.min.x, dw.max.x, dw.min.y, dw.max.y)?;
+                    let cx = spec.level.0.clamp(0, (nx - 1).max(0));
+                    let cy = spec.level.1.clamp(0, (ny - 1).max(0));
+                    if td.mode == crate::attr::LevelMode::MipmapLevels {
+                        let c = cx.min(cy);
+                        (c, c)
+                    } else {
+                        (cx, cy)
+                    }
+                } else {
+                    if !has_level(&td, dw, spec.level.0, spec.level.1)? {
+                        return Err(ExrError::Arg(format!(
+                            "Level ({}, {}) does not exist in this file's tiling.",
+                            spec.level.0, spec.level.1
+                        )));
+                    }
+                    spec.level
+                };
+                let lw = level_window(&td, dw, lx, ly)?;
+                let crop = spec.region.map_or(Ok(lw), |r| intersect_window(lw, r))?;
+                let tw = i64::from(td.x_size.max(1));
+                let th = i64::from(td.y_size.max(1));
+                let dx1 = i32::try_from((i64::from(crop.min.x) - i64::from(lw.min.x)) / tw)
+                    .map_err(|_| ExrError::Arg("Tile x index overflow.".into()))?;
+                let dx2 = i32::try_from((i64::from(crop.max.x) - i64::from(lw.min.x)) / tw)
+                    .map_err(|_| ExrError::Arg("Tile x index overflow.".into()))?;
+                let dy1 = i32::try_from((i64::from(crop.min.y) - i64::from(lw.min.y)) / th)
+                    .map_err(|_| ExrError::Arg("Tile y index overflow.".into()))?;
+                let dy2 = i32::try_from((i64::from(crop.max.y) - i64::from(lw.min.y)) / th)
+                    .map_err(|_| ExrError::Arg("Tile y index overflow.".into()))?;
+                let first_tile = level_math::data_window_for_tile(
+                    &td, dw.min.x, dw.max.x, dw.min.y, dw.max.y, dx1, dy1, lx, ly,
+                )?;
+                let last_tile = level_math::data_window_for_tile(
+                    &td, dw.min.x, dw.max.x, dw.min.y, dw.max.y, dx2, dy2, lx, ly,
+                )?;
+                let tile_win = Box2i::from_min_max(first_tile.min, last_tile.max);
+                let plan = ReadPlan::new_filtered(&header, tile_win, false, spec.channels)?;
+                let mut buffer = vec![0u8; plan.total];
+                if plan.total > 0 {
+                    input.set_frame_buffer(&plan.frame_buffer()?)?;
+                    input.read_tiles(dx1, dx2, dy1, dy2, lx, ly, &mut buffer)?;
+                }
+                Self::from_header(&header, crop, plan.into_planes_cropped(&buffer, crop)?)
+            }
+        }
+    }
+
+
     /// Read a file's header and dimensions WITHOUT decoding any pixel data —
     /// a true "header only" entry point (py-parity2 exr-core need (b)):
     /// `openexr-py`'s `header_only=True` used to call the full [`Image::read`]
@@ -1183,6 +1345,22 @@ fn peek_kind(stream: &mut dyn IStream) -> Result<Kind> {
         return Err(ExrError::Unsupported(Unsupported::Deep));
     }
     Ok(if version::is_tiled(flags) { Kind::Tiled } else { Kind::Scanline })
+}
+
+/// Intersect `region` with `dw` and verify the intersection is non-empty.
+fn intersect_window(dw: Box2i, region: Box2i) -> Result<Box2i> {
+    let crop = Box2i {
+        min: imath_rs::V2i {
+            x: dw.min.x.max(region.min.x),
+            y: dw.min.y.max(region.min.y),
+        },
+        max: imath_rs::V2i {
+            x: dw.max.x.min(region.max.x),
+            y: dw.max.y.min(region.max.y),
+        },
+    };
+    let _ = sample_dims(crop, 1, 1)?;
+    Ok(crop)
 }
 
 /// Open `path` for reading (UTF-8 paths only, like every facade entry point).

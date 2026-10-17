@@ -265,8 +265,8 @@ pub fn show(
     // and the present pass composites it there, in linear light (a painted checker came out at
     // the wrong brightness under PQ/HLG). The tiles are drawn after, premultiplied, over it.
     let shown = if worker { canvas } else { img_rect };
-    let view = egui_display::BackdropView::new(rect.min, ui.ctx().pixels_per_point()).with_image(shown.min, img.zoom);
-    egui_display::show_backdrop(&painter, shown, &controls.backdrop, &view);
+    let view = soluwell_viewport::display::BackdropView::new(rect.min, ui.ctx().pixels_per_point()).with_image(shown.min, img.zoom);
+    soluwell_viewport::display::show_backdrop(&painter, shown, &controls.backdrop, &view);
 
     // Plan and stream this frame's tiles, then draw them through a paint
     // callback clipped to the viewport. Magnified pixels are drawn nearest
@@ -608,7 +608,7 @@ fn coords_label(win: &Windows, px: u32, py: u32) -> String {
 /// The corner HUD: the pixel readout (top left) and the zoom (bottom right), on
 /// translucent plates so they stay legible over any image.
 fn draw_hud(ui: &mut egui::Ui, rect: egui::Rect, readout: Option<String>, zoom: f32) {
-    use egui_viewport_hud::{HudBlock, HudCorner, HudLine, HudStyle};
+    use soluwell_viewport::hud::{HudBlock, HudCorner, HudLine, HudStyle};
     let zoom = [HudLine::new(format!("{:.0}%", zoom * 100.0))];
     let readout = readout.map(|line| [HudLine::new(line)]);
     let mut blocks = vec![HudBlock::new(HudCorner::BottomRight, &zoom)];
@@ -620,7 +620,7 @@ fn draw_hud(ui: &mut egui::Ui, rect: egui::Rect, readout: Option<String>, zoom: 
         font_size: theme::mono(ui.style()).size,
         ..HudStyle::default()
     };
-    egui_viewport_hud::draw_hud(ui, rect, &blocks, &style);
+    soluwell_viewport::hud::draw_hud(ui, rect, &blocks, &style);
 }
 
 #[cfg(test)]

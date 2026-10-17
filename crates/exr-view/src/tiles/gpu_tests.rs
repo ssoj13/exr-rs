@@ -693,13 +693,13 @@ fn single_slot_atlas_accepts_overview_when_optional_fine_uploads_are_refused() {
 /// The reported bug end to end: a texel with light and no coverage (a lens flare:
 /// `rgb > 0`, `a == 0`) goes through the real tile pass onto a cleared canvas and the
 /// real present pass over each backdrop, and keeps its light. The canvas the tile
-/// shader writes is encoded associated light (the contract of `egui_display::backdrop`),
+/// shader writes is encoded associated light (the contract of `soluwell_viewport::display::backdrop`),
 /// so the result in scRGB (linear, white 80 nits) is `light + backdrop * (1 - a)` for
 /// every texel: emissive, partial alpha and opaque.
 #[test]
 #[ignore = "needs a GPU adapter"]
 fn emissive_texel_survives_the_backdrop_present() {
-    use egui_display::{Backdrop, BackdropKind, BackdropView, Output, PresentPass, Target};
+    use soluwell_viewport::display::{Backdrop, BackdropKind, BackdropView, Output, PresentPass, Target};
     let (device, queue) = device();
     let mut gpu = TileGpu {
         atlas: TileAtlas::new(PageLayout::new(1024, 64 << 20)),

@@ -24,6 +24,8 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3b7f7f85a7e5f68090000ed7622545829afd484d210358702ae4cb97dd0c320"
 dependencies = [
+ "enumn",
+ "serde",
  "uuid",
 ]
 
@@ -84,6 +86,7 @@ dependencies = [
  "const-random",
  "getrandom 0.3.4",
  "once_cell",
+ "serde",
  "version_check",
  "zerocopy",
 ]
@@ -359,6 +362,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "av-util-core"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/ffmpeg-rs.git?branch=main#aefc8078345d3d3dbd921ec382e9e3e97186f8a8"
+dependencies = [
+ "bytemuck",
+ "log",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "av1-grain"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -549,6 +562,7 @@ source = "git+https://github.com/tracel-ai/burn?rev=93e63e8e9cf215ffb870ed621329
 dependencies = [
  "burn-autodiff",
  "burn-core",
+ "burn-flex",
  "burn-nn",
  "burn-optim",
  "burn-std",
@@ -1587,9 +1601,9 @@ name = "cryptomatte"
 version = "0.1.0"
 dependencies = [
  "cryptomatte",
- "exr-core",
+ "exr-core 0.1.0",
  "exr-test-data",
- "imath-rs",
+ "imath-rs 0.1.0",
  "log",
  "murmur3",
  "serde",
@@ -2276,6 +2290,11 @@ name = "deflate-rs"
 version = "0.1.0"
 
 [[package]]
+name = "deflate-rs"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#fd7def424cef33671a49e575387b1461de79604f"
+
+[[package]]
 name = "deflate64"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2508,6 +2527,7 @@ checksum = "0656a7530b9e2841ee7a5f983965bdd9840c32f4012f759cfd44b912cced6b34"
 dependencies = [
  "bytemuck",
  "emath",
+ "serde",
 ]
 
 [[package]]
@@ -2525,67 +2545,10 @@ dependencies = [
  "log",
  "nohash-hasher",
  "profiling",
+ "serde",
  "smallvec",
  "unicode-segmentation",
  "web-sys",
-]
-
-[[package]]
-name = "egui-attr-grid"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-colorpicker",
- "egui-file-field",
- "egui-font-picker",
- "egui-preset",
- "egui-slider",
- "egui-splitter-table",
- "egui-widgets-config",
- "serde",
-]
-
-[[package]]
-name = "egui-colorpicker"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
- "serde",
-]
-
-[[package]]
-name = "egui-display"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "bytemuck",
- "egui",
- "egui-wgpu",
- "egui-widgets-config",
- "gpu-info-rs",
- "half",
- "log",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "video-io",
- "wgpu",
-]
-
-[[package]]
-name = "egui-dock-layout"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-layout-manager",
- "egui-widgets-config",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2599,182 +2562,6 @@ dependencies = [
  "egui",
  "serde",
  "sysinfo 0.39.6",
-]
-
-[[package]]
-name = "egui-file-field"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
- "serde",
-]
-
-[[package]]
-name = "egui-font-picker"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
-]
-
-[[package]]
-name = "egui-hotkeys"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
-]
-
-[[package]]
-name = "egui-layout-manager"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
- "indexmap",
- "serde",
-]
-
-[[package]]
-name = "egui-menubar"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
-]
-
-[[package]]
-name = "egui-outliner"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
-]
-
-[[package]]
-name = "egui-phosphor"
-version = "0.14.0"
-source = "git+ssh://git@github.com/ssoj13/egui-phosphor.git?branch=main#21aeabe699eea6f8dee740580097c4e920df1702"
-dependencies = [
- "egui",
-]
-
-[[package]]
-name = "egui-prefs2"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "box-rs",
- "egui",
- "egui-attr-grid",
- "egui-widgets-config",
- "serde",
-]
-
-[[package]]
-name = "egui-preset"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
- "serde",
-]
-
-[[package]]
-name = "egui-progressbar"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
-]
-
-[[package]]
-name = "egui-ramp"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "curves",
- "egui",
- "egui-colorpicker",
- "egui-widgets-config",
-]
-
-[[package]]
-name = "egui-slider"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
-]
-
-[[package]]
-name = "egui-splitter-table"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
- "serde",
-]
-
-[[package]]
-name = "egui-statusbar"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-progressbar",
- "egui-widgets-config",
- "serde",
-]
-
-[[package]]
-name = "egui-timeline"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
-]
-
-[[package]]
-name = "egui-titlebar"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
-]
-
-[[package]]
-name = "egui-viewport-hud"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-widgets-config",
-]
-
-[[package]]
-name = "egui-viewport-toolbar"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-colorpicker",
- "egui-display",
- "egui-widgets-config",
- "serde",
 ]
 
 [[package]]
@@ -2796,17 +2583,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui-widgets-config"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#76f512bcc8a3286423aca8a45f1f516cd9724e5c"
-dependencies = [
- "egui",
- "egui-phosphor",
- "serde",
- "unicode-segmentation",
-]
-
-[[package]]
 name = "egui-winit"
 version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2825,6 +2601,21 @@ dependencies = [
  "web-time",
  "webbrowser",
  "winit",
+]
+
+[[package]]
+name = "egui_extras"
+version = "0.36.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05cbdc785020861553f230f23d330ba1fb72613b9d8e0e457f3bdc8ba6db6dcf"
+dependencies = [
+ "ahash",
+ "egui",
+ "enum-map",
+ "itertools 0.15.0",
+ "log",
+ "mime_guess2",
+ "profiling",
 ]
 
 [[package]]
@@ -2853,6 +2644,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52c8d4141cf0f60fb2f7aefaf352d3ffa5171ef0ab09731c64391801e95e48f1"
 dependencies = [
  "bytemuck",
+ "serde",
 ]
 
 [[package]]
@@ -2939,6 +2731,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum-map"
+version = "2.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6866f3bfdf8207509a033af1a75a7b08abda06bbaaeae6669323fd5a097df2e9"
+dependencies = [
+ "enum-map-derive",
+]
+
+[[package]]
+name = "enum-map-derive"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f282cfdfe92516eb26c2af8589c274c7c17681f5ecc03c18255fe741c6aa64eb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "enumn"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f9ed6b3789237c8a0c1c505af1c7eb2c560df6186f01b098c3a1064ea532f38"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "enumset"
 version = "1.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3001,6 +2824,7 @@ dependencies = [
  "parking_lot",
  "profiling",
  "self_cell",
+ "serde",
  "skrifa 0.44.0",
  "smallvec",
  "unicode-general-category",
@@ -3118,9 +2942,24 @@ version = "0.1.0"
 dependencies = [
  "codec-simd",
  "criterion",
- "deflate-rs",
+ "deflate-rs 0.1.0",
  "exr-test-data",
- "imath-rs",
+ "imath-rs 0.1.0",
+ "jph-rs",
+ "log",
+ "murmur3",
+ "rayon",
+ "smallvec",
+]
+
+[[package]]
+name = "exr-core"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#fd7def424cef33671a49e575387b1461de79604f"
+dependencies = [
+ "codec-simd",
+ "deflate-rs 0.1.0 (git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main)",
+ "imath-rs 0.1.0 (git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main)",
  "jph-rs",
  "log",
  "murmur3",
@@ -3132,9 +2971,9 @@ dependencies = [
 name = "exr-gpu"
 version = "0.1.0"
 dependencies = [
- "exr-core",
+ "exr-core 0.1.0",
  "gpu-info-rs",
- "imath-rs",
+ "imath-rs 0.1.0",
  "log",
  "pollster 1.0.1",
  "wgpu",
@@ -3144,17 +2983,17 @@ dependencies = [
 name = "exr-image"
 version = "0.1.0"
 dependencies = [
- "exr-core",
+ "exr-core 0.1.0",
  "image",
- "imath-rs",
+ "imath-rs 0.1.0",
 ]
 
 [[package]]
 name = "exr-import"
 version = "0.1.0"
 dependencies = [
- "exr-core",
- "imath-rs",
+ "exr-core 0.1.0",
+ "imath-rs 0.1.0",
  "tempfile",
  "thiserror 2.0.21",
  "vfx-io",
@@ -3168,12 +3007,12 @@ dependencies = [
  "clap",
  "cryptomatte",
  "env_logger",
- "exr-core",
+ "exr-core 0.1.0",
  "exr-import",
  "exr-test-data",
  "exr-util",
  "exr-view",
- "imath-rs",
+ "imath-rs 0.1.0",
  "log",
  "png",
  "tempfile",
@@ -3187,9 +3026,9 @@ version = "0.1.0"
 name = "exr-util"
 version = "0.1.0"
 dependencies = [
- "exr-core",
+ "exr-core 0.1.0",
  "exr-test-data",
- "imath-rs",
+ "imath-rs 0.1.0",
  "log",
 ]
 
@@ -3202,32 +3041,16 @@ dependencies = [
  "cryptomatte",
  "dirs 7.0.0",
  "egui",
- "egui-attr-grid",
- "egui-display",
- "egui-dock-layout",
  "egui-file-dialog",
- "egui-file-field",
- "egui-hotkeys",
- "egui-menubar",
- "egui-outliner",
- "egui-phosphor",
- "egui-prefs2",
- "egui-slider",
- "egui-statusbar",
- "egui-timeline",
- "egui-titlebar",
- "egui-viewport-hud",
- "egui-viewport-toolbar",
  "egui-wgpu",
- "egui-widgets-config",
  "egui-winit",
  "egui_kittest",
- "exr-core",
+ "exr-core 0.1.0",
  "exr-gpu",
  "exr-import",
  "exr-test-data",
  "gpu-info-rs",
- "imath-rs",
+ "imath-rs 0.1.0",
  "log",
  "naga",
  "ofx",
@@ -3240,6 +3063,12 @@ dependencies = [
  "scanseq",
  "serde",
  "serde_json",
+ "soluwell-chrome",
+ "soluwell-config",
+ "soluwell-controls",
+ "soluwell-panels",
+ "soluwell-timeline",
+ "soluwell-viewport",
  "sysinfo 0.39.6",
  "tempfile",
  "vfx-ocio",
@@ -3369,6 +3198,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c92d9081c7ab3bd83ef1eecdfad090f3d966e3ce74106779664114cfe1a6274"
 dependencies = [
  "bytemuck",
+ "serde",
 ]
 
 [[package]]
@@ -3446,7 +3276,7 @@ dependencies = [
 [[package]]
 name = "fractal-core"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#08305c99fd647770b13e9fdc9fc42a92ea097760"
+source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#81e5bc7e51382274efa20fa29de9475eb0662160"
 dependencies = [
  "standard-surface-bsdf",
 ]
@@ -3454,7 +3284,7 @@ dependencies = [
 [[package]]
 name = "fractal-env"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#08305c99fd647770b13e9fdc9fc42a92ea097760"
+source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#81e5bc7e51382274efa20fa29de9475eb0662160"
 dependencies = [
  "fractal-core",
  "pt-integrator",
@@ -3464,7 +3294,7 @@ dependencies = [
 [[package]]
 name = "fractal-materials"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#08305c99fd647770b13e9fdc9fc42a92ea097760"
+source = "git+ssh://git@github.com/ssoj13/fractal-rs.git?branch=main#81e5bc7e51382274efa20fa29de9475eb0662160"
 
 [[package]]
 name = "futures-channel"
@@ -4236,6 +4066,11 @@ name = "imath-rs"
 version = "0.1.0"
 
 [[package]]
+name = "imath-rs"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#fd7def424cef33671a49e575387b1461de79604f"
+
+[[package]]
 name = "imgref"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4352,10 +4187,12 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
+ "jiff-tzdb-platform",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
+ "windows-link",
 ]
 
 [[package]]
@@ -4378,6 +4215,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "jiff-tzdb"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa8377070c6bae868759445e5a77f66d84f0b72f3a054bfb00e6d038b8282da7"
+
+[[package]]
+name = "jiff-tzdb-platform"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8"
+dependencies = [
+ "jiff-tzdb",
 ]
 
 [[package]]
@@ -4809,6 +4661,24 @@ checksum = "5f98efec8807c63c752b5bd61f862c165c115b0a35685bdcfd9238c7aeb592b7"
 dependencies = [
  "cfg-if",
  "unicode-width",
+]
+
+[[package]]
+name = "mime"
+version = "0.3.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+
+[[package]]
+name = "mime_guess2"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1706dc14a2e140dec0a7a07109d9a3d5890b81e85bd6c60b906b249a77adf0ca"
+dependencies = [
+ "mime",
+ "phf",
+ "phf_shared",
+ "unicase",
 ]
 
 [[package]]
@@ -5512,7 +5382,7 @@ dependencies = [
 [[package]]
 name = "ofx"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "cudarc",
  "gpu-info-rs",
@@ -5524,17 +5394,18 @@ dependencies = [
  "ofx-format",
  "ofx-preset",
  "ofx-sys",
+ "vfx-core-math",
 ]
 
 [[package]]
 name = "ofx-banner"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 
 [[package]]
 name = "ofx-cuda"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "bytemuck",
  "cudarc",
@@ -5544,7 +5415,7 @@ dependencies = [
 [[package]]
 name = "ofx-density"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -5553,7 +5424,7 @@ dependencies = [
 [[package]]
 name = "ofx-effects"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "gpu-info-rs",
  "ofx",
@@ -5565,6 +5436,7 @@ dependencies = [
  "ofx-fractal",
  "ofx-fs",
  "ofx-gen",
+ "ofx-ml",
  "ofx-motion",
  "ofx-noise",
  "ofx-sim",
@@ -5574,17 +5446,18 @@ dependencies = [
  "vfx-compute",
  "vfx-core",
  "vfx-stmap",
+ "wgpu-post",
 ]
 
 [[package]]
 name = "ofx-expiry"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 
 [[package]]
 name = "ofx-finish"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "bytemuck",
  "libm",
@@ -5596,7 +5469,7 @@ dependencies = [
 [[package]]
 name = "ofx-flare"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -5606,15 +5479,16 @@ dependencies = [
 [[package]]
 name = "ofx-format"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "ofx-sys",
+ "vfx-core-math",
 ]
 
 [[package]]
 name = "ofx-fractal"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "cudarc",
  "fractal-core",
@@ -5632,15 +5506,16 @@ dependencies = [
 [[package]]
 name = "ofx-fs"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
+ "sha2 0.10.9",
  "tempfile",
 ]
 
 [[package]]
 name = "ofx-gen"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "bytemuck",
  "gpu-info-rs",
@@ -5649,12 +5524,14 @@ dependencies = [
  "ofx-format",
  "realfft",
  "rustfft",
+ "vfx-core",
+ "vfx-core-math",
 ]
 
 [[package]]
 name = "ofx-host"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5668,29 +5545,30 @@ dependencies = [
  "ofx-preset",
  "ofx-sys",
  "smallvec",
+ "vfx-core-math",
 ]
 
 [[package]]
 name = "ofx-host-egui"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "anyhow",
  "egui",
- "egui-attr-grid",
- "egui-ramp",
- "egui-titlebar",
- "egui-widgets-config",
  "ofx-host",
  "ofx-preset",
  "ofx-runtime",
  "ofx-sys",
+ "soluwell-chrome",
+ "soluwell-config",
+ "soluwell-controls",
+ "soluwell-panels",
 ]
 
 [[package]]
 name = "ofx-host-gl"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "anyhow",
  "libloading 0.9.0",
@@ -5700,7 +5578,7 @@ dependencies = [
 [[package]]
 name = "ofx-host-wgpu"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "anyhow",
  "ash",
@@ -5710,13 +5588,36 @@ dependencies = [
  "ofx-host",
  "ofx-host-gl",
  "pollster 1.0.1",
+ "vfx-core-math",
  "wgpu",
+]
+
+[[package]]
+name = "ofx-ml"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
+dependencies = [
+ "burn",
+ "burn-store",
+ "crc32fast",
+ "gpu-info-rs",
+ "miniz_oxide 0.8.9",
+ "ofx-fs",
+ "ofx-gen",
+ "ofx-preset",
+ "oidn-tza",
+ "regex",
+ "serde",
+ "toml",
+ "tracing",
+ "ureq",
+ "vfx-compute",
 ]
 
 [[package]]
 name = "ofx-motion"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "bytemuck",
  "gpu-info-rs",
@@ -5727,12 +5628,13 @@ dependencies = [
  "tracing",
  "vfx-compute",
  "vfx-core",
+ "vfx-core-math",
 ]
 
 [[package]]
 name = "ofx-noise"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -5741,7 +5643,7 @@ dependencies = [
 [[package]]
 name = "ofx-preset"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "ofx-fs",
  "serde",
@@ -5751,7 +5653,7 @@ dependencies = [
 [[package]]
 name = "ofx-runtime"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "anyhow",
  "gpu-info-rs",
@@ -5766,7 +5668,7 @@ dependencies = [
 [[package]]
 name = "ofx-sim"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -5775,12 +5677,12 @@ dependencies = [
 [[package]]
 name = "ofx-sys"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 
 [[package]]
 name = "ofx-warp"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#8d828d032ffeb8120a8a41b19f93cdf012a15d30"
+source = "git+ssh://git@github.com/ssoj13/ofx-rs.git?branch=main#87b793bb84eb5a8e7e5b33c68015c25357c342a2"
 dependencies = [
  "ofx-cuda",
  "ofx-gen",
@@ -5789,7 +5691,7 @@ dependencies = [
 [[package]]
 name = "oidn-model"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oidn-rs.git?branch=main#63b090275fde85ca515eae975747c8f90300808e"
+source = "git+ssh://git@github.com/ssoj13/oidn-rs.git?branch=main#50c3c6f4fa3988d67ab7395565b403182da0c1e3"
 dependencies = [
  "burn",
  "oidn-tza",
@@ -5799,7 +5701,7 @@ dependencies = [
 [[package]]
 name = "oidn-rs"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oidn-rs.git?branch=main#63b090275fde85ca515eae975747c8f90300808e"
+source = "git+ssh://git@github.com/ssoj13/oidn-rs.git?branch=main#50c3c6f4fa3988d67ab7395565b403182da0c1e3"
 dependencies = [
  "burn",
  "bytemuck",
@@ -5813,7 +5715,7 @@ dependencies = [
 [[package]]
 name = "oidn-tza"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oidn-rs.git?branch=main#63b090275fde85ca515eae975747c8f90300808e"
+source = "git+ssh://git@github.com/ssoj13/oidn-rs.git?branch=main#50c3c6f4fa3988d67ab7395565b403182da0c1e3"
 dependencies = [
  "bytemuck",
  "bytes",
@@ -6002,6 +5904,50 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap",
  "serde",
+]
+
+[[package]]
+name = "phf"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
+dependencies = [
+ "phf_macros",
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_generator"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
+dependencies = [
+ "phf_shared",
+ "rand 0.8.8",
+]
+
+[[package]]
+name = "phf_macros"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f84ac04429c13a7ff43785d75ad27569f2951ce0ffd30a3321230db2fc727216"
+dependencies = [
+ "phf_generator",
+ "phf_shared",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "unicase",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
+dependencies = [
+ "siphasher",
+ "unicase",
 ]
 
 [[package]]
@@ -7437,6 +7383,94 @@ dependencies = [
 ]
 
 [[package]]
+name = "soluwell-chrome"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#4338de33475858d59524b876d3d6e572e1d48530"
+dependencies = [
+ "egui",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "soluwell-config",
+ "soluwell-controls",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "soluwell-config"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#4338de33475858d59524b876d3d6e572e1d48530"
+dependencies = [
+ "egui",
+ "serde",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "soluwell-controls"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#4338de33475858d59524b876d3d6e572e1d48530"
+dependencies = [
+ "curves",
+ "egui",
+ "serde",
+ "soluwell-config",
+]
+
+[[package]]
+name = "soluwell-panels"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#4338de33475858d59524b876d3d6e572e1d48530"
+dependencies = [
+ "box-rs",
+ "egui",
+ "egui_extras",
+ "serde",
+ "soluwell-config",
+ "soluwell-controls",
+]
+
+[[package]]
+name = "soluwell-timeline"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#4338de33475858d59524b876d3d6e572e1d48530"
+dependencies = [
+ "egui",
+ "exr-core 0.1.0 (git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main)",
+ "half",
+ "image",
+ "imath-rs 0.1.0 (git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main)",
+ "log",
+ "serde",
+ "serde_json",
+ "soluwell-config",
+ "soluwell-controls",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "soluwell-viewport"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#4338de33475858d59524b876d3d6e572e1d48530"
+dependencies = [
+ "bytemuck",
+ "egui",
+ "egui-wgpu",
+ "enumset",
+ "glam",
+ "gpu-info-rs",
+ "half",
+ "log",
+ "serde",
+ "serde_json",
+ "soluwell-config",
+ "soluwell-controls",
+ "thiserror 2.0.21",
+ "video-io",
+ "wgpu",
+]
+
+[[package]]
 name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8189,6 +8223,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
+name = "unicase"
+version = "2.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357cc3acc6a036009fd6c973ed009037c732d60d0b4f6c673e9041497482a28f"
+
+[[package]]
 name = "unicode-bidi"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8354,6 +8394,9 @@ name = "uuid"
 version = "1.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97277d36b9c3ace13e58fa6e753f8b0bbbf302a18dd193240d70f9e29681059a"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "v_frame"
@@ -8423,7 +8466,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vfx-compute"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#3ccdfa1aa5d2fde7fc64d3ab599545b8db8eaf20"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#74f734a0e848ccddfccde2302479a524510e9e0a"
 dependencies = [
  "bytemuck",
  "gpu-info-rs",
@@ -8433,6 +8476,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "vfx-core",
+ "vfx-core-math",
  "vfx-lut",
  "vfx-math",
  "wgpu",
@@ -8441,16 +8485,25 @@ dependencies = [
 [[package]]
 name = "vfx-core"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#74f734a0e848ccddfccde2302479a524510e9e0a"
 dependencies = [
  "half",
  "thiserror 2.0.21",
+ "vfx-core-math",
+]
+
+[[package]]
+name = "vfx-core-math"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#74f734a0e848ccddfccde2302479a524510e9e0a"
+dependencies = [
+ "libm",
 ]
 
 [[package]]
 name = "vfx-icc"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#74f734a0e848ccddfccde2302479a524510e9e0a"
 dependencies = [
  "bytemuck",
  "lcms-rs",
@@ -8460,7 +8513,7 @@ dependencies = [
 [[package]]
 name = "vfx-io"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#74f734a0e848ccddfccde2302479a524510e9e0a"
 dependencies = [
  "byteorder",
  "crc32fast",
@@ -8486,6 +8539,7 @@ dependencies = [
  "tiff",
  "tracing",
  "vfx-core",
+ "vfx-core-math",
  "vfx-math",
  "vfx-transfer",
  "weezl",
@@ -8494,18 +8548,19 @@ dependencies = [
 [[package]]
 name = "vfx-lut"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#74f734a0e848ccddfccde2302479a524510e9e0a"
 dependencies = [
  "quick-xml 0.42.0",
  "thiserror 2.0.21",
  "vfx-core",
+ "vfx-core-math",
  "wide",
 ]
 
 [[package]]
 name = "vfx-math"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#74f734a0e848ccddfccde2302479a524510e9e0a"
 dependencies = [
  "glam",
  "vfx-core",
@@ -8515,7 +8570,7 @@ dependencies = [
 [[package]]
 name = "vfx-ocio"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#74f734a0e848ccddfccde2302479a524510e9e0a"
 dependencies = [
  "bytemuck",
  "glam",
@@ -8540,7 +8595,7 @@ dependencies = [
 [[package]]
 name = "vfx-primaries"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#74f734a0e848ccddfccde2302479a524510e9e0a"
 dependencies = [
  "vfx-core",
  "vfx-math",
@@ -8549,7 +8604,7 @@ dependencies = [
 [[package]]
 name = "vfx-stmap"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#3ccdfa1aa5d2fde7fc64d3ab599545b8db8eaf20"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#74f734a0e848ccddfccde2302479a524510e9e0a"
 dependencies = [
  "thiserror 2.0.21",
  "vfx-core",
@@ -8558,7 +8613,7 @@ dependencies = [
 [[package]]
 name = "vfx-transfer"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#fcad4c01b9c124c0372d59b4a827da02a034c9ae"
+source = "git+ssh://git@github.com/ssoj13/oiio-rs.git?branch=main#74f734a0e848ccddfccde2302479a524510e9e0a"
 dependencies = [
  "vfx-core",
 ]
@@ -8566,14 +8621,17 @@ dependencies = [
 [[package]]
 name = "video-io"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/video-io-rs.git?branch=main#96899581c30daaa56b471894d504c8be4e692fd2"
+source = "git+ssh://git@github.com/ssoj13/video-io-rs.git?branch=main#b11e17dd465aeb1def786712cfa12c8902577e9b"
 dependencies = [
+ "av-util-core",
  "half",
+ "image",
+ "jiff",
  "log",
  "png",
  "serde",
- "tempfile",
  "thiserror 2.0.21",
+ "tiff",
 ]
 
 [[package]]
@@ -9034,6 +9092,16 @@ checksum = "d2f62e73117bb7a62bfd9c5a5841438a823f6566c6442a808ee269d2d055c081"
 dependencies = [
  "naga",
  "wgpu-types",
+]
+
+[[package]]
+name = "wgpu-post"
+version = "0.1.0"
+source = "git+ssh://git@github.com/ssoj13/wgpu-fx-rs.git?branch=main#f9ab00516eeac25ca806940fce1f4db812df4daa"
+dependencies = [
+ "bytemuck",
+ "thiserror 2.0.21",
+ "wgpu",
 ]
 
 [[package]]

@@ -150,11 +150,12 @@ impl Texels<'_> {
 /// Interleave half `slots` into `out` (`n` RGBA half texels), reusing its
 /// allocation; every texel is written, so only growth is zeroed.
 fn interleave(out: &mut Vec<u16>, slots: &[HalfSlot<'_>; 4], n: usize) {
+    use rayon::prelude::*;
     out.truncate(n * 4);
     out.resize(n * 4, 0);
     // Blocks small enough that all four slot passes hit the cache.
     const BLOCK: usize = 4096;
-    for (b, texels) in out.as_chunks_mut::<4>().0.chunks_mut(BLOCK).enumerate() {
+    let fill_block = |(b, texels): (usize, &mut [[u16; 4]])| {
         let at = b * BLOCK;
         for (slot, src) in slots.iter().enumerate() {
             match src {
@@ -165,6 +166,12 @@ fn interleave(out: &mut Vec<u16>, slots: &[HalfSlot<'_>; 4], n: usize) {
                 HalfSlot::Const(h) => texels.iter_mut().for_each(|t| t[slot] = h.bits()),
             }
         }
+    };
+    let (texels, _) = out.as_chunks_mut::<4>();
+    if n <= BLOCK {
+        texels.chunks_mut(BLOCK).enumerate().for_each(fill_block);
+    } else {
+        texels.par_chunks_mut(BLOCK).enumerate().for_each(fill_block);
     }
 }
 

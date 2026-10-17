@@ -52,7 +52,7 @@ scancache = { git = "ssh://git@github.com/ssoj13/scancache-rs.git", branch = "ma
 # GUI stack — versions pinned together so a single wgpu/naga copy builds:
 # wgpu 30 ↔ egui 0.36 ↔ egui-wgpu 0.36.
 egui = "0.36"
-egui-display = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+soluwell-viewport = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
 # Display-referred output maths shared with egui-display and Playa (`export.rs`: the HLG curve and
 # reference peak, the PNG encoding labels). `export` only: no ffmpeg backend (the viewer encodes no
 # video). Pulls neither egui nor exr-rs (no cycle).
@@ -61,24 +61,14 @@ video-io = { git = "ssh://git@github.com/ssoj13/video-io-rs.git", branch = "main
 # Playa and vfx-view): design tokens (fonts/metrics), the timeline and status bar that started
 # in this viewer, the layer/channel tree, the read-only attribute grid, the command-table menu
 # bar and the corner HUD. Pinned to egui 0.36 like this crate.
-egui-widgets-config = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-egui-timeline = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-egui-statusbar = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-egui-outliner = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-egui-attr-grid = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-egui-menubar = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-egui-hotkeys = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-egui-viewport-hud = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+soluwell-config = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+soluwell-timeline = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+soluwell-chrome = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+soluwell-panels = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
 # The viewport's collapsible control strip (the display dials), tinted collapsible sections
 # (Metadata panel) and the path field with a Browse button (OCIO config).
-egui-viewport-toolbar = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-egui-titlebar = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-egui-slider = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-egui-file-field = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-egui-dock-layout = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-egui-prefs2 = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+soluwell-controls = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
 # Phosphor icon font (our fork: upstream has no egui 0.36 release), the icon set the widgets use.
-egui-phosphor = { git = "ssh://git@github.com/ssoj13/egui-phosphor.git", branch = "main" }
 # In-app File > Open dialog (immediate mode, directory listing on a thread), as in Playa.
 egui-file-dialog = "0.15"
 # PNG writer for File > Save view / --screenshot (already in the tree through egui-winit).

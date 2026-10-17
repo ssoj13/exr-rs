@@ -18,9 +18,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use egui_attr_grid::{AttrField, AttrGridState, AttrValue};
+use soluwell_panels::attr_grid::{AttrField, AttrGridState, AttrValue};
 use cryptomatte::{Manifest, RankedLayer, discover_path, extract_coverage_with, load_manifest};
-use egui_widgets_config::reset;
+use soluwell_config::reset;
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, WindowEvent};
@@ -157,7 +157,7 @@ pub struct ViewControls {
     /// Tone operator of the colour image (`transfer::tonemap::*`); persisted.
     pub tonemap: u32,
     /// What shows under the image's alpha (the toolbar's drop-up); persisted.
-    pub backdrop: egui_display::Backdrop,
+    pub backdrop: soluwell_viewport::display::Backdrop,
     /// The OCIO display transform (the Colour panel); when active it replaces the
     /// tone operator and the sRGB encode of the colour image. Its choice is persisted.
     pub colour: crate::ocio::State,
@@ -181,7 +181,7 @@ impl Default for ViewControls {
             crypto_name: String::new(),
             hovered_pixel: None,
             tonemap: crate::transfer::tonemap::NONE,
-            backdrop: egui_display::Backdrop::default(),
+            backdrop: soluwell_viewport::display::Backdrop::default(),
             colour: crate::ocio::State::new(crate::ocio::Sel::default()),
             target: crate::present::Target::default(),
             nav: None,
@@ -498,6 +498,8 @@ pub struct SequenceState {
     /// scrub settles (`Scancache::set_scrub_settle`), instead of the play-window
     /// read-ahead thrashing on every drag step.
     pub scrubbing: bool,
+    /// Set by the transport timeline while its scrub gesture is live.
+    pub timeline_scrub: bool,
 }
 
 impl SequenceState {
@@ -587,7 +589,7 @@ impl SequenceState {
     /// pan/zoom (`ViewNav`, on `AppState`) is applied by the caller after this.
     fn ensure_display(&mut self, tiles: Option<&DisplayTarget>) -> Option<&mut ImageBackend> {
         let cur = self.playback.current();
-        if self.playback.playing && !self.scrubbing
+        if self.playback.playing && !(self.scrubbing || self.timeline_scrub)
             && self.display.as_ref().is_some_and(|d| tiles.is_some_and(|t| !t.can_advance(d.frame.id)))
         {
             return self.display.as_mut();
@@ -687,7 +689,7 @@ pub struct AppState {
     /// sized once).
     pub ram_budget: usize,
     /// The Settings panel (selected category, fonts).
-    pub prefs: egui_prefs2::PrefsPanelState,
+    pub prefs: soluwell_panels::prefs::PrefsPanelState,
     /// The window output as it is (the viewer fills it; Settings and the status bar read it).
     pub display: DisplayStatus,
     /// The shown single image's file, re-opened when it changes on disk (a render
@@ -699,7 +701,7 @@ pub struct AppState {
     /// The File > Open dialog.
     pub file_pick: FilePick,
     /// The named-layout bar (keeps its rename field between frames).
-    pub layout_bar: egui_dock_layout::DockLayoutBar,
+    pub layout_bar: soluwell_chrome::dock_layout::DockLayoutBar,
     /// The Metadata grid's column split (session only).
     pub metadata_grid: AttrGridState,
     /// Actions asked from inside a panel (the toolbar's snapshot menu, a tab's context
@@ -738,11 +740,29 @@ pub struct AppState {
 impl AppState {
     /// Build the state, applying the saved display controls from `config` so
     /// exposure / gamma / channel persist across runs.
+    #[cfg(test)]
     fn new(
         initial: Option<PathBuf>,
         config: Config,
         auto_detect: bool,
         wake: scancache::Wake,
+    ) -> Self {
+        Self::with_effects(
+            initial,
+            config,
+            auto_detect,
+            wake,
+            #[cfg(feature = "ofx")]
+            crate::ofx::OfxEffects::new(),
+        )
+    }
+
+    fn with_effects(
+        initial: Option<PathBuf>,
+        config: Config,
+        auto_detect: bool,
+        wake: scancache::Wake,
+        #[cfg(feature = "ofx")] effects: crate::ofx::OfxEffects,
     ) -> Self {
         let config = Config { budgets: config.budgets.clamped(), ..config };
         let ram_budget = ram_budget(config.budgets.ram);
@@ -793,7 +813,7 @@ impl AppState {
             watch: None,
             reloading: false,
             file_pick,
-            layout_bar: egui_dock_layout::DockLayoutBar::new(),
+            layout_bar: soluwell_chrome::dock_layout::DockLayoutBar::new(),
             metadata_grid: AttrGridState::default(),
             queue: Vec::new(),
             open_tabs: Vec::new(),
@@ -805,7 +825,7 @@ impl AppState {
             wake,
             pending_open: None,
             #[cfg(feature = "ofx")]
-            effects: crate::ofx::OfxEffects::new(),
+            effects,
         }
     }
 
@@ -1116,6 +1136,7 @@ impl AppState {
             displayed_frame: None,
             last_seen: cur,
             scrubbing: false,
+            timeline_scrub: false,
         });
     }
 
@@ -1143,7 +1164,7 @@ impl AppState {
         s.playback.tick();
         let cur = s.playback.current();
         let range = (s.playback.first(), s.playback.last());
-        let ph = if s.scrubbing {
+        let ph = if s.scrubbing || s.timeline_scrub {
             scancache::Playhead::scrubbing(cur)
         } else if s.playback.playing {
             let dir = if s.playback.reverse { scancache::Dir::Backward } else { scancache::Dir::Forward };
@@ -1266,7 +1287,7 @@ impl AppState {
             // Single image: no sequence — no scrub/playhead (LMB pins a pixel).
             Self::sync_crypto_overlay(crypto.as_ref(), &crypto_layer, &crypto_name, img);
             #[cfg(feature = "ofx")]
-            {
+            if effects.active() {
                 effects.set_time(0.0);
                 let frame = img.decoded();
                 let identity = crate::ofx::InputIdentity {
@@ -1315,7 +1336,7 @@ impl AppState {
                 self.nav.apply_to(img);
                 Self::sync_crypto_overlay(crypto.as_ref(), &crypto_layer, &crypto_name, img);
                 #[cfg(feature = "ofx")]
-                {
+                if effects.active() {
                     effects.set_time(f64::from(shown));
                     let frame = img.decoded();
                     let rate = f64::from(s.playback.fps);
@@ -1373,7 +1394,11 @@ impl AppState {
             }
             // Apply the on-screen scrubber's seek (after the cache borrow ends).
             if let Some(frac) = scrub_to {
+                let prev = s.playback.pos();
                 s.playback.scrub_fraction(frac);
+                if s.playback.pos() != prev {
+                    ui.ctx().request_repaint();
+                }
             }
             return;
         }
@@ -1412,7 +1437,16 @@ impl AppState {
         let src: Option<&mut ImageBackend> = if let Some(img) = self.image.as_mut() {
             Some(img)
         } else if let Some(s) = self.seq.as_mut() {
-            s.ensure_display(self.viewport_active.then_some(display_gpu))
+            // When the viewport is active and has already established `s.display`,
+            // read that exact backend rather than calling `s.ensure_display`: if the
+            // user just scrubbed at the end of `display_viewport`, `s.playback` points
+            // to the next frame, and calling `ensure_display` here would swap `s.display`
+            // mid-frame (materializing and uploading two different frames in one UI tick).
+            if self.viewport_active && s.display.is_some() {
+                s.display.as_mut()
+            } else {
+                s.ensure_display(self.viewport_active.then_some(display_gpu))
+            }
         } else {
             None
         };
@@ -1487,6 +1521,7 @@ impl AppState {
             device: gpu.device,
             queue: gpu.queue,
             renderer: gpu.renderer,
+            source_key: display_gpu.scope_source_key(),
         };
         panel.tick(&mut ctx, &src_view, src_w, src_h, out_w, out_h);
         show_panel(panel, ui, square);
@@ -1529,7 +1564,7 @@ impl AppState {
     /// The Settings tab: memory, output, UI and Colour, the one home of the OCIO controls
     /// (`ocio::State::ui`; the config field's Browse opens the config file dialog).
     pub fn ui_settings(&mut self, ui: &mut egui::Ui) {
-        use egui_phosphor::regular as icon;
+        use soluwell_config::phosphor::regular as icon;
         let target = self.target();
         let config = &mut self.config;
         let display = &self.display;
@@ -1540,14 +1575,14 @@ impl AppState {
         let mut category = self.prefs.selected;
         let fonts = config.fonts;
         let categories = [
-            egui_prefs2::Category::new(icon::MEMORY, "Memory"),
-            egui_prefs2::Category::new(icon::MONITOR, "Display"),
-            egui_prefs2::Category::new(icon::TEXT_AA, "UI"),
-            egui_prefs2::Category::new(icon::MONITOR, "Colour"),
+            soluwell_panels::prefs::Category::new(icon::MEMORY, "Memory"),
+            soluwell_panels::prefs::Category::new(icon::MONITOR, "Display"),
+            soluwell_panels::prefs::Category::new(icon::TEXT_AA, "UI"),
+            soluwell_panels::prefs::Category::new(icon::MONITOR, "Colour"),
         ];
         // The footer's confirmed "Reset to Defaults" resets the category shown.
-        let opts = egui_prefs2::PanelOpts { reset: true, ..Default::default() };
-        let reset = egui_prefs2::draw(
+        let opts = soluwell_panels::prefs::PanelOpts { reset: true, ..Default::default() };
+        let reset = soluwell_panels::prefs::draw(
             ui,
             "exr_view.settings",
             &mut self.prefs,
@@ -1563,7 +1598,7 @@ impl AppState {
                         open_colour = ui.button("Colour management & monitor presets…").clicked();
                     }
                     3 => {
-                        egui_prefs2::section_header(ui, "Colour management");
+                        soluwell_panels::prefs::section_header(ui, "Colour management");
                         ui.label(format!("Window output: {}.", display.active.label()));
                         ui.label("Monitor presets choose the image rendering. HDR 1000 nits is a rendering peak; SDR reference white controls the brightness of the UI and relative-white image values.");
                         open_display = ui.button("Display output & reference white…").clicked();
@@ -1810,7 +1845,7 @@ impl AppState {
                 }
                 // Header values are text to copy (theme.rs turns label selection off elsewhere).
                 ui.style_mut().interaction.selectable_labels = true;
-                egui_attr_grid::render_grid(ui, &mut fields, grid, &HashSet::new());
+                soluwell_panels::attr_grid::render_grid(ui, &mut fields, grid, &HashSet::new());
             }
             None => {
                 ui.label("EXR header attributes appear here once a file is loaded.");
@@ -1908,10 +1943,10 @@ impl AppState {
     /// These feed the GPU colour-pass uniforms (no CPU processing).
     fn ui_toolbar(&mut self, ui: &mut egui::Ui) {
         // Display dials. Ctrl+click resets one to its default (the shared
-        // `egui_widgets_config::reset` gesture): exposure -> 0 EV, gamma -> 1.0, display -> None,
+        // `soluwell_config::reset` gesture): exposure -> 0 EV, gamma -> 1.0, display -> None,
         // channel -> RGBA.
         ui.label("Exposure");
-        egui_viewport_toolbar::exposure_control(
+        soluwell_viewport::toolbar::exposure_control(
             ui,
             &mut self.controls.exposure,
             &mut self.controls.exposure_hold,
@@ -1922,7 +1957,7 @@ impl AppState {
         ui.separator();
         ui.label("Gamma");
         // A SlimSlider owns the reset gesture (no Ctrl-press preview of a wrong value).
-        ui.add(egui_slider::SlimSlider::new(&mut self.controls.gamma, 0.1..=4.0).default_value(1.0).decimals(2))
+        ui.add(soluwell_controls::slider::SlimSlider::new(&mut self.controls.gamma, 0.1..=4.0).default_value(1.0).decimals(2))
             .on_hover_text("Display gamma dial — pow(c, 1/gamma) before the sRGB encode.\n1.0 = off (correct sRGB look).\nCtrl+click: reset to 1.0.");
         ui.separator();
         // One control for the display transform of the colour image: a built-in
@@ -2125,14 +2160,14 @@ impl AppState {
         // What shows under the image's alpha: composited by the present pass (`viewport::show`).
         ui.separator();
         // Persisted with the other view controls at exit (`config.backdrop`).
-        egui_viewport_toolbar::backdrop_picker(ui, &mut self.controls.backdrop);
+        soluwell_viewport::toolbar::backdrop_picker(ui, &mut self.controls.backdrop);
         // One snapshot button keeps the strip narrow: a click is File > Save view as PNG, the
         // right-click menu offers the HDR save. Both are the registry's actions (run by `build_ui`).
         ui.separator();
         let png = commands::find("file.save_view");
         let on = png.is_some_and(|c| commands::enabled(&c.action, self.avail()));
         let snap = ui
-            .add_enabled(on, egui::Button::new(egui_phosphor::regular::CAMERA))
+            .add_enabled(on, egui::Button::new(soluwell_config::phosphor::regular::CAMERA))
             .on_hover_text("Save the view as PNG as displayed · right-click: HDR (EXR / PQ PNG)");
         if snap.clicked() {
             self.queue.push(Action::SaveView);
@@ -2174,8 +2209,8 @@ impl AppState {
     /// is registered as part of the viewport for the keys.
     fn toolbar_strip(&mut self, ui: &mut egui::Ui, rect: egui::Rect) -> (viewport::Strip, f32) {
         let mut state = self.config.toolbar;
-        let widget = egui_viewport_toolbar::ViewportToolbar {
-            edge: egui_viewport_toolbar::ToolbarEdge::Top,
+        let widget = soluwell_viewport::toolbar::ViewportToolbar {
+            edge: soluwell_viewport::toolbar::ToolbarEdge::Top,
             margin: 4.0,
             id_salt: "exr_view_toolbar",
             expand_tooltip: "Show the display controls",
@@ -2204,7 +2239,7 @@ impl AppState {
         ui.vertical(|ui| {
             // Row 1 — transport controls, frame readout, fps, loop.
             ui.horizontal(|ui| {
-                use egui_phosphor::regular as icon;
+                use soluwell_config::phosphor::regular as icon;
                 let ctx = ui.ctx().clone();
                 // "Label (key)" from the registry, so the hover names the real key.
                 let tip = |id: &str| {
@@ -2237,7 +2272,7 @@ impl AppState {
                 ui.label("fps");
                 // The shared numeric field: Ctrl slows the drag, Shift snaps, Ctrl+click resets.
                 ui.add(
-                    egui_widgets_config::num::drag(&mut pb.fps)
+                    soluwell_config::num::drag(&mut pb.fps)
                         .speed(0.5)
                         .range(0.1..=240.0)
                         .reset(crate::persist::DEFAULT_FPS)
@@ -2271,10 +2306,10 @@ impl AppState {
             let pos = s.playback.pos();
             let count = s.playback.frame_count();
             if count > 1 {
-                let indices = s.playback.indices().to_vec();
                 let seek = {
+                    let indices = s.playback.indices();
                     let (cache, fails) = (&s.cache, &s.fails);
-                    egui_timeline::Timeline::new()
+                    soluwell_timeline::timeline::Timeline::new()
                         .height(20.0)
                         .show(
                             ui,
@@ -2286,7 +2321,7 @@ impl AppState {
                                     Some(CACHE_LOADED)
                                 } else if cache.is_in_flight(f) {
                                     Some(CACHE_INFLIGHT)
-                                } else if fails.msg(f).is_some() {
+                                } else if fails.has(f) {
                                     Some(CACHE_FAILED)
                                 } else {
                                     None
@@ -2296,8 +2331,12 @@ impl AppState {
                         )
                         .seek
                 };
+                s.timeline_scrub = seek.is_some();
                 if let Some(slot) = seek {
                     s.playback.set_pos(slot);
+                    if s.playback.pos() != pos {
+                        ui.ctx().request_repaint();
+                    }
                 }
             }
         });
@@ -2337,7 +2376,7 @@ struct Viewer {
     /// The canvas everything is drawn into and the pass that encodes it for the surface.
     present: crate::present::PresentPass,
     /// The canvas failure being reported (frames are skipped while it lasts), logged once.
-    canvas_err: Option<egui_display::CanvasError>,
+    canvas_err: Option<soluwell_viewport::display::CanvasError>,
     /// The output last asked for (`config.display.output`); a new ask re-applies.
     asked: crate::present::Output,
     /// The monitor the window is on (a move to another one re-reads its HDR figures).
@@ -2385,7 +2424,7 @@ impl Viewer {
 
         let egui_ctx = egui::Context::default();
         // egui draws into the present pass's canvas (below): `show_backdrop` may clear it.
-        egui_display::set_renderer_target(&egui_ctx, egui_display::RendererTarget::CANVAS);
+        soluwell_viewport::display::set_renderer_target(&egui_ctx, soluwell_viewport::display::RendererTarget::CANVAS);
         theme::install_fonts(&egui_ctx);
         theme::set(&egui_ctx, &theme::Theme::dark_theme(), &config.fonts);
 
@@ -2413,7 +2452,19 @@ impl Viewer {
         egui_renderer.callback_resources.insert(crate::tiles::render::TileGpu::new(&gpu.device, vram));
         let present = crate::present::PresentPass::new(&gpu.device, gpu.config.format, gpu.output);
         let dock = Dock::restore(config.dock.as_deref());
-        let mut app_state = AppState::new(initial, config, auto_detect, wake);
+        let mut app_state = AppState::with_effects(
+            initial,
+            config,
+            auto_detect,
+            wake,
+            #[cfg(feature = "ofx")]
+            crate::ofx::OfxEffects::with_device(
+                gpu.adapter.clone(),
+                gpu.device.clone(),
+                gpu.queue.clone(),
+                ofx_runtime::ScanSpec::standard(),
+            ),
+        );
         app_state
             .controls
             .colour
@@ -2840,15 +2891,15 @@ impl Viewer {
 }
 
 /// Give the present pass the backdrops the UI showed this frame (`viewport::show` publishes them
-/// through `egui_display::show_backdrop`), or none when the frame showed none. The viewer draws
+/// through `soluwell_viewport::display::show_backdrop`), or none when the frame showed none. The viewer draws
 /// one egui viewport (the root: viewports stay embedded), so only its backdrops are presented.
-fn hand_backdrop(ctx: &egui::Context, slot: &mut Vec<egui_display::BackdropUniform>) {
-    *slot = egui_display::take_backdrops(ctx, egui::ViewportId::ROOT);
+fn hand_backdrop(ctx: &egui::Context, slot: &mut Vec<soluwell_viewport::display::BackdropUniform>) {
+    *slot = soluwell_viewport::display::take_backdrops(ctx, egui::ViewportId::ROOT);
 }
 
 /// Record the canvas outcome of this frame, logging a failure once per distinct error (a window
 /// over the texture limit fails every frame until it shrinks) and the recovery.
-fn note_canvas(last: &mut Option<egui_display::CanvasError>, now: Option<egui_display::CanvasError>) {
+fn note_canvas(last: &mut Option<soluwell_viewport::display::CanvasError>, now: Option<soluwell_viewport::display::CanvasError>) {
     if *last == now {
         return;
     }
@@ -2951,7 +3002,7 @@ fn build_ui(
             let Some(cmd) = commands::find(id) else {
                 // `menu_and_registry_agree` makes this unreachable; a visible marker
                 // beats a row that lies about its name.
-                return egui_menubar::ItemState::from_label(format!("?{id}")).enabled(false);
+                return soluwell_chrome::menubar::ItemState::from_label(format!("?{id}")).enabled(false);
             };
             let checked = match &cmd.action {
                 Action::Fullscreen => fullscreen,
@@ -2960,7 +3011,7 @@ fn build_ui(
                 Action::Tab(tab) => tabs.contains(tab),
                 _ => false,
             };
-            egui_menubar::ItemState::from_label(cmd.label)
+            soluwell_chrome::menubar::ItemState::from_label(cmd.label)
                 .shortcut(commands::shortcut_text(&ctx, cmd))
                 .checked(checked)
                 .enabled(commands::enabled(&cmd.action, avail))
@@ -2989,7 +3040,7 @@ fn build_ui(
             }
             "view.playhead" => {
                 ui.label("Playhead line (over image)");
-                ui.add(egui_slider::SlimSlider::new(&mut *playhead_alpha, 0.0..=1.0).text("opacity").default_value(0.0).decimals(2))
+                ui.add(soluwell_controls::slider::SlimSlider::new(&mut *playhead_alpha, 0.0..=1.0).text("opacity").default_value(0.0).decimals(2))
                     .on_hover_text("Thin white vertical line at the current frame, over the image. 0 = off.\nCtrl+click: reset to off.");
             }
             "view.preload" => {
@@ -3016,7 +3067,7 @@ fn build_ui(
                 }
             });
         };
-        clicked = egui_menubar::MenuBar::new(commands::MENU).show_full(ui, item, slot, layouts_ui);
+        clicked = soluwell_chrome::menubar::MenuBar::new(commands::MENU).show_full(ui, item, slot, layouts_ui);
     });
     if let Some(layout) = layout_pick {
         dock.replace(&ctx, layout);
@@ -3078,9 +3129,9 @@ fn build_ui(
         });
         let mut sections = vec![
             // Frame / range / play state.
-            egui_statusbar::Section::new(210.0, move |ui| match frame_info {
+            soluwell_chrome::statusbar::Section::new(210.0, move |ui| match frame_info {
                 Some((cur, first, last, playing)) => {
-                    let st = if playing { egui_phosphor::regular::PLAY } else { egui_phosphor::regular::PAUSE };
+                    let st = if playing { soluwell_config::phosphor::regular::PLAY } else { soluwell_config::phosphor::regular::PAUSE };
                     ui.label(format!("{st} frame {cur} / [{first}–{last}]"));
                 }
                 None => {
@@ -3090,11 +3141,11 @@ fn build_ui(
             // Decode-cache fill N/M and its RAM held / live cap (stays visible at
             // 100% with a ✓). The cap moves: it is the RAM budget minus what the
             // tile cache and the OpenFX inputs hold (`RamPartitions::frames`).
-            egui_statusbar::Section::new(300.0, move |ui| match &cache_info {
+            soluwell_chrome::statusbar::Section::new(300.0, move |ui| match &cache_info {
                 Some(st) if st.total > 0 => {
                     let (res, tot) = (st.resident, st.total);
                     let frac = res as f32 / tot as f32;
-                    let mark = if res >= tot { format!("{} ", egui_phosphor::regular::CHECK) } else { String::new() };
+                    let mark = if res >= tot { format!("{} ", soluwell_config::phosphor::regular::CHECK) } else { String::new() };
                     let txt = format!(
                         "cache {mark}{res}/{tot} · {} / {}",
                         humanize_bytes(st.used_bytes as u64),
@@ -3118,7 +3169,7 @@ fn build_ui(
                 }
             }),
             // GPU adapter · backend · output (SDR white on an HDR one, the peak on HLG).
-            egui_statusbar::Section::new(260.0, move |ui| {
+            soluwell_chrome::statusbar::Section::new(260.0, move |ui| {
                 let out = match output {
                     crate::present::Output::Hlg => {
                         format!("{} · {:.0} nit white · {:.0} nit peak", output.label(), target.white, target.peak)
@@ -3130,7 +3181,7 @@ fn build_ui(
                     .on_hover_text("The window output: Settings > Display.");
             }),
             // The display path of the last frame: resident GPU texture or CPU tiles.
-            egui_statusbar::Section::new(110.0, move |ui| match display_path {
+            soluwell_chrome::statusbar::Section::new(110.0, move |ui| match display_path {
                 Some(path) => {
                     ui.label(path.label()).on_hover_text(path.hint());
                 }
@@ -3139,7 +3190,7 @@ fn build_ui(
                 }
             }),
             // Tile atlas VRAM: held / budget (the driver's total on hover).
-            egui_statusbar::Section::new(150.0, move |ui| {
+            soluwell_chrome::statusbar::Section::new(150.0, move |ui| {
                 let text = match atlas {
                     Some((used, budget)) => format!("VRAM {} / {}", humanize_bytes(used), humanize_bytes(budget)),
                     None => "VRAM —".to_owned(),
@@ -3148,7 +3199,7 @@ fn build_ui(
                 ui.label(text).on_hover_text(format!("tile atlas pages / its budget; driver budget {total}"));
             }),
             // Tile RAM cache and tiles in flight.
-            egui_statusbar::Section::new(170.0, move |ui| {
+            soluwell_chrome::statusbar::Section::new(170.0, move |ui| {
                 let busy = if tiles_pending > 0 { format!(" · {tiles_pending} pending") } else { String::new() };
                 ui.label(format!(
                     "tiles {} / {}{busy}",
@@ -3158,7 +3209,7 @@ fn build_ui(
                 .on_hover_text("RAM tile cache held / its budget; tiles still being produced");
             }),
             // The shown frame's colour space and where it came from; an OCIO error in red.
-            egui_statusbar::Section::new(260.0, move |ui| match (&colour, &colour_err) {
+            soluwell_chrome::statusbar::Section::new(260.0, move |ui| match (&colour, &colour_err) {
                 (_, Some(e)) => {
                     ui.colored_label(ui.visuals().error_fg_color, format!("colour: {e}"))
                         .on_hover_text("Settings > Colour: pick an input override for this file, or another view.");
@@ -3171,11 +3222,11 @@ fn build_ui(
                 }
             }),
             // File / dimensions / channels (the flex tail).
-            egui_statusbar::Section::new(0.0, move |ui| {
+            soluwell_chrome::statusbar::Section::new(0.0, move |ui| {
                 ui.colored_label(text_col, &status);
             }),
         ];
-        egui_statusbar::StatusBar::new().locked(*locked).show(ui, layout, &mut sections);
+        soluwell_chrome::statusbar::StatusBar::new().locked(*locked).show(ui, layout, &mut sections);
     });
 
     // Transport bar (sequence playback) sits just above the status bar; only
@@ -3277,7 +3328,7 @@ fn section<R>(ui: &mut egui::Ui, label: &str, tint: egui::Color32, body: impl Fn
     let key = ui.id().with(("section_open", label));
     let open = ui.data(|d| d.get_temp::<bool>(key)).unwrap_or(true);
     // The labels are constant English names, so they serve as the caller-stable salt.
-    let shown = egui_titlebar::CollapsingSection::new(label, label).open(open).tint(tint, 0.16).show(ui, body);
+    let shown = soluwell_chrome::titlebar::CollapsingSection::new(label, label).open(open).tint(tint, 0.16).show(ui, body);
     if shown.header.open != open {
         ui.data_mut(|d| d.insert_temp(key, shown.header.open));
     }
@@ -3300,22 +3351,22 @@ fn neighbour(files: &[PathBuf], cur: &Path, step: isize, own: &HashSet<PathBuf>)
 fn budgets_ui(ui: &mut egui::Ui, budgets: &mut Budgets) {
     const RESET: &str = "\nCtrl+click: reset.";
     let default = Budgets::default();
-    egui_prefs2::section_header(ui, "Caches (next launch)");
-    egui_prefs2::section_grid(ui, "budgets_launch", |ui| {
+    soluwell_panels::prefs::section_header(ui, "Caches (next launch)");
+    soluwell_panels::prefs::section_grid(ui, "budgets_launch", |ui| {
         ui.label("RAM share")
             .on_hover_text(format!("Share of installed RAM for the frame cache and for the tile cache, each.{RESET}"));
-        ui.add(egui_slider::SlimSlider::new(&mut budgets.ram, Budgets::RAM).default_value(default.ram).decimals(2));
+        ui.add(soluwell_controls::slider::SlimSlider::new(&mut budgets.ram, Budgets::RAM).default_value(default.ram).decimals(2));
         ui.end_row();
         ui.label("VRAM share").on_hover_text(format!("Share of the GPU's memory for the tile atlas.{RESET}"));
-        ui.add(egui_slider::SlimSlider::new(&mut budgets.vram, Budgets::VRAM).default_value(default.vram).decimals(2));
+        ui.add(soluwell_controls::slider::SlimSlider::new(&mut budgets.vram, Budgets::VRAM).default_value(default.vram).decimals(2));
         ui.end_row();
     });
-    egui_prefs2::section_header(ui, "Display");
-    egui_prefs2::section_grid(ui, "budgets_live", |ui| {
+    soluwell_panels::prefs::section_header(ui, "Display");
+    soluwell_panels::prefs::section_grid(ui, "budgets_live", |ui| {
         ui.label("Upload per frame").on_hover_text(format!(
             "Tile bytes sent to the GPU per frame: lower keeps panning smooth, higher fills in faster.{RESET}"
         ));
-        ui.add(egui_slider::SlimSlider::new(&mut budgets.upload_mib, Budgets::UPLOAD).default_value(default.upload_mib).suffix(" MiB"));
+        ui.add(soluwell_controls::slider::SlimSlider::new(&mut budgets.upload_mib, Budgets::UPLOAD).default_value(default.upload_mib).suffix(" MiB"));
         ui.end_row();
     });
 }
@@ -3323,41 +3374,41 @@ fn budgets_ui(ui: &mut egui::Ui, budgets: &mut Budgets) {
 /// Settings > Display: the output (applied at once by the viewer), SDR white, the
 /// display peak (HLG), and what the OS reports about the display.
 fn display_ui(ui: &mut egui::Ui, prefs: &mut crate::persist::DisplayPrefs, status: &DisplayStatus, target: crate::present::Target) {
-    let state = egui_display::DisplayState {
+    let state = soluwell_viewport::display::DisplayState {
         output: status.active,
         target,
         info: status.info.clone(),
         error: status.err.clone(),
         available: status.outputs.clone(),
     };
-    egui_display::settings_ui(ui, "exr_view.display", prefs, Some(&state));
+    soluwell_viewport::display::settings_ui(ui, "exr_view.display", prefs, Some(&state));
 }
 
 /// The Settings panel drawn with the viewer's text sizes (egui-prefs2 ships larger ones).
-fn prefs_state(fonts: &crate::persist::Fonts) -> egui_prefs2::PrefsPanelState {
-    egui_prefs2::PrefsPanelState { fonts: prefs_fonts(fonts), ..Default::default() }
+fn prefs_state(fonts: &crate::persist::Fonts) -> soluwell_panels::prefs::PrefsPanelState {
+    soluwell_panels::prefs::PrefsPanelState { fonts: prefs_fonts(fonts), ..Default::default() }
 }
 
 /// The Settings panel's own sizes from `persist::Fonts`.
-fn prefs_fonts(fonts: &crate::persist::Fonts) -> egui_prefs2::PrefsFonts {
+fn prefs_fonts(fonts: &crate::persist::Fonts) -> soluwell_panels::prefs::PrefsFonts {
     let f = fonts.clamped();
-    egui_prefs2::PrefsFonts { sidebar: f.sidebar, heading: f.heading, body: f.body }
+    soluwell_panels::prefs::PrefsFonts { sidebar: f.sidebar, heading: f.heading, body: f.body }
 }
 
 /// Settings > UI: opening files, then the text sizes per style, the dock tab height and
 /// the Settings category list (vfx-view's "Fonts & UI").
 fn ui_prefs(ui: &mut egui::Ui, fonts: &mut crate::persist::Fonts, open_seq: &mut bool) {
     use crate::persist::Fonts;
-    egui_prefs2::section_header(ui, "Files");
-    egui_prefs2::section_grid(ui, "files", |ui| {
+    soluwell_panels::prefs::section_header(ui, "Files");
+    soluwell_panels::prefs::section_grid(ui, "files", |ui| {
         ui.label("Auto-detect sequences").on_hover_text(
             "File > Open and recent files open a frame of a name.####.exr set as the whole sequence              (a lone frame still opens as one image). The Open dialog has the same box.",
         );
         ui.checkbox(open_seq, "");
         ui.end_row();
     });
-    egui_prefs2::section_header(ui, "Fonts & UI");
-    egui_prefs2::section_grid(ui, "fonts", |ui| {
+    soluwell_panels::prefs::section_header(ui, "Fonts & UI");
+    soluwell_panels::prefs::section_grid(ui, "fonts", |ui| {
         const RESET: &str = "\nCtrl+click: reset.";
         let d = Fonts::default();
         for (label, tip, value, default) in [
@@ -3369,11 +3420,11 @@ fn ui_prefs(ui: &mut egui::Ui, fonts: &mut crate::persist::Fonts, open_seq: &mut
             ("Settings tabs", "Size of the category list down the left of this panel, nothing else.", &mut fonts.sidebar, d.sidebar),
         ] {
             ui.label(label).on_hover_text(format!("{tip}{RESET}"));
-            ui.add(egui_slider::SlimSlider::new(&mut *value, Fonts::SIZE).default_value(default).step_by(0.5).max_decimals(1).suffix(" pt"));
+            ui.add(soluwell_controls::slider::SlimSlider::new(&mut *value, Fonts::SIZE).default_value(default).step_by(0.5).max_decimals(1).suffix(" pt"));
             ui.end_row();
         }
         ui.label("Dock tab height").on_hover_text(format!("Height of the tab strip of each dock panel.{RESET}"));
-        ui.add(egui_slider::SlimSlider::new(&mut fonts.dock_tab, Fonts::TAB).default_value(d.dock_tab).step_by(1.0).max_decimals(0).suffix(" px"));
+        ui.add(soluwell_controls::slider::SlimSlider::new(&mut fonts.dock_tab, Fonts::TAB).default_value(d.dock_tab).step_by(1.0).max_decimals(0).suffix(" px"));
         ui.end_row();
     });
 }
@@ -4060,7 +4111,7 @@ mod dock_action_tests {
         let mut dock = Dock::default();
         let ctx = egui::Context::default();
         // Open: a closed tab comes back.
-        dock.layout.apply(egui_dock_layout::Action::Close { panel: DockTab::Waveform }).expect("default layout has a waveform");
+        dock.layout.apply(soluwell_chrome::dock_layout::Action::Close { panel: DockTab::Waveform }).expect("default layout has a waveform");
         assert!(!dock.contains(&DockTab::Waveform));
         run(Action::Tab(DockTab::Waveform), &mut app, &mut dock, &ctx);
         assert!(dock.contains(&DockTab::Waveform));
@@ -4366,7 +4417,7 @@ mod backdrop_tests {
     use super::key_path_tests::{app, frame, input};
     use super::*;
     use crate::viewport::NoGpu;
-    use egui_display::{Backdrop, BackdropKind, Checker};
+    use soluwell_viewport::display::{Backdrop, BackdropKind, Checker};
 
     #[test]
     fn pixel_info_resolves_colour_without_viewport_or_scopes() {
@@ -4414,7 +4465,7 @@ mod backdrop_tests {
     /// One frame of the viewport tab content (no GPU: the tiles are not drawn, the backdrop is),
     /// on the present pass's canvas as the viewer declares it.
     fn show(app: &mut AppState, ctx: &egui::Context) {
-        egui_display::set_renderer_target(ctx, egui_display::RendererTarget::CANVAS);
+        soluwell_viewport::display::set_renderer_target(ctx, soluwell_viewport::display::RendererTarget::CANVAS);
         frame(ctx, vec![], |root| {
             egui::CentralPanel::default().show(root, |ui| app.display_viewport(ui, &mut NoGpu, viewport::Strip::NONE));
         });
