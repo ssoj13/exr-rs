@@ -267,12 +267,69 @@ fn decode1(code: u32, g: f32, v: f32) -> f32 {
     }
 }
 
+/// Precomputed 65,536-entry (`0..=65535`) lookup table for the per-channel decode curve on
+/// `0.0..=1.0`, avoiding two transcendental `f32::powf` calls per sample (e.g. ~50M calls per
+/// 4K PQ frame). Both 8-bit (`k / 255.0`) and 16-bit (`k / 65535.0`) normalized integer codes
+/// land on exact integer table indices because `65535 = 255 * 257`; arbitrary `f32` values in
+/// `0.0..=1.0` are linearly interpolated between adjacent entries, and values outside `0.0..=1.0`
+/// (or non-finite) fall back to [`decode1`].
+pub struct CurveLut {
+    code: u32,
+    g: f32,
+    table: Box<[f32; 65536]>,
+}
+
+impl CurveLut {
+    /// Build the 65,536-entry table for `tf`.
+    pub fn new(tf: Tf) -> Self {
+        let (code, g) = curve_of(tf);
+        let inv = 1.0 / 65535.0;
+        let table: Vec<f32> = (0..=65535u32)
+            .map(|i| decode1(code, g, i as f32 * inv))
+            .collect();
+        let table = table
+            .into_boxed_slice()
+            .try_into()
+            .unwrap_or_else(|_| unreachable!());
+        Self { code, g, table }
+    }
+
+    /// Evaluate the per-channel curve at `v`.
+    #[inline]
+    pub fn eval(&self, v: f32) -> f32 {
+        if (0.0..=1.0).contains(&v) {
+            let scaled = v * 65535.0;
+            let idx = scaled as usize;
+            if idx >= 65535 {
+                return self.table[65535];
+            }
+            let frac = scaled - idx as f32;
+            let a = self.table[idx];
+            let b = self.table[idx + 1];
+            a + frac * (b - a)
+        } else {
+            decode1(self.code, self.g, v)
+        }
+    }
+}
+
 /// The built-in stage 1 (no OCIO, `ocio::Decode`): a frame's stored colour to linear Rec.709
 /// light (the curve, HLG's display OOTF, then the matrix into Rec.709). Relative light (1.0 = the
 /// display's white) for SDR curves, units of 100 nits for PQ / HLG.
+#[cfg(test)]
 pub fn decode(b: &Builtin, rgb: [f32; 3]) -> [f32; 3] {
     let (code, g) = curve_of(b.tf);
-    let mut l = rgb.map(|v| decode1(code, g, v));
+    decode_with(b, code, rgb.map(|v| decode1(code, g, v)))
+}
+
+/// Like [`decode`], using a precomputed [`CurveLut`] for the per-channel curve.
+#[inline]
+pub fn decode_with_lut(b: &Builtin, lut: &CurveLut, rgb: [f32; 3]) -> [f32; 3] {
+    decode_with(b, lut.code, rgb.map(|v| lut.eval(v)))
+}
+
+#[inline]
+fn decode_with(b: &Builtin, code: u32, mut l: [f32; 3]) -> [f32; 3] {
     if code == curve::HLG {
         let [_, _, _, peak, gamma] = HLG;
         let y = (LUMA_2020[0] * l[0] + LUMA_2020[1] * l[1] + LUMA_2020[2] * l[2]).max(0.0);

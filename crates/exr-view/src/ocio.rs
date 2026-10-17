@@ -555,8 +555,8 @@ enum DecodeKind {
     /// The stored values are already scene_linear (an untagged EXR without a config, a data
     /// space, a processor that is a no-op).
     Identity,
-    /// No OCIO: the built-in curve and primaries to linear Rec.709 (`transfer::decode`).
-    Builtin(Builtin),
+    /// No OCIO: the built-in curve and primaries to linear Rec.709 (`transfer::decode_with_lut`).
+    Builtin(Builtin, crate::transfer::CurveLut),
     /// The config's processor to `scene_linear` (`Ocio::to_scene_linear`).
     Ocio(Processor),
 }
@@ -600,32 +600,55 @@ impl Decode {
     }
 
     fn chunk(&self, px: &mut [[f32; 4]]) {
-        use crate::transfer::unpremul;
-        let mut alpha = [0f32; DECODE_CHUNK];
-        for (p, a) in px.iter_mut().zip(alpha.iter_mut()) {
-            *a = p[3];
-            [p[0], p[1], p[2]] = unpremul([p[0], p[1], p[2]], *a, self.straight);
-            // A NaN alpha must not enter the processor's matrices (restored below).
-            p[3] = 1.0;
-        }
-        match &self.kind {
-            DecodeKind::Identity => {}
-            DecodeKind::Builtin(b) => {
-                for p in px.iter_mut() {
-                    [p[0], p[1], p[2]] = crate::transfer::decode(b, [p[0], p[1], p[2]]);
-                }
-            }
-            DecodeKind::Ocio(proc) => proc.apply_rgba(px),
-        }
+        use crate::transfer::{decode_with_lut, unpremul};
         let straight = self.straight;
-        for (p, &a) in px.iter_mut().zip(&alpha) {
-            if a < 1.0 && (straight || a > 0.0) {
-                let k = a.max(0.0);
-                for c in &mut p[..3] {
-                    *c *= k;
+        match &self.kind {
+            DecodeKind::Identity => {
+                if straight {
+                    for p in px.iter_mut() {
+                        let a = p[3];
+                        if a < 1.0 {
+                            let k = a.max(0.0);
+                            p[0] *= k;
+                            p[1] *= k;
+                            p[2] *= k;
+                        }
+                    }
                 }
             }
-            p[3] = a;
+            DecodeKind::Builtin(b, lut) => {
+                for p in px.iter_mut() {
+                    let a = p[3];
+                    let rgb = unpremul([p[0], p[1], p[2]], a, straight);
+                    let mut l = decode_with_lut(b, lut, rgb);
+                    if a < 1.0 && (straight || a > 0.0) {
+                        let k = a.max(0.0);
+                        l[0] *= k;
+                        l[1] *= k;
+                        l[2] *= k;
+                    }
+                    [p[0], p[1], p[2]] = l;
+                }
+            }
+            DecodeKind::Ocio(proc) => {
+                let mut alpha = [0f32; DECODE_CHUNK];
+                for (p, a) in px.iter_mut().zip(alpha.iter_mut()) {
+                    *a = p[3];
+                    [p[0], p[1], p[2]] = unpremul([p[0], p[1], p[2]], *a, straight);
+                    // A NaN alpha must not enter the processor's matrices (restored below).
+                    p[3] = 1.0;
+                }
+                proc.apply_rgba(px);
+                for (p, &a) in px.iter_mut().zip(&alpha) {
+                    if a < 1.0 && (straight || a > 0.0) {
+                        let k = a.max(0.0);
+                        for c in &mut p[..3] {
+                            *c *= k;
+                        }
+                    }
+                    p[3] = a;
+                }
+            }
         }
     }
 }
@@ -684,7 +707,12 @@ impl Decoder {
         let key = format!("builtin|{b:?}|{straight}");
         self.cached(key, straight, || {
             let linear = b.tf == exr_import::Tf::Linear && b.to709 == exr_import::IDENTITY;
-            Ok(if linear { DecodeKind::Identity } else { DecodeKind::Builtin(b) })
+            if linear {
+                Ok(DecodeKind::Identity)
+            } else {
+                let lut = crate::transfer::CurveLut::new(b.tf);
+                Ok(DecodeKind::Builtin(b, lut))
+            }
         })
         .map_err(|e| format!("{e:#}"))
     }

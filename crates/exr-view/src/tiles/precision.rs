@@ -109,14 +109,20 @@ pub fn finish(spans: [Option<Span>; 4]) -> Option<[i32; 4]> {
     Some(low)
 }
 
-fn profile_chunk(rgba: &[f32]) -> Option<[Span; 4]> {
+/// Fold a block of RGBA pixels into four per-slot [`Span`]s (`None` when any
+/// component leaves the checked fixed-point domain).
+pub(crate) fn profile_pixels(px: &[[f32; 4]]) -> Option<[Span; 4]> {
     let mut spans = [Span::EMPTY; 4];
-    for px in rgba.chunks(4) {
-        for (span, &v) in spans.iter_mut().zip(px) {
+    for p in px {
+        for (span, &v) in spans.iter_mut().zip(p) {
             *span = span.add(v)?;
         }
     }
     Some(spans)
+}
+
+fn profile_chunk(rgba: &[f32]) -> Option<[Span; 4]> {
+    profile_pixels(rgba.as_chunks::<4>().0)
 }
 
 /// The profile of an interleaved RGBA buffer (the reference the per-channel

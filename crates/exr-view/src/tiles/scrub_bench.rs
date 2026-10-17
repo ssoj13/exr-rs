@@ -119,6 +119,8 @@ fn resident_frame_switch_cost() {
         src: crate::transfer::Src::LINEAR,
     };
 
+    let mut colour_state = crate::ocio::State::new(crate::ocio::Sel::default());
+    let present_target = crate::present::Target::default();
     let mut img = ImageBackend::from_frame(Arc::clone(first));
     // stage name -> (ms samples, bytes per switch)
     let mut stages: BTreeMap<&'static str, (Vec<f64>, u64)> = BTreeMap::new();
@@ -138,11 +140,14 @@ fn resident_frame_switch_cost() {
 
             let t = Instant::now();
             img.set_frame(Arc::clone(frame));
+            let src = img.colour(&mut colour_state, &present_target).expect("colour");
+            let look = super::render::Look { src, ..look };
+            let active_colour = colour_state.active().map(|t| &**t);
             record("1 set_frame", ms(t), 0, warm);
 
             let t = Instant::now();
             let callback = img
-                .present(&d, &q, &mut renderer, &mut target, Some(&mut Idle), place, look, None)
+                .present(&d, &q, &mut renderer, &mut target, Some(&mut Idle), place, look, active_colour)
                 .expect("present");
             assert!(callback.direct, "a resident frame must take the direct path");
             record("2 present (cpu)", ms(t), 0, warm);

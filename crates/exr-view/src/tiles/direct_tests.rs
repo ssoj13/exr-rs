@@ -1254,8 +1254,10 @@ fn decoded_colour_reduction_profiles_linear_pixels() {
             assert!(callback.direct, "{space} OCIO={ocio_on}: resident GPU path");
             let gpu = renderer.callback_resources.get::<TileGpu>().unwrap();
             let direct = gpu.direct.as_ref().unwrap();
-            assert_eq!((direct.profiles, direct.scans), (1, 1),
-                "{space} OCIO={ocio_on}: stored-plane profile cannot describe decoded light");
+            assert_eq!((direct.profiles, direct.scans), (1, 0),
+                "{space} OCIO={ocio_on}: decoded light profile is fused into fill without a second pixel rescan");
+            assert_eq!(direct.profile, super::precision::profile(&linear),
+                "{space} OCIO={ocio_on}: fused profile must equal decoded linear profile");
             let level = grid.pick_level(0.25);
             assert_eq!(level, 2);
             let reference = level_from_rgba(&linear, &grid, level).unwrap();

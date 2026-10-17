@@ -97,15 +97,16 @@ use crate::viewport::{self, TabGpu, ViewportGpu};
 /// System memory reserved (GiB) as a floor the cache may not cross — OS + GPU
 /// driver + the application's own working set.
 const CACHE_MEM_RESERVE_GB: f64 = 2.0;
-/// Decode-pool width cap. DWAA decode is CPU + memory-bandwidth bound; past ~8
-/// threads the gain flattens while the UI/wgpu threads need headroom.
-const MAX_DECODE_THREADS: usize = 8;
+/// Decode-pool width cap. Each decode worker may fan out across rayon or saturate
+/// memory bandwidth (4K PNG/EXR); capping at 4 (and `available_parallelism / 4`)
+/// leaves CPU cores and DRAM bandwidth free for the UI/wgpu threads during scrubbing.
+const MAX_DECODE_THREADS: usize = 4;
 
-/// Decode-pool thread count: `available_parallelism` clamped to `[2, MAX]`.
+/// Decode-pool thread count: `available_parallelism / 4` clamped to `[2, MAX]`.
 fn decode_threads() -> usize {
     std::thread::available_parallelism()
-        .map(|p| p.get())
-        .unwrap_or(4)
+        .map(|p| p.get() / 4)
+        .unwrap_or(2)
         .clamp(2, MAX_DECODE_THREADS)
 }
 

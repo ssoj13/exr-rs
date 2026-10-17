@@ -62,7 +62,7 @@ video-io = { git = "ssh://git@github.com/ssoj13/video-io-rs.git", branch = "main
 # in this viewer, the layer/channel tree, the read-only attribute grid, the command-table menu
 # bar and the corner HUD. Pinned to egui 0.36 like this crate.
 soluwell-config = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
-soluwell-timeline = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
+soluwell-timeline = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main", default-features = false, features = ["serde"] }
 soluwell-chrome = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
 soluwell-panels = { git = "ssh://git@github.com/ssoj13/egui-widgets-rs.git", branch = "main" }
 # The viewport's collapsible control strip (the display dials), tinted collapsible sections

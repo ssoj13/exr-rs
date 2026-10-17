@@ -1601,9 +1601,9 @@ name = "cryptomatte"
 version = "0.1.0"
 dependencies = [
  "cryptomatte",
- "exr-core 0.1.0",
+ "exr-core",
  "exr-test-data",
- "imath-rs 0.1.0",
+ "imath-rs",
  "log",
  "murmur3",
  "serde",
@@ -2290,11 +2290,6 @@ name = "deflate-rs"
 version = "0.1.0"
 
 [[package]]
-name = "deflate-rs"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#fd7def424cef33671a49e575387b1461de79604f"
-
-[[package]]
 name = "deflate64"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2942,24 +2937,9 @@ version = "0.1.0"
 dependencies = [
  "codec-simd",
  "criterion",
- "deflate-rs 0.1.0",
+ "deflate-rs",
  "exr-test-data",
- "imath-rs 0.1.0",
- "jph-rs",
- "log",
- "murmur3",
- "rayon",
- "smallvec",
-]
-
-[[package]]
-name = "exr-core"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#fd7def424cef33671a49e575387b1461de79604f"
-dependencies = [
- "codec-simd",
- "deflate-rs 0.1.0 (git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main)",
- "imath-rs 0.1.0 (git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main)",
+ "imath-rs",
  "jph-rs",
  "log",
  "murmur3",
@@ -2971,9 +2951,9 @@ dependencies = [
 name = "exr-gpu"
 version = "0.1.0"
 dependencies = [
- "exr-core 0.1.0",
+ "exr-core",
  "gpu-info-rs",
- "imath-rs 0.1.0",
+ "imath-rs",
  "log",
  "pollster 1.0.1",
  "wgpu",
@@ -2983,17 +2963,17 @@ dependencies = [
 name = "exr-image"
 version = "0.1.0"
 dependencies = [
- "exr-core 0.1.0",
+ "exr-core",
  "image",
- "imath-rs 0.1.0",
+ "imath-rs",
 ]
 
 [[package]]
 name = "exr-import"
 version = "0.1.0"
 dependencies = [
- "exr-core 0.1.0",
- "imath-rs 0.1.0",
+ "exr-core",
+ "imath-rs",
  "tempfile",
  "thiserror 2.0.21",
  "vfx-io",
@@ -3007,12 +2987,12 @@ dependencies = [
  "clap",
  "cryptomatte",
  "env_logger",
- "exr-core 0.1.0",
+ "exr-core",
  "exr-import",
  "exr-test-data",
  "exr-util",
  "exr-view",
- "imath-rs 0.1.0",
+ "imath-rs",
  "log",
  "png",
  "tempfile",
@@ -3026,9 +3006,9 @@ version = "0.1.0"
 name = "exr-util"
 version = "0.1.0"
 dependencies = [
- "exr-core 0.1.0",
+ "exr-core",
  "exr-test-data",
- "imath-rs 0.1.0",
+ "imath-rs",
  "log",
 ]
 
@@ -3045,12 +3025,12 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "egui_kittest",
- "exr-core 0.1.0",
+ "exr-core",
  "exr-gpu",
  "exr-import",
  "exr-test-data",
  "gpu-info-rs",
- "imath-rs 0.1.0",
+ "imath-rs",
  "log",
  "naga",
  "ofx",
@@ -4064,11 +4044,6 @@ checksum = "65b27460c2c92b037f3f94c538ed9a3342f3fdf923606781629ccb35f82d042a"
 [[package]]
 name = "imath-rs"
 version = "0.1.0"
-
-[[package]]
-name = "imath-rs"
-version = "0.1.0"
-source = "git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main#fd7def424cef33671a49e575387b1461de79604f"
 
 [[package]]
 name = "imgref"
@@ -7436,10 +7411,7 @@ version = "0.1.0"
 source = "git+ssh://git@github.com/ssoj13/egui-widgets-rs.git?branch=main#4338de33475858d59524b876d3d6e572e1d48530"
 dependencies = [
  "egui",
- "exr-core 0.1.0 (git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main)",
  "half",
- "image",
- "imath-rs 0.1.0 (git+ssh://git@github.com/ssoj13/exr-rs.git?branch=main)",
  "log",
  "serde",
  "serde_json",

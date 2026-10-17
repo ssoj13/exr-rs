@@ -200,7 +200,7 @@ pub struct DirectGpu {
     staging: Vec<u16>,
     pub desc: Option<SourceDesc>,
     profile_desc: Option<SourceDesc>,
-    profile: Option<[i32; 4]>,
+    pub(crate) profile: Option<[i32; 4]>,
     /// Profiles resolved (one per new source).
     #[cfg(test)]
     pub profiles: usize,

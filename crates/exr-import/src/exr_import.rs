@@ -402,12 +402,48 @@ fn is_straight(img: &ImageData) -> bool {
 fn planes(img: &ImageData) -> Vec<Vec<f32>> {
     let c = img.channels as usize;
     let n = img.pixel_count();
-    // One reserved plane per channel (`vec![v; c]` clones `v`, and a clone of an empty `Vec`
-    // does not keep its capacity).
     let mut out: Vec<Vec<f32>> = (0..c).map(|_| Vec::with_capacity(n)).collect();
-    for p in 0..n {
-        for (ch, plane) in out.iter_mut().enumerate() {
-            plane.push(img.sample_f32(p * c + ch));
+    if c == 0 || n == 0 {
+        return out;
+    }
+    match &img.data {
+        PixelData::U8(buf) => {
+            let scale = 1.0 / 255.0;
+            for px in buf.chunks_exact(c).take(n) {
+                for (plane, &v) in out.iter_mut().zip(px) {
+                    plane.push(f32::from(v) * scale);
+                }
+            }
+        }
+        PixelData::U16(buf) => {
+            let scale = 1.0 / 65535.0;
+            for px in buf.chunks_exact(c).take(n) {
+                for (plane, &v) in out.iter_mut().zip(px) {
+                    plane.push(f32::from(v) * scale);
+                }
+            }
+        }
+        PixelData::U32(buf) => {
+            let scale = 1.0 / 4294967295.0f64;
+            for px in buf.chunks_exact(c).take(n) {
+                for (plane, &v) in out.iter_mut().zip(px) {
+                    plane.push((f64::from(v) * scale) as f32);
+                }
+            }
+        }
+        PixelData::F32(buf) => {
+            for px in buf.chunks_exact(c).take(n) {
+                for (plane, &v) in out.iter_mut().zip(px) {
+                    plane.push(v);
+                }
+            }
+        }
+        _ => {
+            for p in 0..n {
+                for (ch, plane) in out.iter_mut().enumerate() {
+                    plane.push(img.sample_f32(p * c + ch));
+                }
+            }
         }
     }
     out

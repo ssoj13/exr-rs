@@ -300,9 +300,18 @@ impl DecodedFrame {
         Self::open(path, budget)
     }
 
-    /// `frame` with its channel spans computed here, on the loading thread.
+    /// `frame` with its channel spans computed here, on the loading thread, when
+    /// the stored channels can be displayed without stage-1 colour conversion.
+    /// Non-identity colour tags (`.png`, `.pq.png`, ACES, ...) compute their
+    /// precision profile in-cache during stage-1 materialization (`fill_with_decode`),
+    /// so scanning the undecoded channels here would waste ~7 ms/frame of DRAM bandwidth.
     fn warmed(frame: Self) -> Self {
-        frame.spans();
+        let is_identity = !frame.straight
+            && exr_import::builtin(&frame.tag)
+                .is_ok_and(|b| b.tf == exr_import::Tf::Linear && b.to709 == exr_import::IDENTITY);
+        if is_identity {
+            frame.spans();
+        }
         frame
     }
 
@@ -1107,6 +1116,9 @@ pub struct ImageBackend {
     /// the tile workers (`Arc`); re-materializing reuses the allocation unless a
     /// worker still holds it.
     pixels: Arc<Vec<f32>>,
+    /// Precision profile computed in-cache during [`Self::prepare_cpu`] when a non-identity
+    /// stage-1 colour decode ran, avoiding a second 132 MB DRAM scan in [`DirectGpu::prepare`].
+    decoded_profile: Option<Option<[i32; 4]>>,
     /// What each RGBA slot of `pixels` holds, as `(channel name, slot)` rows for
     /// the pixel readout: the real channel names (`Z`, `N.x`), not fixed
     /// `R/G/B/A`. Rebuilt with `pixels` (see [`readout_rows`]).
@@ -1224,6 +1236,7 @@ impl ImageBackend {
             decoder: Arc::new(crate::ocio::Decoder::builtin_only()),
             decode_identity: "identity|builtin".to_owned(),
             pixels: Arc::new(Vec::new()),
+            decoded_profile: None,
             readout: Vec::new(),
             file_source: None,
             probe,
@@ -1441,7 +1454,7 @@ impl ImageBackend {
         // Stage-1 colour decode is fused into each cache-local block during fill.
         let decode = layer_decode(&self.decode, &self.frame, group);
         let names = names_of(&self.frame.channels);
-        Mapping::of(&names, group).fill_with_decode(
+        self.decoded_profile = Mapping::of(&names, group).fill_with_decode(
             Arc::make_mut(&mut self.pixels),
             &self.frame.channels,
             self.width,
@@ -1456,6 +1469,7 @@ impl ImageBackend {
                 }
                 rows = vec![("coverage".to_owned(), 0)];
             }
+            self.decoded_profile = None;
         }
         self.readout = rows;
         self.materialized = Some(self.view.clone());
@@ -1472,6 +1486,7 @@ impl ImageBackend {
         let group = self.frame.resolve(&self.view);
         self.readout = readout_rows(&self.frame.channels, group.as_deref());
         self.pixels = Arc::new(Vec::new());
+        self.decoded_profile = None;
         self.planes = true;
         self.materialized = Some(self.view.clone());
     }
@@ -1775,11 +1790,17 @@ impl ImageBackend {
             let direct = gpu
                 .direct
                 .get_or_insert_with(|| crate::tiles::direct::DirectGpu::new(device));
-            // Source-channel spans describe these pixels only for an identity decode.
-            // Converted scene-linear light is rescanned before GPU fixed-point reduction.
-            let known = (desc.stage == 0 && self.coverage_overlay.is_none()
-                && layer_decode(&self.decode, &self.frame, self.frame.resolve(&self.view).as_deref()).is_identity())
-                .then(|| self.frame.profile(&self.view));
+            // Source-channel spans describe these pixels for an identity decode;
+            // converted scene-linear light carries the profile computed in-cache during fill.
+            let known = if desc.stage == 0 && self.coverage_overlay.is_none() {
+                if layer_decode(&self.decode, &self.frame, self.frame.resolve(&self.view).as_deref()).is_identity() {
+                    Some(self.frame.profile(&self.view))
+                } else {
+                    self.decoded_profile
+                }
+            } else {
+                None
+            };
             match direct.prepare(
                 device,
                 queue,
@@ -2332,13 +2353,14 @@ impl Mapping {
         width: u32,
         height: u32,
     ) -> Result<(), ExrError> {
-        self.fill_with_decode(out, channels, width, height, None)
+        self.fill_with_decode(out, channels, width, height, None).map(|_| ())
     }
 
     /// Like [`Self::fill`], optionally running stage-1 `decode` on each cache-local
     /// `BLOCK` of pixels immediately after filling its four RGBA slots. Fusing the
-    /// fill and decode avoids a second 132 MB DRAM pass on 4K frames and runs
-    /// across rayon workers when `n > BLOCK`.
+    /// fill, decode, and precision profile (`Some(profile)` when `decode` is non-identity)
+    /// avoids two additional 132 MB DRAM passes on 4K frames and runs across rayon
+    /// workers when `n > BLOCK`.
     pub(crate) fn fill_with_decode(
         &self,
         out: &mut Vec<f32>,
@@ -2346,7 +2368,7 @@ impl Mapping {
         width: u32,
         height: u32,
         decode: Option<&crate::ocio::Decode>,
-    ) -> Result<(), ExrError> {
+    ) -> Result<Option<Option<[i32; 4]>>, ExrError> {
         use rayon::prelude::*;
         let n = resize(out, width, height)?;
         let bound = self.bind(channels)?;
@@ -2357,11 +2379,12 @@ impl Mapping {
             )));
         }
         let lut = half_lut();
+        let want_profile = decode.is_some_and(|d| !d.is_identity());
         // Blocks small enough that all four slot passes + decode hit L1/L2 cache.
         // Every source holds at least `n` samples (checked above), so `v[at..]`
         // is in bounds.
         const BLOCK: usize = 4096;
-        let fill_block = |b: usize, pixels: &mut [[f32; 4]]| {
+        let fill_block = |b: usize, pixels: &mut [[f32; 4]]| -> Option<[Span; 4]> {
             let at = b * BLOCK;
             for (slot, (src, &konst)) in bound.src.iter().zip(&bound.konst).enumerate() {
                 match src {
@@ -2382,19 +2405,60 @@ impl Mapping {
             if let Some(dec) = decode {
                 dec.apply_pixels(pixels);
             }
+            if want_profile {
+                crate::tiles::precision::profile_pixels(pixels)
+            } else {
+                None
+            }
         };
         let chunks = out.as_chunks_mut::<4>().0;
-        if n <= BLOCK {
+        let spans = if n <= BLOCK {
+            let mut acc = Some([Span::EMPTY; 4]);
             for (b, pixels) in chunks.chunks_mut(BLOCK).enumerate() {
-                fill_block(b, pixels);
+                let block_spans = fill_block(b, pixels);
+                if want_profile {
+                    acc = match (acc, block_spans) {
+                        (Some(a), Some(s)) => Some([
+                            a[0].merge(s[0]),
+                            a[1].merge(s[1]),
+                            a[2].merge(s[2]),
+                            a[3].merge(s[3]),
+                        ]),
+                        _ => None,
+                    };
+                }
             }
+            acc
+        } else if want_profile {
+            chunks
+                .par_chunks_mut(BLOCK)
+                .enumerate()
+                .map(|(b, pixels)| fill_block(b, pixels))
+                .reduce(
+                    || Some([Span::EMPTY; 4]),
+                    |a, b| match (a, b) {
+                        (Some(a), Some(b)) => Some([
+                            a[0].merge(b[0]),
+                            a[1].merge(b[1]),
+                            a[2].merge(b[2]),
+                            a[3].merge(b[3]),
+                        ]),
+                        _ => None,
+                    },
+                )
         } else {
             chunks
                 .par_chunks_mut(BLOCK)
                 .enumerate()
-                .for_each(|(b, pixels)| fill_block(b, pixels));
-        }
-        Ok(())
+                .for_each(|(b, pixels)| {
+                    let _ = fill_block(b, pixels);
+                });
+            None
+        };
+        let profile = want_profile.then(|| {
+            spans.and_then(|s| crate::tiles::precision::finish(s.map(Some)))
+        });
+        Ok(profile)
     }
 
     /// The pixel readout's rows: each channel shown, by name, at the first slot
