@@ -547,15 +547,44 @@ def cmd_ae(rest: list[str]) -> int:
 	return cmd_deploy(rest)
 
 
+def _cxx() -> str | None:
+	return shutil.which("g++") or shutil.which("clang++") or shutil.which("c++")
+
+
 def cmd_nuke(rest: list[str]) -> int:
 	header("BUILD & TEST exv-nuke (Nuke NDK Reader/Writer + exv_capi)")
 	debug = "-d" in rest or "--debug" in rest
-	cfg = "Debug" if debug else "Release"
+	prof, cfg = ("debug", "Debug") if debug else ("release", "Release")
+	target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT_DIR / "target"))
 	cargo_cmd = ["cargo", "build", "-p", "exv-capi"] + ([] if debug else ["--release"])
 	code, ms = run(cargo_cmd)
 	if _report("exv-capi", code, ms) != 0:
 		return code
 	bd = Path(os.environ.get("EXV_NUKE_BUILD", NUKE_DIR / "build"))
+	if not IS_WINDOWS and shutil.which("cmake") is None:
+		cxx = _cxx()
+		if cxx is None:
+			fail("neither cmake nor g++/clang++ found on PATH")
+			return 1
+		bd.mkdir(parents=True, exist_ok=True)
+		lib_dir = target_dir / prof
+		bin_out = bd / "nuke_io_test"
+		code, t1 = run([
+			cxx, "-std=c++17", "-O2",
+			f"-I{NUKE_DIR / 'include'}", f"-I{ROOT_DIR / 'docs'}",
+			str(NUKE_DIR / "tests" / "nuke_io_test.cpp"),
+			f"-L{lib_dir}", "-lexv_capi", f"-Wl,-rpath,{lib_dir}",
+			"-o", str(bin_out),
+		])
+		if code != 0:
+			fail("C++ build failed (exv-nuke)")
+			return code
+		code, t2 = run([str(bin_out)])
+		if code != 0:
+			fail("nuke_io_test failed")
+			return code
+		ok(f"exv-nuke OK ({fmt_time(t1 + t2)})")
+		return 0
 	cfg_cmd = ["cmake", "-S", str(NUKE_DIR), "-B", str(bd), f"-DCMAKE_BUILD_TYPE={cfg}"]
 	if sdk := os.environ.get("NUKE_SDK_PATH"):
 		cfg_cmd.append(f"-DNUKE_SDK_PATH={sdk}")
@@ -585,6 +614,30 @@ def cmd_os(rest: list[str]) -> int:
 	if _report("exv-capi", code, ms) != 0:
 		return code
 	bd = Path(os.environ.get("EXV_OS_BUILD", OS_DIR / "build"))
+	if not IS_WINDOWS and shutil.which("cmake") is None:
+		cxx = _cxx()
+		if cxx is None:
+			fail("neither cmake nor g++/clang++ found on PATH")
+			return 1
+		bd.mkdir(parents=True, exist_ok=True)
+		lib_dir = target_dir / prof
+		bin_out = bd / "os_thumb_test"
+		code, t1 = run([
+			cxx, "-std=c++17", "-O2",
+			f"-I{OS_DIR / 'include'}", f"-I{ROOT_DIR / 'docs'}",
+			str(OS_DIR / "tests" / "os_thumb_test.cpp"),
+			f"-L{lib_dir}", "-lexv_capi", f"-Wl,-rpath,{lib_dir}",
+			"-o", str(bin_out),
+		])
+		if code != 0:
+			fail("C++ build failed (exv-os)")
+			return code
+		code, t2 = run([str(bin_out)])
+		if code != 0:
+			fail("os_thumb_test failed")
+			return code
+		ok(f"exv-os OK ({fmt_time(t1 + t2)})")
+		return 0
 	cfg_cmd = ["cmake", "-S", str(OS_DIR), "-B", str(bd), f"-DCMAKE_BUILD_TYPE={cfg}"]
 	code, t1 = run(cfg_cmd)
 	if code != 0:
