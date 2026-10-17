@@ -31,18 +31,26 @@ also work as hidden aliases. A `-v` or `-vv` raises logging to debug or trace;
 
 ```sh
 exr-rs info beauty.exr
+exr-rs info clip.exv
 exr-rs check beauty.exr
 exr-rs convert beauty.exr beauty-zip.exr --compress zip
+exr-rs convert beauty.exr beauty.exv --exv-codec bc6h-lossless
+exr-rs convert shot.####.exr clip.exv --exv-codec bc6h-lossless --gop 12
+exr-rs convert clip.exv out.####.exr --compress zip
 exr-rs convert plate.0001.dpx plate.0001.exr
 ```
 
 `info` reads headers for scanline, tiled, deep and multipart files (a non-EXR still gets a
-short format/size/channels summary). `convert` also reads every non-EXR still the viewer opens
-(PNG, JPEG, TIFF, DPX, HDR, TGA, ...; the [colour rule](viewer.md#other-image-formats)) and writes
+short format/size/channels summary; an `.exv` clip prints its container summary followed by any
+embedded OpenEXR part headers). `convert` also reads every non-EXR still the viewer opens
+(PNG, JPEG, TIFF, DPX, HDR, TGA, `.exv`, ...; the [colour rule](viewer.md#other-image-formats)) and writes
 it as a scanline EXR the way `oiiotool` does: the values as read, alpha associated, the colour tag
-as the `colorInteropID` attribute. `convert`
-re-encodes a flat single-part image and keeps its storage shape: scanline or tiled
-(tile size, level mode, rounding), every MIP/RIP level, and subsampled channels at
+as the `colorInteropID` attribute. When writing `.exv` (`--exv-codec bc6h-lossless|bc6h-lossy|htj2k|fast|wave|rt`,
+`--gop <n>`), `convert` packs a single frame or a `name.####.ext` sequence into an
+[EXV video container](exv.md) while embedding 100% of the OpenEXR `Header` attributes. When reading
+a multi-frame `.exv` into an `out.####.exr` pattern, `convert` unpacks every frame back to EXR.
+For EXR-to-EXR conversion, `convert` re-encodes a flat single-part image and keeps its storage shape:
+scanline or tiled (tile size, level mode, rounding), every MIP/RIP level, and subsampled channels at
 their native sampling. Without `--compress`, it keeps the input codec. Deep and
 multipart inputs are rejected; use the `multipart` tool or the low-level APIs.
 

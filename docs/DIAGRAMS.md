@@ -13,8 +13,23 @@ flowchart TD
     CLI --> crypto[cryptomatte]
     CLI --> imath[imath-rs]
     CLI --> util[exr-util]
+    CLI --> imp[exr-import]
     CLI -->|feature viewer| view[exr-view]
     util --> core
+    imp --> core
+    imp --> exv_vid[exv-video]
+    exv_vid --> exv_cod[exv-codec]
+    exv_cod --> exv_tile[exv-tile]
+    exv_cod --> rans[rans-rs]
+    exv_cod --> jph([jph-rs])
+    exv_tile --> exv_fmt[exv-format]
+    exv_fmt --> core
+    exv_fmt --> imath
+    exv_gpu[exv-gpu] --> exv_kern[exv-gpu-kernels]
+    exv_gpu --> exv_vid
+    exv_kern --> exv_fmt
+    exv_capi[exv-capi] --> exv_vid
+    exv_capi --> exv_gpu
     py[openexr-py<br/>maturin only] --> core
     py --> imath
     py --> crypto
@@ -24,6 +39,7 @@ flowchart TD
     view --> core
     view --> imath
     view --> crypto
+    view --> imp
     view --> widgets([egui-widgets-rs])
     view --> scanseq([scanseq])
     view --> scancache([scancache])
@@ -34,7 +50,7 @@ flowchart TD
     gpu[exr-gpu] --> core
     core --> imath
     core --> deflate[deflate-rs]
-    core --> jph([jph-rs])
+    core --> jph
     core --> simd([codec-simd])
     core --> murmur3
     xtask[xtask] --> vcv([vcv-rs])

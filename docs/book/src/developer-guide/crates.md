@@ -12,8 +12,16 @@ Workspace members (plus the root `exr-rs` CLI package):
 | `exr-view` | `exr-core` + winit / egui 0.36 / egui_dock 0.21 / wgpu 30 | the GPU viewer behind `exr-rs view`: resident and tiled display, OCIO, HDR output, scopes, layer selection, Cryptomatte overlay, sequence playback, OpenFX effects. |
 | `exr-util` | OpenEXRUtil | in-memory flat and deep images, whole-file image I/O and `CheckFile`, used by the whole-image CLI tools. |
 | `exr-image` | `exr-core` + the `image` crate | EXR decoding for `image` through exr-core (`register()` installs the hooks). |
-| `exr-import` | `exr-core`, `vfx-io` | Non-EXR stills (PNG, DPX, HDR, ...) as scene-linear associated-alpha `exr_core::api::Image`; the format registry of the Open dialog; used by the viewer and `convert`. |
+| `exr-import` | `exr-core`, `vfx-io`, `exv-video` | Non-EXR stills (PNG, DPX, HDR, ...) and `.exv` clips (`ExvClip`, `write_exr_frames_as_exv`) as scene-linear `exr_core::api::Image`; used by the viewer and `convert`. |
 | `exr-test-data` | test infrastructure | resolves opt-in private fixtures via `EXR_TEST_DATA`. |
+| `rans-rs` | 32-stream interleaved rANS | 12-bit scale rANS entropy codec (zero `unsafe`). |
+| `exv-format` | `exr-core`, `imath-rs` | `.exv` wire format (`Header`, `Meta::exr_headers` TLV tag `6`, `TileIndex`, `TAG_BC6H`, `bufpool`, `fsio`, `crc32c`). |
+| `exv-tile` | `exv-format` | 2D tile grid, byte-plane `split_delta`/`unsplit_delta`, LeGall 5/3 & CDF 9/7 DWT, reversible colour transform (RCT). |
+| `exv-codec` | `exv-tile`, `rans-rs`, `jph-rs` | `.exv` CPU tile codecs: `BC6H` (`Bc6hMode::{Lossy, LosslessResidual}`), `HTJ2K`, `rANS`, `Wavelet`, `EXV-RT`, temporal `PRED`. |
+| `exv-video` | `exv-codec` | multi-frame `.exv` container (`FrameIndex`, `FrameToc`, `VideoIndex`, `GopCache`, memory-mapped `open_bytes`). |
+| `exv-gpu-kernels` | `exv-format`, `wgpu 30` | WGSL compute kernels for `.exv` (`BC6H`, `rANS`, `DWT`, `EXV-RT`, `PRED`, `RCT`, `F16` texture pack). |
+| `exv-gpu` | `exv-gpu-kernels`, `exv-video` | GPU tile/frame decoder & VRAM cache (`GpuTileCache`, `FrameAssembler`, `decode_bc6h_batched`). |
+| `exv-capi` | `exv-video`, `exv-gpu` | C ABI (`exv_capi` + `docs/exv-capi.h` via `cbindgen`) for native host plug-ins (`cpp/exv-ae` After Effects `ExvAE.aex`). |
 
 `xtask` is also a workspace member. `cargo xtask <command>` with `setup`,
 `parity`, `parity-deflate`, `parity-exr`, `parity-header` or `parity-tools` builds the

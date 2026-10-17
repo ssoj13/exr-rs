@@ -90,8 +90,9 @@ exr-rs aims at **strict C++ parity across the whole stack**.
   any thread count; readers validate declared sizes with checked arithmetic and use fallible
   allocation.
 - **Beyond OpenEXR.** Wgpu upload of EXR layers, a GPU viewer for images from thumbnails to
-  65k with OCIO and HDR output, Cryptomatte decode *and* encode, and a Python module that
-  replaces the official one without code changes.
+  65k with OCIO and HDR output, the `.exv` (**EXR Video**) container with hardware GPU `BC6H` +
+  lossless residual coding and a native After Effects AEIO plug-in (`ExvAE.aex`), Cryptomatte
+  decode *and* encode, and a Python module that replaces the official one without code changes.
 
 ## Contents
 
@@ -125,6 +126,7 @@ flowchart TB
     subgraph built["built on top (this repo)"]
         crypto["cryptomatte"]
         gpu["exr-gpu<br/>layers → wgpu textures"]
+        exv["exv-* + rans-rs<br/>.exv video, BC6H, WGSL GPU,<br/>exv-capi + ExvAE.aex"]
         view["exr-view<br/>GPU viewer"]
         py["openexr-py<br/>drop-in OpenEXR module"]
         cli["exr-rs CLI"]
@@ -137,6 +139,9 @@ flowchart TB
     core --> crypto
     mm --> crypto
     core --> gpu
+    core --> exv
+    exv --> view
+    exv --> cli
     core --> view
     gpu --> view
     crypto --> view
@@ -161,7 +166,10 @@ flowchart TB
 | [`exr-gpu`](crates/exr-gpu) | Decoded layers into `wgpu` textures or storage buffers, with checked sizing and readback. |
 | [`exr-util`](crates/exr-util) | OpenEXRUtil: in-memory flat and deep images, whole-file image I/O and `CheckFile`, behind the whole-image CLI tools. |
 | [`exr-image`](crates/exr-image) | EXR decoding for the `image` crate through exr-core (`exr_image::register()`). |
-| [`exr-import`](crates/exr-import) | PNG, JPEG, TIFF, DPX, HDR, ... as scene-linear EXR-ready images (viewer, `convert`). |
+| [`exr-import`](crates/exr-import) | PNG, JPEG, TIFF, DPX, HDR, ... and `.exv` clips (`ExvClip`, `write_exr_frames_as_exv`) as scene-linear EXR-ready images (viewer, `convert`). |
+| [`rans-rs`](crates/rans-rs), [`exv-format`](crates/exv-format), [`exv-tile`](crates/exv-tile), [`exv-codec`](crates/exv-codec), [`exv-video`](crates/exv-video) | The `.exv` video format & codecs: hardware `BC6H` (lossy + lossless rANS residual), `HTJ2K`, `rANS`, `Wavelet`, `EXV-RT`, temporal `PRED` GOPs, and 100% OpenEXR `Header` preservation (`Meta::exr_headers`). |
+| [`exv-gpu-kernels`](crates/exv-gpu-kernels), [`exv-gpu`](crates/exv-gpu) | WGSL compute shaders and VRAM tile/frame decoders (`BC6H`, `rANS`, `DWT`, `EXV-RT`, `PRED`) with bit-exact CPU parity. |
+| [`exv-capi`](crates/exv-capi), [`cpp/exv-ae`](cpp/exv-ae) | C ABI (`exv_capi.dll` + [`docs/exv-capi.h`](docs/exv-capi.h)) and the Adobe After Effects AEIO plug-in (`ExvAE.aex`). |
 | [`exr-view`](crates/exr-view) | The GPU viewer library (winit, egui, wgpu) behind `exr-rs view`. |
 | [`openexr-py`](crates/openexr-py) | The `OpenEXR` Python module on PyO3 + numpy (built by maturin, outside the cargo workspace). |
 | `exr-rs` (root) | The one binary: the command-line tools and the viewer. |
@@ -208,7 +216,7 @@ order. Writers take the pixel bytes on each call, so one strip buffer can stream
 | Ten ported command-line tools (`exrcheck`, `exrmaketiled`, `exrmakepreview`, `exrenvmap`, `exrmultipart`, `exrmultiview`, `exrstdattr`, `exrmetrics`, `exrmanifest`, `exr2aces`) | ✅ | `check`, `tile`, `preview`, `envmap`, `multipart`, `multiview`, `attr`, `metrics`, `manifest`, `aces` | ✅ compared with the C++ tools (`cargo xtask parity-tools`) |
 | OpenEXRUtil (`ImfImage`, `ImfFlatImage`, `ImfDeepImage`, `ImfCheckFile`) | ✅ | `exr-util` | ✅ |
 | Native code | C / C++ | Rust; `unsafe` only in `deflate-rs` SIMD and `codec-simd`, none in `exr-core` | ✅ no FFI |
-| GPU upload, GPU viewer, Cryptomatte encode | — | `exr-gpu`, `exr-view`, `cryptomatte` | ➕ beyond OpenEXR |
+| GPU upload, GPU viewer, `.exv` video (`BC6H` + lossless residual + AE plug-in), Cryptomatte encode | — | `exr-gpu`, `exr-view`, `exv-*`, `cryptomatte` | ➕ beyond OpenEXR |
 
 ---
 
@@ -337,13 +345,15 @@ flowchart LR
 ### Command line
 
 ```text
-exr-rs info <file>                            # full header, byte-identical to exrheader
-exr-rs convert <in> <out> [--compress <c>]    # re-encode with any codec
-exr-rs view [--auto] <file|dir|frame>         # the GPU viewer (--auto: detect sequences)
-exr-rs v                                    # start the viewer without a path (also: exr-rs view)
-exr-rs view --help                           # show viewer options (--empty/-e remains optional)
-exr-rs view <file> --screenshot <out.png>     # save the image as the viewer shows it
-exr-rs cryptomatte info|extract|encode|inject  # Cryptomatte tools
+exr-rs info <file>                                         # full header, byte-identical to exrheader (also .exv)
+exr-rs convert <in> <out> [--compress <c>]                 # re-encode EXR with any codec
+exr-rs convert shot.####.exr clip.exv [--exv-codec <c>]    # pack EXR sequence into an .exv video clip (default: bc6h-lossless)
+exr-rs convert clip.exv out.####.exr [--compress <c>]      # unpack .exv video clip back to an EXR sequence
+exr-rs view [--auto] <file|dir|frame>                      # the GPU viewer (--auto: detect sequences; .exv opens as a clip)
+exr-rs v                                                   # start the viewer without a path (also: exr-rs view)
+exr-rs view --help                                         # show viewer options (--empty/-e remains optional)
+exr-rs view <file> --screenshot <out.png>                  # save the image as the viewer shows it
+exr-rs cryptomatte info|extract|encode|inject              # Cryptomatte tools
 ```
 
 Commands without arguments show help and common examples. Every tool has a visible
@@ -358,7 +368,7 @@ Every crate lives in this repository; depend on it by git:
 ```toml
 [dependencies]
 exr-core = { git = "ssh://git@github.com/ssoj13/exr-rs.git", branch = "main" }
-# the same for imath-rs, deflate-rs, cryptomatte, exr-gpu, exr-view
+# the same for imath-rs, deflate-rs, cryptomatte, exr-gpu, exr-view, exv-video, exv-gpu
 ```
 
 ```rust
@@ -415,6 +425,7 @@ Stable Rust **1.96+**, edition 2024 (the viewer's OCIO sets the MSRV).
 cargo build --release          # the exr-rs binary (CLI + viewer), no system libraries
 python bootstrap.py b          # the exr-rs binary (release; -d for debug)
 python bootstrap.py b p        # the OpenEXR Python wheel via maturin
+python bootstrap.py ae         # build + deploy the After Effects AEIO plug-in (ExvAE.aex + exv_capi.dll)
 python bootstrap.py t          # the full gate: tests, clippy, oracles, pytest
 python bootstrap.py c          # clippy -D warnings
 ```

@@ -1,8 +1,9 @@
 # Introduction
 
 `exr-rs` is a pure-Rust port of [OpenEXR](https://www.openexr.com/) together with a
-GPU viewer, a wgpu-based upload layer, Cryptomatte support, and a drop-in `OpenEXR`
-Python module.
+GPU viewer, the `.exv` (**EXR Video**) container with hardware GPU `BC6H` + lossless
+residual coding, a wgpu-based upload layer, Cryptomatte support, a native After Effects
+AEIO plug-in (`ExvAE.aex`), and a drop-in `OpenEXR` Python module.
 
 The image-format code is a **1:1 port** of the upstream C/C++ libraries — Imath,
 libdeflate, OpenEXR/IlmImf, and OpenJPH (the last via the `jph-rs` dependency) —
@@ -19,10 +20,12 @@ gate and a corpus of upstream test images.
 This book has two parts:
 
 - The **User Guide** covers installing the tools, the `exr-rs` command line, the
-  viewer, and using `exr-core`/`exr-gpu` as libraries.
+  viewer, [EXV video & After Effects](user-guide/exv.md), and using `exr-core`/`exr-gpu`
+  as libraries.
 - The **Developer Guide** covers the architecture, the crate breakdown, the parity
   harness, and the engineering conventions the port follows.
 
 If you only want to read or write EXR files from Rust, start with
 [Library API](user-guide/library.md). If you want to display or process them on the
-GPU, see [GPU upload](user-guide/gpu.md) and [Viewer](user-guide/viewer.md).
+GPU, see [GPU upload](user-guide/gpu.md), [Viewer](user-guide/viewer.md), and
+[EXV video & After Effects](user-guide/exv.md).

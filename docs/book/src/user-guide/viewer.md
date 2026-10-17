@@ -129,11 +129,13 @@ See [CLI examples](cli.md). Use `convert` or the
 
 ## Other image formats
 
-Besides EXR the viewer opens PNG, JPEG, TIFF, DPX, Cineon, Radiance HDR, BMP, TGA, SGI, ICO, GIF,
+Besides EXR the viewer opens [`.exv` video clips](exv.md) (multi-frame `.exv` containers open
+directly as sequences with their embedded OpenEXR headers and Cryptomatte manifests) as well as
+PNG, JPEG, TIFF, DPX, Cineon, Radiance HDR, BMP, TGA, SGI, ICO, GIF,
 WebP, PNM/PFM, IFF, RLA and Softimage PIC (HEIC/HEIF and AVIF are not built in), as sequences
-too (`shot.####.png`). EXR keeps its own readers; every other format is decoded by `vfx-io`
-(`exr-import`) into the same frame, so exposure, OCIO, scopes, Pixel Info, effects and Save view
-work unchanged. The first frame of multi-image files (GIF, ICO, TIFF pages) is shown, and the
+too (`shot.####.png`). EXR keeps its own readers; every other format is decoded by `exr-import`
+into the same frame, so exposure, OCIO, scopes, Pixel Info, effects and Save view
+work unchanged. The first frame of multi-image stills (GIF, ICO, TIFF pages) is shown, and the
 file is always held in RAM (no out-of-core pyramid).
 
 Frames keep their values as the file holds them and a colour tag. A foreign still takes the

@@ -158,3 +158,23 @@ If preparing a non-tiled effect exceeds the budget before the plug-in starts ren
 and the partial work is released cleanly, the effect may render from a coarser
 whole-image level; a refusal once rendering has begun keeps the error. Host regression
 tests cover the effect, provider, temporal and GPU paths.
+
+## EXV video & hardware GPU BC6H
+
+While `.exr` files keep their serial entropy stages on the CPU for bit-for-bit C++
+OpenEXR parity, the `.exv` video stack (`exv-format`, `exv-tile`, `exv-codec`,
+`exv-video`, `exv-gpu-kernels`, `exv-gpu`) is purpose-built for GPU-friendly random
+access and multi-frame streaming:
+
+- **100% OpenEXR metadata preservation:** `Header::from_exr_headers` serializes every
+  `exr_core::header::Header` into `Meta::exr_headers` (TLV tag `6`), and
+  `Header::to_exr_headers` restores them on read.
+- **Hybrid `BC6H_SF16` + `rANS` residual (`CodecId::BC6H = 7`):**
+  - Base layer: 4×4 `F16` blocks encoded into 16-byte signed-float `BC6H_SF16` Mode 11
+    blocks (`1` byte per `F16` sample).
+  - Lossless residual layer (`Bc6hMode::LosslessResidual`): the 16-bit difference
+    `orig_u16.wrapping_sub(bc6h_decoded_u16)` is byte-plane split (`split_delta(..., 2)`)
+    and compressed with 32-stream interleaved `rANS`, yielding 100% bit-exact `F16`
+    reconstruction on both CPU (`exv-codec`) and WGSL compute (`exv-gpu-kernels`).
+- **Temporal `PRED` GOPs:** P/B frames store tile-level residuals against reference
+  frames managed by a byte-budgeted `GopCache`.

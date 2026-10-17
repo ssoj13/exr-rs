@@ -8,6 +8,7 @@
 - [Installation](user-guide/installation.md)
 - [Command-line tool](user-guide/cli.md)
 - [Viewer](user-guide/viewer.md)
+- [EXV video & After Effects](user-guide/exv.md)
 - [Screenshot sources and licenses](assets/sources.md)
 - [Library API](user-guide/library.md)
 - [GPU upload (exr-gpu)](user-guide/gpu.md)
