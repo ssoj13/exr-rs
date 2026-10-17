@@ -1,6 +1,26 @@
 [workspace]
 resolver = "3"
-members = ["crates/imath-rs", "crates/deflate-rs", "crates/exr-core", "crates/exr-image", "crates/exr-import", "crates/exr-util", "crates/cryptomatte", "crates/exr-gpu", "crates/exr-view", "crates/exr-test-data", "xtask"]
+members = [
+    "crates/imath-rs",
+    "crates/deflate-rs",
+    "crates/exr-core",
+    "crates/exr-image",
+    "crates/exr-import",
+    "crates/exr-util",
+    "crates/cryptomatte",
+    "crates/exr-gpu",
+    "crates/exr-view",
+    "crates/exr-test-data",
+    "crates/rans-rs",
+    "crates/exv-format",
+    "crates/exv-tile",
+    "crates/exv-codec",
+    "crates/exv-video",
+    "crates/exv-gpu-kernels",
+    "crates/exv-gpu",
+    "crates/exv-capi",
+    "xtask",
+]
 # `openexr-py` is a PyO3 cdylib built ONLY by maturin (`bootstrap.py b p`), NOT by
 # cargo: its `extension-module` feature does not link libpython, which would break
 # `cargo test --workspace` (a test binary needs libpython). It still path-depends on
@@ -18,8 +38,16 @@ rust-version = "1.96"  # vfx-ocio's vfx-lut (exr-view's OCIO) requires 1.96; rai
 
 # Shared dependency versions; members opt in via `<dep> = { workspace = true }`.
 [workspace.dependencies]
+bytemuck = { version = "1", features = ["derive"] }
+memmap2 = "0.9"
+naga = { version = "30", features = ["wgsl-in"] }
+pollster = "1.0"
 rayon = "1"
 smallvec = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+wgpu = "30"
+jph-rs = { git = "ssh://git@github.com/ssoj13/jph-rs.git", branch = "main" }
 # Logging facade (libraries) + env_logger backend (binaries only). The `log`
 # crate is a zero-cost facade: members emit `log::{info,debug,trace,warn,error}`
 # and pick NO backend; only the one binary (`exr-rs`, whose `view` runs the viewer) inits

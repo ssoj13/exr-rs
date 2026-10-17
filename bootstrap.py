@@ -20,6 +20,8 @@ Short directives (one/two letters) drive the common loop; full names also work.
   pd  parity-deflate cargo run -p xtask -- parity-deflate (C libdeflate byte-exact)
   s   setup         cargo run -p xtask -- setup          (prove cl/cmake on PATH)
   v   view          cargo run -p exr-rs -- view [--auto] [file|dir|frame]  (GPU viewer; --auto = scan sequence)
+  ae  e             build + deploy the After Effects AEIO plugin (ExvAE.aex + exv_capi.dll)
+  d   deploy        copy dist/ (ExvAE.aex + exv_capi.dll) -> AE MediaCore + Support Files
   ci                clippy + tests + release build + portable ZIP in dist/ (ci.py · --target TRIPLE)
   release           release build + portable ZIP in dist/, no checks (ci.py · --target TRIPLE)
   cl  clean         cargo clean
@@ -28,6 +30,7 @@ Examples:
   python bootstrap.py b            # build exr-rs (release — matches gui.cmd)
   python bootstrap.py b -d         # build debug
   python bootstrap.py b p          # build the OpenEXR python module (maturin wheel)
+  python bootstrap.py ae           # build + deploy After Effects AEIO plugin (ExvAE.aex)
   python bootstrap.py i            # install the exr-rs CLI + viewer onto PATH
   python bootstrap.py i p          # install the OpenEXR python module into this Python
   python bootstrap.py t            # the full gate (every stage, non-zero on any failure)
@@ -42,6 +45,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -56,11 +60,21 @@ CLIPPY_CRATES = [
 	"imath-rs",
 	"deflate-rs",
 	"exr-core",
+	"exr-image",
+	"exr-import",
+	"exr-util",
 	"cryptomatte",
 	"exr-view",
 	"exr-gpu",
-	"egui-timeline",
-	"egui-statusbar",
+	"exr-test-data",
+	"rans-rs",
+	"exv-format",
+	"exv-tile",
+	"exv-codec",
+	"exv-video",
+	"exv-gpu-kernels",
+	"exv-gpu",
+	"exv-capi",
 	"xtask",
 ]
 
@@ -432,7 +446,97 @@ def cmd_release(rest: list[str]) -> int:
 
 def cmd_clean(_rest: list[str]) -> int:
 	header("CLEAN")
+	ae_build = ROOT_DIR / "cpp" / "exv-ae" / "build"
+	if ae_build.exists():
+		shutil.rmtree(ae_build, ignore_errors=True)
 	return _report("cargo clean", *run(["cargo", "clean"]))
+
+
+AE_DIR = ROOT_DIR / "cpp" / "exv-ae"
+DIST_DIR = ROOT_DIR / "dist"
+DLL_NAME = {"Windows": "exv_capi.dll", "Darwin": "libexv_capi.dylib"}.get(platform.system(), "libexv_capi.so")
+AE_MEDIACORE = Path(os.environ.get("EXV_AE_MEDIACORE", "C:/Program Files/Adobe/Common/Plug-ins/7.0/MediaCore"))
+AE_SUPPORT = Path(os.environ.get("EXV_AE_SUPPORT", "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files"))
+AE_HOSTS = ("AfterFX.exe", "aerender.exe", "Adobe Premiere Pro.exe", "Adobe Media Encoder.exe")
+
+
+def _ae_running() -> bool:
+	if not IS_WINDOWS:
+		return False
+	try:
+		out = subprocess.run(["tasklist"], capture_output=True, text=True, check=True).stdout
+	except (OSError, subprocess.CalledProcessError):
+		return True
+	return any(h.lower() in out.lower() for h in AE_HOSTS)
+
+
+def _cp(src: Path, dst: Path) -> bool:
+	if not src.exists():
+		return False
+	try:
+		dst.parent.mkdir(parents=True, exist_ok=True)
+		shutil.copy2(src, dst)
+	except OSError as e:
+		fail(f"cp {src.name} -> {dst} failed: {e}")
+		return False
+	print(f"  cp {src.name} -> {dst}")
+	return True
+
+
+def cmd_deploy(_rest: list[str]) -> int:
+	header("DEPLOY (AE MediaCore + Support Files)")
+	if not IS_WINDOWS:
+		ok("Deploy is Windows-only, skipping")
+		return 0
+	if _ae_running():
+		fail("After Effects / MediaCore host is RUNNING — quit it before deploying ExvAE.aex / exv_capi.dll.")
+		return 1
+	if not DIST_DIR.exists():
+		fail("dist/ not found — run `python bootstrap.py ae` first.")
+		return 1
+	jobs = [(DIST_DIR / "ExvAE.aex", AE_MEDIACORE / "ExvAE.aex")]
+	if (DIST_DIR / DLL_NAME).exists():
+		jobs += [(DIST_DIR / DLL_NAME, AE_MEDIACORE / DLL_NAME), (DIST_DIR / DLL_NAME, AE_SUPPORT / DLL_NAME)]
+	done = [_cp(s, d) for s, d in jobs]
+	if not all(done):
+		fail("Deploy incomplete")
+		return 1
+	ok(f"Deployed {len(done)} file(s)")
+	return 0
+
+
+def cmd_ae(rest: list[str]) -> int:
+	header("BUILD exv-ae (After Effects AEIO + exv_capi.dll)")
+	if not IS_WINDOWS:
+		ok("exv-ae is Windows-only, skipping")
+		return 0
+	debug = "-d" in rest or "--debug" in rest
+	prof, cfg = ("debug", "Debug") if debug else ("release", "Release")
+	target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT_DIR / "target"))
+	cargo_cmd = ["cargo", "build", "-p", "exv-capi"] + ([] if debug else ["--release"])
+	code, ms = run(cargo_cmd)
+	if _report("exv-capi", code, ms) != 0:
+		return code
+	bd = Path(os.environ.get("EXV_AE_BUILD", AE_DIR / "build"))
+	cfg_cmd = ["cmake", "-S", str(AE_DIR), "-B", str(bd)]
+	if sdk := os.environ.get("AE_SDK_PATH"):
+		cfg_cmd.append(f"-DAE_SDK_PATH={sdk}")
+	code, t1 = run(cfg_cmd)
+	if code != 0:
+		fail("cmake configure failed (set AE_SDK_PATH=...Examples)")
+		return code
+	code, t2 = run(["cmake", "--build", str(bd), "--config", cfg])
+	if code != 0:
+		fail("cmake build failed (exv-ae)")
+		return code
+	DIST_DIR.mkdir(parents=True, exist_ok=True)
+	if not (_cp(bd / cfg / "ExvAE.aex", DIST_DIR / "ExvAE.aex") and _cp(target_dir / prof / DLL_NAME, DIST_DIR / DLL_NAME)):
+		fail("exv-ae build produced no ExvAE.aex / exv_capi.dll")
+		return 1
+	ok(f"exv-ae OK ({fmt_time(t1 + t2)})")
+	if "--no-deploy" in rest:
+		return 0
+	return cmd_deploy(rest)
 
 
 def cmd_help(_rest: list[str]) -> int:
@@ -451,6 +555,8 @@ DISPATCH = {
 	"parity-deflate": cmd_parity_deflate,
 	"setup": cmd_setup,
 	"view": cmd_view,
+	"ae": cmd_ae,
+	"deploy": cmd_deploy,
 	"ci": cmd_ci,
 	"release": cmd_release,
 	"clean": cmd_clean,
@@ -466,6 +572,8 @@ ALIASES = {
 	"pd": "parity-deflate",
 	"s": "setup",
 	"v": "view",
+	"e": "ae",
+	"d": "deploy",
 	"cl": "clean",
 	"h": "help",
 }

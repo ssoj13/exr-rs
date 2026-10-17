@@ -249,3 +249,57 @@ fn exr_tag_rules() {
     h.add_color_interop_id(exr_core::attr::ExrString::from("lin_ap0_scene")).unwrap();
     assert_eq!(exr_tag(&h).unwrap(), ColorTag { space: "lin_ap0_scene".into(), origin: TagOrigin::File });
 }
+
+#[test]
+fn exv_round_trips_pixels_windows_and_openexr_attributes() {
+    let dir = tmp();
+    let p = dir.path().join("shot.exv");
+    let f = families();
+    assert_eq!(f[1].key, "EXV");
+    assert!(is_exv(&p) && is_foreign(&p) && is_image(&p));
+
+    let dw = Box2i::from_min_max(V2i::new(10, 20), V2i::new(13, 23));
+    let disp = Box2i::from_min_max(V2i::new(0, 0), V2i::new(31, 31));
+    let mut img = Image::new(dw);
+    img.display_window = disp;
+    img.insert_channel("R", ChannelData::Half((0..16).map(|i| Half::from(i as f32 * 0.1)).collect())).unwrap();
+    img.insert_channel("G", ChannelData::Half((0..16).map(|i| Half::from(i as f32 * 0.2)).collect())).unwrap();
+    img.insert_channel("B", ChannelData::Half((0..16).map(|i| Half::from(i as f32 * 0.3)).collect())).unwrap();
+    img.insert_channel("id", ChannelData::Uint((0..16).map(|i| 1000 + i).collect())).unwrap();
+    img.attributes_mut()
+        .insert(
+            "owner",
+            Box::new(exr_core::attr::StringAttribute::new(exr_core::attr::ExrString::from("Alex Khalyavin"))),
+        )
+        .unwrap();
+    img.attributes_mut()
+        .insert(
+            "colorInteropID",
+            Box::new(exr_core::attr::StringAttribute::new(exr_core::attr::ExrString::from("lin_ap1_scene"))),
+        )
+        .unwrap();
+
+    write_exr_as_exv(&p, &img, exv_codec::Profile::bc6h_lossless()).unwrap();
+
+    let rows = probe(&p).unwrap();
+    assert!(rows.contains(&("format".into(), "EXV1".into())));
+    assert!(rows.contains(&("codec".into(), "bc6h-lossless-residual".into())));
+    assert!(rows.contains(&("exr_headers".into(), "1".into())));
+
+    let loaded = load(&p).unwrap();
+    assert_eq!(loaded.tag, ColorTag { space: "lin_ap1_scene".into(), origin: TagOrigin::File });
+    assert_eq!(loaded.image.data_window, dw);
+    assert_eq!(loaded.image.display_window, disp);
+    let back = loaded.to_exr().unwrap();
+    assert_eq!(back.channel("R"), img.channel("R"));
+    assert_eq!(back.channel("G"), img.channel("G"));
+    assert_eq!(back.channel("B"), img.channel("B"));
+    assert_eq!(back.channel("id"), img.channel("id"));
+    let owner = back
+        .attributes()
+        .get("owner")
+        .and_then(|a| a.as_any().downcast_ref::<exr_core::attr::StringAttribute>())
+        .and_then(|a| a.value.as_str());
+    assert_eq!(owner, Some("Alex Khalyavin"));
+}
+

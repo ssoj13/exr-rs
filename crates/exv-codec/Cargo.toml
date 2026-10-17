@@ -1,0 +1,46 @@
+[package]
+name = "exv-codec"
+description = "EXV codecs (reorder+delta, 5/3 wavelet, HTJ2K, EXV-RT) behind a static codec registry."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "exv_codec"
+path = "src/codec.rs"
+
+[dependencies]
+exv-format = { path = "../exv-format" }
+# Tile window / budget math + the ordered windowed parallel loop (`pipe`): one definition shared with every tile consumer.
+exv-tile = { path = "../exv-tile" }
+rans-rs = { path = "../rans-rs" }
+# Data-parallel tile encode (`write_frame_tiles`, `write_intra_frame_body_windowed`) and the lane decode (`decode_rows`). Approved infra (root CLAUDE).
+rayon.workspace = true
+# Span instrumentation for chrome://tracing + leveled logs (near-free without a subscriber; the writer
+# lives in the binaries). Lets a profile trace show per-tile/per-channel/per-stage decode cost.
+tracing.workspace = true
+# Alternative entropy backend for the lossless profiles: raw-DEFLATE (libdeflate port).
+# Order-0 rANS lacks LZ matching; on continuous float AOVs deflate's LZ77 wins, on
+# constant/sparse AOVs rANS wins — encode_channel picks the smaller per blob. Consumed by
+# GIT-REF from ssoj13/exr-rs (NOT a cross-repo local path — that breaks CI / other machines),
+# same pattern exv-view uses for scancache/imath-rs.
+deflate-rs = { path = "../deflate-rs" }
+# CPU-only HTJ2K interop backend (optional; private git dep, SSH required).
+jph-rs = { workspace = true, optional = true }
+
+[features]
+# HTJ2K is the DEFAULT codec (per-channel JPEG 2000 Part-15 via jph-rs; lossless reversible 5/3).
+# On by default; `--no-default-features` gives a jph-rs-free build (then CodecId 6 -> None/unsupported).
+default = ["htj2k-backend"]
+htj2k-backend = ["dep:jph-rs"]
+
+[dev-dependencies]
+# `.exv` container: the OOM-gate + diagnostic tests exercise the REAL still container
+# (`write_still`/`read_still`/`write_still_windowed`/`still_frame_body`).
+# This is a DEV-dependency back-edge (exv-video depends on exv-codec) —
+# a cycle Cargo permits because it is test-only (never in the normal build/publish graph).
+exv-video = { path = "../exv-video" }
+exr-core = { path = "../exr-core" }
+exv-format = { path = "../exv-format" }

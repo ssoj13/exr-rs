@@ -89,20 +89,23 @@ pub struct Family {
 /// EXR extensions: `.sxr` is a stereo EXR some tools write.
 const EXR_EXTS: [&str; 2] = ["exr", "sxr"];
 
-/// Every family: EXR first, then the registered non-EXR formats by name (the registry is a hash
-/// map; the order must not depend on it).
+/// Every family: EXR first, then EXV, then the registered non-EXR formats by name (the registry
+/// is a hash map; the order must not depend on it).
 pub fn families() -> Vec<Family> {
     let reg = vfx_io::FormatRegistry::global();
     let mut names: Vec<&str> = reg.format_names().collect();
     names.sort_unstable();
-    let mut out = vec![family("EXR", EXR_EXTS.iter().map(|e| (*e).to_owned()).collect())];
+    let mut out = vec![
+        family("EXR", EXR_EXTS.iter().map(|e| (*e).to_owned()).collect()),
+        family("EXV", vec!["exv".to_owned()]),
+    ];
     for name in names {
         let Some(info) = reg.get(name) else { continue };
         let exts: Vec<String> = info
             .extensions
             .iter()
             .map(|e| e.to_ascii_lowercase())
-            .filter(|e| !EXR_EXTS.contains(&e.as_str()) && e != "tx")
+            .filter(|e| !EXR_EXTS.contains(&e.as_str()) && e != "tx" && e != "exv")
             .collect();
         if !exts.is_empty() {
             out.push(family(name, exts));
@@ -125,14 +128,19 @@ pub fn is_exr(path: &Path) -> bool {
     ext_of(path).is_some_and(|e| EXR_EXTS.contains(&e.as_str()))
 }
 
-/// Whether the viewer can open `path`, by extension: EXR or a registered foreign format.
+/// Whether `path` is an `.exv` container by extension.
+pub fn is_exv(path: &Path) -> bool {
+    ext_of(path).is_some_and(|e| e == "exv")
+}
+
+/// Whether the viewer can open `path`, by extension: EXR, EXV, or a registered foreign format.
 pub fn is_image(path: &Path) -> bool {
     is_exr(path) || is_foreign(path)
 }
 
-/// Whether `path` is a foreign (non-EXR) format [`load`] reads, by extension.
+/// Whether `path` is a foreign (non-EXR) format [`load`] reads, by extension (including `.exv`).
 pub fn is_foreign(path: &Path) -> bool {
-    ext_of(path).is_some_and(|e| e != "tx" && vfx_io::FormatRegistry::global().supports_extension(&e))
+    is_exv(path) || ext_of(path).is_some_and(|e| e != "tx" && vfx_io::FormatRegistry::global().supports_extension(&e))
 }
 
 // -- colour tags ----------------------------------------------------------------------------------
@@ -451,6 +459,219 @@ fn planes(img: &ImageData) -> Vec<Vec<f32>> {
 
 // -- loading --------------------------------------------------------------------------------------
 
+/// Whether `path` starts with the 4-byte `EXV1` container magic.
+pub fn has_exv_magic(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut f) = std::fs::File::open(path) else { return false };
+    let mut magic = [0u8; 4];
+    f.read_exact(&mut magic).is_ok() && u32::from_le_bytes(magic) == exv_video::MAGIC
+}
+
+/// Human-readable codec name for an `.exv` header's `codec_id` / `codec_params`.
+pub fn exv_codec_label(header: &exv_format::Header) -> String {
+    use exv_format::CodecId;
+    match CodecId(header.codec_id) {
+        CodecId::RAW => "raw".to_owned(),
+        CodecId::LOSSLESS_FAST => "rans-fast".to_owned(),
+        CodecId::WAVELET53 => "wavelet-rans".to_owned(),
+        CodecId::WAVELET53_LOSSY => {
+            let q = header.codec_params.first().copied().unwrap_or(0);
+            format!("wavelet-lossy(q={q})")
+        }
+        CodecId::HTJ2K => match header.codec_params.as_slice() {
+            [] => "htj2k-lossless".to_owned(),
+            [1, q] => format!("htj2k-hdr(q={q})"),
+            [2, q] => format!("htj2k-ldr97(q={q})"),
+            _ => "htj2k".to_owned(),
+        },
+        CodecId::EXV_RT => match header.codec_params.as_slice() {
+            [1, block, q] => format!("exv-rt-dwt(block={block}, q={q})"),
+            [0, block, bits, _] => format!("exv-rt-lerp(block={block}, bits={bits})"),
+            _ => "exv-rt".to_owned(),
+        },
+        CodecId::BC6H => match header.codec_params.first().copied() {
+            Some(1) => "bc6h-lossless-residual".to_owned(),
+            _ => "bc6h-lossy".to_owned(),
+        },
+        other => format!("codec({other})"),
+    }
+}
+
+/// Convert an `.exv` plane into [`ChannelData`], matching `exr-import`'s rules (floats and `U32`
+/// kept as stored; 8-bit normalized to `Half`, 16-bit normalized to `Float`).
+fn exv_plane_to_channel(plane: &[u8], dtype: exv_format::Dtype) -> ChannelData {
+    use exv_format::Dtype;
+    match dtype {
+        Dtype::F16 => ChannelData::Half(
+            plane
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| Half::from_bits(u16::from_le_bytes(*b)))
+                .collect(),
+        ),
+        Dtype::F32 => ChannelData::Float(
+            plane
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes(*b))
+                .collect(),
+        ),
+        Dtype::Bf16 => ChannelData::Float(
+            plane
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| exv_format::half::bf16_to_f32(u16::from_le_bytes(*b)))
+                .collect(),
+        ),
+        Dtype::U32 => ChannelData::Uint(
+            plane
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| u32::from_le_bytes(*b))
+                .collect(),
+        ),
+        Dtype::U16 => {
+            let scale = 1.0 / 65535.0;
+            ChannelData::Float(
+                plane
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|b| f32::from(u16::from_le_bytes(*b)) * scale)
+                    .collect(),
+            )
+        }
+        Dtype::U8 => {
+            let scale = 1.0 / 255.0;
+            ChannelData::Half(plane.iter().map(|&b| Half::from(f32::from(b) * scale)).collect())
+        }
+    }
+}
+
+/// Convert a decoded `.exv` [`exv_codec::image::Image`] + container [`exv_video::VideoIndex`] into a
+/// [`Loaded`] frame, restoring any embedded OpenEXR headers (`Meta::exr_headers`) when present.
+pub fn loaded_from_exv_image(
+    path: &Path,
+    frame: exv_codec::image::Image,
+    idx: &exv_video::VideoIndex,
+) -> Result<Loaded, ImportError> {
+    let (w, h) = (
+        i32::try_from(frame.header.width)
+            .ok()
+            .filter(|&v| v > 0)
+            .ok_or_else(|| ImportError::Pixels(format!("{}: invalid width {}", path.display(), frame.header.width)))?,
+        i32::try_from(frame.header.height)
+            .ok()
+            .filter(|&v| v > 0)
+            .ok_or_else(|| ImportError::Pixels(format!("{}: invalid height {}", path.display(), frame.header.height)))?,
+    );
+    let default_win = Box2i::from_min_max(V2i::new(0, 0), V2i::new(w - 1, h - 1));
+    let restored_hdr = idx
+        .meta()
+        .filter(|m| !m.exr_headers.is_empty())
+        .and_then(|m| idx.header.to_exr_headers(Some(m)).ok())
+        .and_then(|mut v| if v.is_empty() { None } else { Some(v.swap_remove(0)) });
+
+    let (mut out, tag, straight, meta) = if let Some(exr_hdr) = restored_hdr {
+        let (dw, disp) = match (exr_hdr.data_window(), exr_hdr.display_window()) {
+            (Ok(dw), Ok(disp))
+                if (i64::from(dw.max.x) - i64::from(dw.min.x) + 1) == i64::from(w)
+                    && (i64::from(dw.max.y) - i64::from(dw.min.y) + 1) == i64::from(h) =>
+            {
+                (dw, disp)
+            }
+            _ => (default_win, default_win),
+        };
+        let mut out = Image::new(dw);
+        out.display_window = disp;
+        out.compression = exr_hdr.compression().unwrap_or(exr_core::attr::Compression::Zip);
+        out.line_order = exr_hdr.line_order().unwrap_or(exr_core::attr::LineOrder::IncreasingY);
+        if exr_hdr.has_tile_description()
+            && let Ok(td) = exr_hdr.tile_description()
+        {
+            out.set_tiling(Some(td));
+        }
+        *out.attributes_mut() = exr_core::api::ImageAttributes::from_header(&exr_hdr);
+        let tag = exr_tag(&exr_hdr)?;
+        let straight = idx.meta().is_some_and(|m| m.alpha == 1);
+        let mut meta = vec![
+            ("Source format".to_owned(), "EXV1".to_owned()),
+            ("EXV codec".to_owned(), exv_codec_label(&idx.header)),
+            ("EXV frames".to_owned(), idx.frame_count().to_string()),
+            ("EXV tile grid".to_owned(), format!("{}x{}", idx.header.tile_w, idx.header.tile_h)),
+        ];
+        for row in exr_core::api::describe::rows(&exr_hdr) {
+            meta.push((row.name, row.value));
+        }
+        (out, tag, straight, meta)
+    } else {
+        let out = Image::new(default_win);
+        let straight = idx.meta().is_some_and(|m| m.alpha == 1);
+        let all_int = frame
+            .header
+            .channels
+            .iter()
+            .all(|c| matches!(c.dtype, exv_format::Dtype::U8 | exv_format::Dtype::U16));
+        let space = if all_int && !frame.header.channels.is_empty() {
+            "srgb_rec709_display"
+        } else {
+            colorspace::SCENE_LINEAR
+        };
+        let tag = ColorTag { space: space.to_owned(), origin: TagOrigin::Untagged };
+        let mut meta = vec![
+            ("Source format".to_owned(), "EXV1".to_owned()),
+            ("EXV codec".to_owned(), exv_codec_label(&idx.header)),
+            ("EXV frames".to_owned(), idx.frame_count().to_string()),
+            ("EXV tile grid".to_owned(), format!("{}x{}", idx.header.tile_w, idx.header.tile_h)),
+        ];
+        if let Some(m) = idx.meta() {
+            if let Some((n, d)) = m.fps {
+                meta.push(("fps".to_owned(), format!("{n}/{d}")));
+            }
+            if let Some((n, d)) = m.pixel_aspect {
+                meta.push(("pixelAspectRatio".to_owned(), format!("{n}/{d}")));
+            }
+            if let Some(tc) = m.timecode {
+                meta.push(("timecode".to_owned(), tc.to_string()));
+            }
+        }
+        (out, tag, straight, meta)
+    };
+
+    for (ch, plane) in frame.header.channels.into_iter().zip(frame.planes) {
+        let data = exv_plane_to_channel(&plane, ch.dtype);
+        out.insert_channel(ch.name, data).map_err(|e| ImportError::Pixels(e.to_string()))?;
+    }
+
+    Ok(Loaded { image: out, tag, straight, meta })
+}
+
+/// Decode frame `frame_idx` from an already-mapped `.exv` container (`data` + `idx`).
+pub fn load_exv_frame_from_index(
+    path: &Path,
+    data: &[u8],
+    idx: &exv_video::VideoIndex,
+    frame_idx: usize,
+) -> Result<Loaded, ImportError> {
+    let frame = exv_video::decode_frame(data, idx, frame_idx, exv_video::Chans::All)
+        .and_then(exv_video::Frame::into_image)
+        .map_err(|e| ImportError::Pixels(format!("{}: frame {frame_idx}: {e}", path.display())))?;
+    loaded_from_exv_image(path, frame, idx)
+}
+
+/// Open `path` as an `.exv` container and decode display frame `frame_idx`.
+pub fn load_exv_frame(path: &Path, frame_idx: usize) -> Result<Loaded, ImportError> {
+    let data = exv_format::fsio::open_ro(path)
+        .map_err(|e| ImportError::Pixels(format!("{}: {e}", path.display())))?;
+    let idx = exv_video::VideoIndex::parse(&data)
+        .map_err(|e| ImportError::Pixels(format!("{}: {e}", path.display())))?;
+    load_exv_frame_from_index(path, &data, &idx, frame_idx)
+}
+
 /// Decode `path` with vfx-io. PNG, TIFF, TGA and WebP are asked for straight alpha (see the
 /// module docs); the rest go through the registry, format picked by magic bytes like vfx-io does.
 fn decode(path: &Path) -> Result<ImageData, ImportError> {
@@ -468,8 +689,12 @@ fn decode(path: &Path) -> Result<ImageData, ImportError> {
     }
 }
 
-/// Load a foreign still: first frame/page of multi-image files (GIF, ICO, TIFF, WebP).
+/// Load a foreign still (or frame 0 of an `.exv` container): first frame/page of multi-image files
+/// (EXV, GIF, ICO, TIFF, WebP).
 pub fn load(path: &Path) -> Result<Loaded, ImportError> {
+    if is_exv(path) || has_exv_magic(path) {
+        return load_exv_frame(path, 0);
+    }
     let img = decode(path)?;
     let tag = foreign_tag(&img);
     let spec = img.to_spec();
@@ -509,9 +734,16 @@ impl Loaded {
     /// (no colour conversion), alpha associated (straight colour multiplied by alpha in the stored
     /// encoding, OpenEXR's alpha model), and the tag as the standard `colorInteropID` attribute
     /// when the file named it (an untagged still stays untagged, so a reader's file rules decide).
+    /// Any OpenEXR attributes already on `self.image` (e.g. restored from `.exv`'s `exr_headers`)
+    /// are preserved intact.
     pub fn to_exr(self) -> Result<Image, ImportError> {
         let Loaded { image, tag, straight, .. } = self;
         let mut out = Image::new(image.data_window);
+        out.display_window = image.display_window;
+        out.compression = image.compression;
+        out.line_order = image.line_order;
+        out.set_tiling(image.tiling());
+        *out.attributes_mut() = image.attributes().clone();
         let alpha = image.channel("A").map(ChannelData::to_f32);
         let pixels = |e: exr_core::ExrError| ImportError::Pixels(e.to_string());
         for (name, data) in image.into_channels().map_err(pixels)? {
@@ -539,6 +771,30 @@ impl Loaded {
 
 /// A header-level summary for `exr-rs info` (size, channels, format) without decoding the pixels.
 pub fn probe(path: &Path) -> Result<Vec<(String, String)>, ImportError> {
+    if is_exv(path) || has_exv_magic(path) {
+        let data = exv_format::fsio::open_ro(path)
+            .map_err(|e| ImportError::Pixels(format!("{}: {e}", path.display())))?;
+        let idx = exv_video::VideoIndex::parse(&data)
+            .map_err(|e| ImportError::Pixels(format!("{}: {e}", path.display())))?;
+        let mut rows = vec![
+            ("format".into(), "EXV1".into()),
+            ("size".into(), format!("{}x{}", idx.header.width, idx.header.height)),
+            ("channels".into(), idx.header.channels.len().to_string()),
+            ("frames".into(), idx.frame_count().to_string()),
+            ("codec".into(), exv_codec_label(&idx.header)),
+            ("tile_grid".into(), format!("{}x{}", idx.header.tile_w, idx.header.tile_h)),
+            ("gop".into(), idx.gop.to_string()),
+        ];
+        if let Some(m) = idx.meta() {
+            if let Some((n, d)) = m.fps {
+                rows.push(("fps".into(), format!("{n}/{d}")));
+            }
+            if !m.exr_headers.is_empty() {
+                rows.push(("exr_headers".into(), m.exr_headers.len().to_string()));
+            }
+        }
+        return Ok(rows);
+    }
     let bad = |source| ImportError::Decode { path: path.display().to_string(), source };
     let format = vfx_io::Format::detect(path).map_err(bad)?;
     if matches!(format, vfx_io::Format::Exr | vfx_io::Format::Tx) {
@@ -550,6 +806,188 @@ pub fn probe(path: &Path) -> Result<Vec<(String, String)>, ImportError> {
         ("size".into(), format!("{w}x{h}")),
         ("channels".into(), c.to_string()),
     ])
+}
+
+/// Convert an [`exr_core::api::Image`] into an `.exv` [`exv_codec::image::Image`] and its
+/// [`exv_format::Meta`] with the full OpenEXR [`Header`] embedded in [`exv_format::Meta::exr_headers`].
+pub fn exr_to_exv_image(
+    img: &Image,
+) -> Result<(exv_codec::image::Image, exv_format::Meta), ImportError> {
+    let attr_err = |e: exr_core::ExrError| ImportError::Attr(e.to_string());
+    let mut hdr = Header::with_windows(
+        img.display_window,
+        img.data_window,
+        1.0,
+        imath_rs::V2f::new(0.0, 0.0),
+        1.0,
+        img.line_order,
+        img.compression,
+    )
+    .map_err(attr_err)?;
+    if let Some(td) = img.tiling() {
+        hdr.set_tile_description(td).map_err(attr_err)?;
+    }
+    let mut planes = Vec::new();
+    for (name, cd) in img.channels() {
+        let samp = img.sampling(name);
+        if samp != Some((1, 1)) {
+            return Err(ImportError::Pixels(format!(
+                "channel '{name}' is subsampled ({samp:?}): EXV planes require full (1, 1) sampling"
+            )));
+        }
+        hdr.channels_mut()
+            .map_err(attr_err)?
+            .insert(
+                name,
+                exr_core::attr::Channel::new(cd.pixel_type(), 1, 1, false),
+            )
+            .map_err(attr_err)?;
+        let plane: Vec<u8> = match cd {
+            ChannelData::Half(v) => v.iter().flat_map(|x| x.bits().to_le_bytes()).collect(),
+            ChannelData::Float(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
+            ChannelData::Uint(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
+        };
+        planes.push(plane);
+    }
+    img.attributes().apply_to(&mut hdr).map_err(attr_err)?;
+    let (exv_hdr, meta) = exv_format::Header::from_exr_headers(&[hdr], 1, (256, 256), 0, Vec::new())
+        .map_err(|e| ImportError::Attr(e.to_string()))?;
+    let exv_img = exv_codec::image::Image::new(exv_hdr, planes)
+        .map_err(|e| ImportError::Pixels(e.to_string()))?;
+    Ok((exv_img, meta))
+}
+
+/// Parse an `.exv` codec name (`bc6h`, `bc6h-lossless`, `bc6h-lossy`, `htj2k`, `fast`, `wave`, `rt`).
+pub fn parse_exv_profile(spec: &str) -> Result<exv_codec::Profile, ImportError> {
+    match spec.trim().to_ascii_lowercase().as_str() {
+        "bc6h" | "bc6h-lossless" | "bc6h_lossless" => Ok(exv_codec::Profile::bc6h_lossless()),
+        "bc6h-lossy" | "bc6h_lossy" => Ok(exv_codec::Profile::bc6h_lossy()),
+        "htj2k" | "jph" => Ok(exv_codec::Profile::htj2k()),
+        "fast" | "rans" => Ok(exv_codec::Profile::lossless_fast()),
+        "wave" | "wavelet" => Ok(exv_codec::Profile::lossless_wave()),
+        "rt" | "exvrt" | "exv-rt" => Ok(exv_codec::Profile::exv_rt_dwt(8, 0)),
+        other => Err(ImportError::Attr(format!(
+            "unknown EXV codec '{other}' (expected: bc6h-lossless, bc6h-lossy, htj2k, fast, wave, rt)"
+        ))),
+    }
+}
+
+/// Write a single [`exr_core::api::Image`] to `path` as a 1-frame `.exv` still with `profile`,
+/// preserving its complete OpenEXR [`Header`] inside [`exv_format::Meta::exr_headers`].
+pub fn write_exr_as_exv(
+    path: &Path,
+    img: &Image,
+    profile: exv_codec::Profile,
+) -> Result<(), ImportError> {
+    write_exr_frames_as_exv(path, std::slice::from_ref(img), profile, 1)
+}
+
+/// Write one or more [`exr_core::api::Image`] frames to `path` as an `.exv` video container with
+/// `profile` and GOP cadence `gop` (`1` = all-intra, `> 1` = temporal `PRED` delta frames),
+/// preserving the complete OpenEXR [`Header`] inside [`exv_format::Meta::exr_headers`].
+pub fn write_exr_frames_as_exv(
+    path: &Path,
+    frames: &[Image],
+    profile: exv_codec::Profile,
+    gop: u32,
+) -> Result<(), ImportError> {
+    if frames.is_empty() {
+        return Err(ImportError::Pixels(format!("{}: cannot write an empty EXV clip", path.display())));
+    }
+    let mut exv_frames = Vec::with_capacity(frames.len());
+    let mut meta = None;
+    for (i, img) in frames.iter().enumerate() {
+        let (exv_img, m) = exr_to_exv_image(img)
+            .map_err(|e| ImportError::Pixels(format!("{}: frame {i}: {e}", path.display())))?;
+        if meta.is_none() {
+            meta = Some(m);
+        }
+        exv_frames.push(exv_img);
+    }
+    let opts = exv_video::WriteOpts {
+        gop: gop.max(1),
+        meta: meta.unwrap_or_default(),
+        ..Default::default()
+    };
+    let bytes = exv_video::write_video_meta(&exv_frames, &profile, &opts)
+        .map_err(|e| ImportError::Pixels(format!("{}: {e}", path.display())))?;
+    exv_format::fsio::write_atomic(path, &bytes)
+        .map_err(|e| ImportError::Pixels(format!("{}: {e}", path.display())))
+}
+
+/// An open, memory-mapped `.exv` video clip with a shared [`exv_video::GopCache`] for P/B chains.
+pub struct ExvClip {
+    path: PathBuf,
+    data: exv_video::Bytes,
+    idx: exv_video::VideoIndex,
+    gop: exv_video::GopCache,
+    clip_id: u64,
+}
+
+impl ExvClip {
+    /// Open `path` as an `.exv` container with a `gop_budget`-byte [`exv_video::GopCache`] for temporal P/B frames.
+    pub fn open(path: &Path, gop_budget: usize) -> Result<Self, ImportError> {
+        let data = exv_video::open_bytes(path)
+            .map_err(|e| ImportError::Pixels(format!("{}: {e}", path.display())))?;
+        let idx = exv_video::VideoIndex::parse((*data).as_ref())
+            .map_err(|e| ImportError::Pixels(format!("{}: {e}", path.display())))?;
+        let gop = exv_video::GopCache::new(exv_format::bufpool::Budget::new((gop_budget as u64).max(64 << 20)));
+        let clip_id = gop.open_clip();
+        Ok(Self {
+            path: path.to_path_buf(),
+            data,
+            idx,
+            gop,
+            clip_id,
+        })
+    }
+
+    /// Source file path.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Number of frames in the `.exv` container.
+    pub fn frame_count(&self) -> usize {
+        self.idx.frame_count()
+    }
+
+    /// Frame rate declared in the container metadata (`fps_num / fps_den`), if any.
+    pub fn fps(&self) -> Option<f32> {
+        let (n, d) = self.idx.meta()?.fps?;
+        (n > 0 && d > 0).then(|| n as f32 / d as f32)
+    }
+
+    /// Codec label for the UI status bar (`BC6H (lossless residual)`, `HTJ2K`, ...).
+    pub fn codec_label(&self) -> String {
+        exv_codec_label(&self.idx.header)
+    }
+
+    /// Reconstruct embedded OpenEXR part [`Header`]s from `Meta::exr_headers`, if present.
+    pub fn exr_headers(&self) -> Option<Vec<Header>> {
+        self.idx.header.to_exr_headers(self.idx.meta()).ok().filter(|v| !v.is_empty())
+    }
+
+    /// Decode display frame `frame_idx` (reusing cached P/B reference frames when `gop > 1`).
+    pub fn load_frame(&self, frame_idx: usize) -> Result<Loaded, ImportError> {
+        let bytes = (*self.data).as_ref();
+        if self.idx.gop <= 1 {
+            return load_exv_frame_from_index(&self.path, bytes, &self.idx, frame_idx);
+        }
+        let cancel = exv_format::bufpool::Cancel::new();
+        let frame = match self.gop.get(self.clip_id, bytes, &self.idx, frame_idx, exv_video::Chans::All, &cancel) {
+            Ok(lease) => lease
+                .to_image()
+                .map_err(|e| ImportError::Pixels(format!("{}: frame {frame_idx}: {e}", self.path.display())))?,
+            Err(_) => {
+                // Fall back to stateless decode if the GOP cache budget was exceeded by concurrent workers.
+                exv_video::decode_frame(bytes, &self.idx, frame_idx, exv_video::Chans::All)
+                    .and_then(exv_video::Frame::into_image)
+                    .map_err(|e| ImportError::Pixels(format!("{}: frame {frame_idx}: {e}", self.path.display())))?
+            }
+        };
+        loaded_from_exv_image(&self.path, frame, &self.idx)
+    }
 }
 
 #[cfg(test)]

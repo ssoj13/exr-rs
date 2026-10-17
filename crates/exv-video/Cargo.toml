@@ -1,0 +1,33 @@
+[package]
+name = "exv-video"
+description = "EXV container: tiled temporal video (I/P/B, global MV), streaming ClipWriter, GOP-aware reads, shared file IO."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "exv_video"
+path = "src/video.rs"
+
+[features]
+# Mirror exv-codec's HTJ2K switch so a consumer that pulls exv-video with `default-features = false`
+# (e.g. exv-gpu, which gates its OWN htj2k-backend) does NOT force `exv-codec/htj2k-backend` on — the
+# `Transform::Htj2k` variant then follows ONE feature across the whole graph (feature-unification).
+# Default-on keeps every direct consumer (cli/view/capi) HTJ2K-enabled exactly as before.
+default = ["htj2k-backend"]
+htj2k-backend = ["exv-codec/htj2k-backend"]
+
+[dependencies]
+# Data-parallel encode: frames within a window encode concurrently (temporal delta uses the
+# INPUT prev frame, so frames are independent given loaded inputs).
+rayon.workspace = true
+# Span instrumentation for chrome://tracing + leveled logs (per-frame / per-GOP decode cost).
+tracing.workspace = true
+exv-format = { path = "../exv-format" }
+# `default-features = false` so exv-codec's `htj2k-backend` follows exv-video's OWN feature (above),
+# not exv-codec's default — required for exv-gpu to keep the feature unified when it pulls exv-video.
+exv-codec = { path = "../exv-codec", default-features = false }
+# Tile engine: the `TileSource` seam (`ExvSource`) and the byte-budget formulas every writer/reader window uses.
+exv-tile = { path = "../exv-tile" }

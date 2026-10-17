@@ -1,0 +1,36 @@
+[package]
+name = "exv-gpu-kernels"
+description = "Pure GPU tile/block decode kernels (rANS lanes, inverse 5/3 wavelet, EXV-RT block codec) + the reusable GpuContext. NO jph, NO atlas, NO dispatch."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "exv_gpu_kernels"
+path = "src/kernels.rs"
+
+[dependencies]
+# Zero-copy `&[u32]` -> `&[u8]` view for storage-buffer uploads (`storage_u32`); pure safe casts.
+bytemuck = "1"
+# Parallel fill of the upload staging memory (`storage_parts`).
+rayon.workspace = true
+# Entropy foundation: the WGSL rANS decoders replicate `rans-rs`'s CPU steps bit-for-bit
+# (`rans::parse`/`rans::Model`), and `rans::Prepared` rides the crate prelude.
+rans-rs = { path = "../rans-rs" }
+# Container dtypes + per-blob classification consumed by the tile decoders (`Dtype`, `BlobKind`,
+# `CodecId`, `classify_blob`).
+exv-format = { path = "../exv-format" }
+# `GpuContext::recommended_tile_size` calls `exv_tile::pick_tile_size` — ONE budget contract shared by
+# the decoder and the out-of-core tiler. exv-tile depends only on exv-format, so this edge is acyclic.
+exv-tile = { path = "../exv-tile" }
+# wgpu comes ONLY from gpu-info-rs (`gpu_info::wgpu`) → a single version (30) across the whole graph.
+# branch=main is the EXACT SAME spec exv-gpu and jph-wgpu use, so cargo unifies to one gpu-info-rs
+# (hence one wgpu): this crate's `wgpu::Device` IS the device exv-gpu injects into jph-wgpu via
+# `Gpu::from_parts`. Do NOT change the ref without changing it in exv-gpu in lockstep.
+gpu-info-rs = { git = "ssh://git@github.com/ssoj13/gpu-info-rs.git", branch = "main" }
+
+[dev-dependencies]
+# WGSL parse+validate of every composed shader source (no GPU needed); same naga as wgpu 30 (no duplicate copy).
+naga = { version = "30", features = ["wgsl-in"] }

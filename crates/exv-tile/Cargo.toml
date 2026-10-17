@@ -1,0 +1,17 @@
+[package]
+name = "exv-tile"
+description = "EXV out-of-core tiling engine: fallible TileSource, byte-budget TilePool, memory budgets, region reads."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "exv_tile"
+path = "src/tile.rs"
+
+[dependencies]
+exv-format = { path = "../exv-format", features = ["rayon"] }
+rayon.workspace = true
+gpu-info = { git = "ssh://git@github.com/ssoj13/gpu-info-rs.git", branch = "main", package = "gpu-info-rs", default-features = false }

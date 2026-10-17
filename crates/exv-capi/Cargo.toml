@@ -1,0 +1,34 @@
+[package]
+name = "exv-capi"
+description = "C ABI (cdylib) over exv-codec/exv-video — the FFI seam for native hosts (After Effects, …)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+# The project's only FFI boundary. The core (exv-codec/exv-format/exv-video) stays
+# pure safe-Rust; this crate exposes a flat C ABI so that native system
+# plugins (After Effects AEIO) can link the codec. The structure mirrors 1:1
+# the sibling apv-rs `apv-capi` (path-session model), but without YCbCr/CICP/color management —
+# EXV already stores linear RGBA-float / arbitrary planar channels.
+[lib]
+name = "exv_capi"             # -> exv_capi.dll / libexv_capi.so / exv_capi.a
+path = "src/capi.rs"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+exv-format = { path = "../exv-format" }
+exv-codec = { path = "../exv-codec" }
+exv-video = { path = "../exv-video" }
+# Memory budgets (RAM/VRAM formulas, byte windows, TilePool): the ONE owner, see exv-tile/CLAUDE.md.
+exv-tile = { path = "../exv-tile" }
+rayon.workspace = true # row-parallel RGBA pack in `write_rgba` (AE-8)
+
+[dev-dependencies]
+# Regenerates docs/exv-capi.h in the `header_in_sync` test and fails on drift (see cbindgen.toml).
+cbindgen = { version = "0.29", default-features = false }
+# Thread-local span counter for the decode-count proof of the shared GOP cache (`capi_sequential_p_gop_reuses_references`).
+tracing.workspace = true
+tracing-subscriber.workspace = true

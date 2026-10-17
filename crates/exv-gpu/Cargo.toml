@@ -1,0 +1,49 @@
+[package]
+name = "exv-gpu"
+description = "EXV wgpu WGSL decode orchestration (codec routing, whole-image GPU decode, resident atlas + plane compose) over exv-gpu-kernels."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "exv_gpu"
+path = "src/gpu.rs"
+
+[features]
+# HTJ2K on by default, mirroring exv-codec's default. Enabling here also enables exv-codec/htj2k-backend;
+# `--no-default-features` drops it in both. exv-gpu no longer matches `Transform` exhaustively (it routes on
+# the always-present `exv_codec::GpuKind`), so the old feature-unification footgun is gone.
+default = ["htj2k-backend"]
+# HTJ2K-on-GPU + resident tile atlas.
+htj2k-backend = ["exv-codec/htj2k-backend", "exv-video/htj2k-backend"]
+
+[dependencies]
+# Parallel blob parse of the whole-frame EXV-RT batch (`decode_blockrt_batched`).
+rayon.workspace = true
+# Worker shutdown warnings.
+log.workspace = true
+# Zero-copy `&[u32]` -> `&[u8]` views for the staging fills of the batched hosts.
+bytemuck = "1"
+rans-rs = { path = "../rans-rs" }
+exv-format = { path = "../exv-format" }
+# Codec: `decode_still_gpu` routes raw/deflate (and GPU-incapable rANS) tiles to the CPU
+# `decode_channel` and reuses `Profile`/`Transform`. Edge exv-gpu → exv-codec is acyclic
+# (exv-codec does NOT depend on exv-gpu — the `GpuKind` capability enum lives in exv-codec's registry).
+# `default-features = false` so exv-codec's `htj2k-backend` follows exv-gpu's OWN feature.
+exv-codec = { path = "../exv-codec", default-features = false }
+# `.exv` container access for the GPU blob seam (C0): `still_frame_body(data) -> (Header, &body)` →
+# `exv_codec::frame::FrameReader::open(body, header)` gives the RAW per-tile blob the GPU decoders
+# (jph-wgpu / rANS) consume. `default-features = false` so its `htj2k-backend` follows exv-gpu's OWN
+# feature (wired above), keeping `Transform::Htj2k` unified across the graph. Acyclic: exv-video →
+# exv-codec, exv-gpu → {exv-codec, exv-video}; exv-codec depends on neither.
+exv-video = { path = "../exv-video", default-features = false }
+# Pure GPU decode kernels + GpuContext (extracted crate). exv-gpu is the
+# orchestration layer (dispatch/htj2k/atlas/compose) over it. It shares gpu-info-rs (hence wgpu)
+# with THIS crate VERBATIM, so the graph unifies to one wgpu (v30; the resident path injects our device
+# into jph-wgpu). Its low-level plumbing (storage_u32/e/pass/map_read_blocking/Pipelines/decode_exvrt_into)
+# is `pub` so dispatch can build bind groups against the shared pipeline cache.
+exv-gpu-kernels = { path = "../exv-gpu-kernels" }
+# wgpu comes ONLY from gpu-info-rs (`gpu_info::wgpu`) → a single version (30) across the whole graph.
+gpu-info-rs = { git = "ssh://git@github.com/ssoj13/gpu-info-rs.git", branch = "main" }

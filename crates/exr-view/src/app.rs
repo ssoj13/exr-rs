@@ -317,6 +317,23 @@ impl CryptoCatalog {
                 return None;
             }
         };
+        Self::from_layers(path, layers)
+    }
+
+    fn discover_headers(path: &std::path::Path, headers: &[exr_core::header::Header]) -> Option<Self> {
+        let mut found = Vec::new();
+        for (p, header) in headers.iter().enumerate() {
+            let names: Vec<String> = header.channels().ok()?.iter().map(|(n, _)| n.to_string()).collect();
+            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            for mut layer in cryptomatte::discover_layers(header, &refs).ok()? {
+                layer.part = p;
+                found.push(layer);
+            }
+        }
+        Self::from_layers(path, found)
+    }
+
+    fn from_layers(path: &std::path::Path, layers: Vec<cryptomatte::LayerInfo>) -> Option<Self> {
         let mut out = Vec::with_capacity(layers.len());
         for layer in layers {
             let manif = load_manifest(
@@ -364,6 +381,12 @@ enum OpenOutcome {
         sequence: Seq,
         /// Every present frame's modification time at the scan (the reload baseline).
         stamps: Stamps,
+        crypto: Option<CryptoCatalog>,
+    },
+    /// A multi-frame `.exv` video container (`frame_count > 1`).
+    ExvClip {
+        path: PathBuf,
+        clip: Arc<exr_import::ExvClip>,
         crypto: Option<CryptoCatalog>,
     },
     /// A single image, already decoded.
@@ -429,6 +452,45 @@ fn open_blocking(path: PathBuf, detect_sequence: bool, backing: u64) -> OpenOutc
         }
     }
 
+    // Native `.exv` container: a multi-frame `.exv` opens as a sequence (`ExvClip`);
+    // a 1-frame `.exv` opens as a single image, both discovering Cryptomatte from embedded `exr_headers`.
+    if exr_import::is_exv(&seed) || exr_import::has_exv_magic(&seed) {
+        return match exr_import::ExvClip::open(&seed, (backing as usize).max(64 << 20)) {
+            Ok(clip) => {
+                let crypto = clip
+                    .exr_headers()
+                    .and_then(|hdrs| CryptoCatalog::discover_headers(&seed, &hdrs));
+                if clip.frame_count() > 1 {
+                    OpenOutcome::ExvClip {
+                        path: seed,
+                        clip: Arc::new(clip),
+                        crypto,
+                    }
+                } else {
+                    match clip
+                        .load_frame(0)
+                        .map_err(|e| crate::image::LoadError::Read(e.to_string()))
+                        .and_then(|loaded| DecodedFrame::from_loaded(&seed, loaded))
+                    {
+                        Ok(frame) => OpenOutcome::Single {
+                            path: seed,
+                            frame: Box::new(frame),
+                            crypto,
+                        },
+                        Err(e) => OpenOutcome::Failed {
+                            path: seed,
+                            reason: e.status(),
+                        },
+                    }
+                }
+            }
+            Err(e) => OpenOutcome::Failed {
+                path: seed,
+                reason: e.to_string(),
+            },
+        };
+    }
+
     // Too large to hold (a 65k plate) -> file-backed, decoded per tile band.
     // Half the tile cache's RAM budget: the frame must leave the cache room.
     match DecodedFrame::open(&seed, backing) {
@@ -466,7 +528,10 @@ pub struct SequenceState {
     source_epoch: Option<u64>,
     /// The detected sequence (frame set + naming), shared with the decode loader and
     /// replaced when a rescan finds new frames (the loader resolves frame -> file here).
-    pub sequence: Arc<std::sync::RwLock<Seq>>,
+    /// `None` when the sequence is a single multi-frame `.exv` container (`exv_path`).
+    pub sequence: Option<Arc<std::sync::RwLock<Seq>>>,
+    /// When the sequence is a multi-frame `.exv` container rather than a folder of frame files.
+    exv_path: Option<PathBuf>,
     /// The folder rescan: frames added by a render in progress, frames rewritten.
     watch: SeqWatch,
     /// FPS-based clock over the present frames.
@@ -529,7 +594,11 @@ impl SequenceState {
             return changed;
         }
         self.watch.next = now + WATCH_PERIOD;
-        let seed = self.sequence.read().ok().and_then(|s| s.get_file(i64::from(self.playback.current())));
+        let seed = self
+            .sequence
+            .as_ref()
+            .and_then(|seq| seq.read().ok())
+            .and_then(|s| s.get_file(i64::from(self.playback.current())));
         let Some(seed) = seed else { return changed };
         let (tx, rx) = std::sync::mpsc::channel();
         let wake = Arc::clone(wake);
@@ -562,9 +631,11 @@ impl SequenceState {
         { self.source_epoch = self.source_epoch.and_then(|epoch| epoch.checked_add(1)); }
         let indices: Vec<i32> = seq.indices.iter().map(|&f| f as i32).collect();
         // The loader must resolve the new frames before the cache asks for them.
-        match self.sequence.write() {
-            Ok(mut s) => *s = seq,
-            Err(e) => log::warn!("sequence rescan: the sequence lock is poisoned: {e}"),
+        if let Some(shared) = &self.sequence {
+            match shared.write() {
+                Ok(mut s) => *s = seq,
+                Err(e) => log::warn!("sequence rescan: the sequence lock is poisoned: {e}"),
+            }
         }
         if set_changed {
             log::info!("sequence rescan: {} frames present", indices.len());
@@ -982,6 +1053,18 @@ impl AppState {
                 self.crypto = crypto;
                 self.open_sequence(sequence, stamps);
             }
+            OpenOutcome::ExvClip {
+                path,
+                clip,
+                crypto,
+            } => {
+                self.reloading = false;
+                self.reset_view_state();
+                self.record_open(&path, true);
+                self.watch = Some(Watch::new(path.clone()));
+                self.crypto = crypto;
+                self.open_exv_clip(path, clip);
+            }
             OpenOutcome::Single {
                 path,
                 frame,
@@ -1126,8 +1209,87 @@ impl AppState {
         self.seq = Some(SequenceState {
             #[cfg(feature = "ofx")]
             source_epoch: Some(0),
-            sequence: shared,
+            sequence: Some(shared),
+            exv_path: None,
             watch: SeqWatch::new(stamps),
+            playback,
+            cache,
+            fails,
+            frame_budget,
+            meter: Default::default(),
+            display: None,
+            displayed_frame: None,
+            last_seen: cur,
+            scrubbing: false,
+            timeline_scrub: false,
+        });
+    }
+
+    /// Open a multi-frame `.exv` video clip as a sequence over frames `0..frame_count`.
+    fn open_exv_clip(&mut self, path: PathBuf, clip: Arc<exr_import::ExvClip>) {
+        if let Err(error) = self.ram_partitions.validate() {
+            self.status = error.to_string();
+            return;
+        }
+        let n = clip.frame_count();
+        let indices: Vec<i32> = (0..n as i32).collect();
+        let fps = clip.fps().unwrap_or(self.config.fps);
+        let mut playback = Playback::new(indices.clone(), fps);
+        playback.loop_ = self.config.loop_;
+        let cur = playback.current();
+
+        let fails = Arc::new(crate::frame_loader::Fails::default());
+        let fails_for_loader = Arc::clone(&fails);
+        let clip_for_loader = Arc::clone(&clip);
+        let loader: scancache::Loader<DecodedFrame> = Arc::new(move |frame: i32, cancel: &scancache::Cancel| {
+            if cancel.is_cancelled() {
+                return Err("cancelled".to_owned());
+            }
+            let idx = usize::try_from(frame).map_err(|_| format!("frame {frame}: out of range"))?;
+            let res = clip_for_loader
+                .load_frame(idx)
+                .map_err(|e| crate::image::LoadError::Read(e.to_string()))
+                .and_then(|loaded| DecodedFrame::from_loaded(clip_for_loader.path(), loaded));
+            match res {
+                Ok(f) => {
+                    fails_for_loader.clear(frame);
+                    if cancel.is_cancelled() {
+                        Err("cancelled".to_owned())
+                    } else {
+                        Ok(f)
+                    }
+                }
+                Err(e) => Err(e.status()),
+            }
+        });
+        let size_of: scancache::SizeOf<DecodedFrame> = Arc::new(|f: &DecodedFrame| f.byte_size());
+        let wake = Arc::clone(&self.wake);
+        let frame_budget: scancache::SharedBudget =
+            Arc::new(std::sync::atomic::AtomicUsize::new(self.frame_cap()));
+        let cache = Scancache::with_shared_budget(
+            indices,
+            Arc::clone(&frame_budget),
+            decode_threads(),
+            size_of,
+            loader,
+            wake,
+        );
+        cache.set_strategy(self.config.preload_strategy);
+        cache.set_playhead(
+            scancache::Playhead::at(cur).with_range((playback.first(), playback.last())),
+        );
+        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("<exv>");
+        self.status = format!(
+            "{name}  —  {n} frames [0-{}]  [{}]",
+            n.saturating_sub(1),
+            clip.codec_label(),
+        );
+        self.seq = Some(SequenceState {
+            #[cfg(feature = "ofx")]
+            source_epoch: Some(0),
+            sequence: None,
+            exv_path: Some(path),
+            watch: SeqWatch::new(Stamps::new()),
             playback,
             cache,
             fails,
@@ -1648,7 +1810,9 @@ impl AppState {
         if self.pending_open.is_some() {
             return false;
         }
-        if let Some(s) = self.seq.as_mut() {
+        if let Some(s) = self.seq.as_mut()
+            && s.exv_path.is_none()
+        {
             return s.poll_rescan(Instant::now(), &self.wake);
         }
         let Some(watch) = self.watch.as_mut() else {
@@ -1667,8 +1831,8 @@ impl AppState {
     /// When [`Self::poll_watch`] next wants to run (the event loop sleeps until then).
     pub fn watch_deadline(&self) -> Option<Instant> {
         match &self.seq {
-            Some(s) => Some(s.watch.next),
-            None => self.watch.as_ref().map(|w| w.next),
+            Some(s) if s.exv_path.is_none() => Some(s.watch.next),
+            _ => self.watch.as_ref().map(|w| w.next),
         }
     }
 
@@ -1760,10 +1924,14 @@ impl AppState {
         let (cur, own): (PathBuf, HashSet<PathBuf>) = match (&self.image, &self.seq) {
             (Some(img), _) => (img.frame.path.clone(), HashSet::new()),
             (None, Some(s)) => {
-                let seq = s.sequence.read().ok()?;
-                let file = |f: i32| seq.get_file(i64::from(f)).map(PathBuf::from);
-                let own = s.playback.indices().iter().filter_map(|&f| file(f)).collect();
-                (file(s.playback.current())?, own)
+                if let Some(path) = &s.exv_path {
+                    (path.clone(), HashSet::new())
+                } else {
+                    let seq = s.sequence.as_ref()?.read().ok()?;
+                    let file = |f: i32| seq.get_file(i64::from(f)).map(PathBuf::from);
+                    let own = s.playback.indices().iter().filter_map(|&f| file(f)).collect();
+                    (file(s.playback.current())?, own)
+                }
             }
             (None, None) => return None,
         };
@@ -3519,7 +3687,7 @@ fn first_frame_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
         .ok()?
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.is_file() && is_seed_candidate(p))
+        .filter(|p| p.is_file() && (is_seed_candidate(p) || exr_import::is_exv(p)))
         .collect();
     // Sort for determinism (lowest filename first).
     frames.sort();
@@ -4028,6 +4196,45 @@ mod seq_watch_tests {
         let seq = app.seq.as_ref().expect("a .png set opens as a sequence");
         assert_eq!(seq.playback.indices(), &[1, 2, 3]);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A multi-frame `.exv` video container opens directly as a sequence over frames `0..N`
+    /// and decodes its frames into the sequence cache.
+    #[test]
+    fn an_exv_clip_opens_as_a_sequence() {
+        let tmp = tempfile::Builder::new().prefix("exr-view-exvclip-").tempdir().unwrap();
+        let path = tmp.path().join("clip.exv");
+        let win = imath_rs::Box2i::from_min_max(imath_rs::V2i::new(0, 0), imath_rs::V2i::new(3, 3));
+        let frames: Vec<exr_core::api::Image> = (0..3)
+            .map(|i| {
+                exr_core::api::Image::new(win).with_channel(
+                    "R",
+                    exr_core::api::ChannelData::Half(vec![imath_rs::Half::from(i as f32 + 1.0); 16]),
+                )
+            })
+            .collect();
+        exr_import::write_exr_frames_as_exv(
+            &path,
+            &frames,
+            exr_import::parse_exv_profile("bc6h-lossless").unwrap(),
+            2,
+        )
+        .unwrap();
+        let mut app = AppState::new(None, Config::default(), false, Arc::new(|| {}));
+        app.apply_open(open_blocking(path, false, u64::MAX));
+        let seq = app.seq.as_ref().expect("multi-frame .exv opens as a sequence");
+        assert_eq!(seq.playback.indices(), &[0, 1, 2]);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !app.seq.as_ref().is_some_and(|s| (0..3).all(|f| s.cache.contains(f))) {
+            assert!(Instant::now() < deadline, "all .exv frames decode");
+            app.tick_sequence();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let s = app.seq.as_ref().unwrap();
+        for f in 0..3 {
+            let val = s.cache.get(f).and_then(|d| d.channels[0].1.sample_f32(0));
+            assert_eq!(val, Some(f as f32 + 1.0));
+        }
     }
 
     /// New frames change the set; a different time on a surviving frame is a rewrite;

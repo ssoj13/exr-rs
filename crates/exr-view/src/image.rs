@@ -371,19 +371,24 @@ impl DecodedFrame {
         frame.map(|f| Self { version, ..f })
     }
 
-    /// A non-EXR still (`exr-import`: PNG, DPX, HDR, ...), always resident. It arrives with its
+    /// A non-EXR still (`exr-import`: PNG, DPX, HDR, EXV, ...), always resident. It arrives with its
     /// values as read, its colour tag and its alpha kind, so the display converts it from its own
     /// colour space like any EXR. The source format and depth head the Metadata panel.
     fn import(path: &Path) -> Result<DecodedFrame, LoadError> {
         log::info!("load start {} (exr-import)", path.display());
         let loaded = exr_import::load(path).map_err(|e| LoadError::Read(e.to_string()))?;
+        Self::from_loaded(path, loaded)
+    }
+
+    /// Build a [`DecodedFrame`] from an already-loaded [`exr_import::Loaded`] frame (single still or `.exv` video frame).
+    pub(crate) fn from_loaded(path: &Path, loaded: exr_import::Loaded) -> Result<DecodedFrame, LoadError> {
         let image = loaded.image;
         let (data_window, display_window) = (image.data_window, image.display_window);
         let (width, height) = (image.width().max(0) as u32, image.height().max(0) as u32);
         let channels: Vec<(String, ChannelData)> = image.into_channels().map_err(LoadError::from_exr)?.collect();
         let layers = group_layers(channels.iter().map(|(n, c)| (n.as_str(), c.pixel_type())));
         log::info!("load ok {}: {width}x{height} ({} layers, imported)", path.display(), layers.len());
-        Ok(DecodedFrame {
+        Ok(Self::warmed(DecodedFrame {
             path: path.to_path_buf(),
             width,
             height,
@@ -396,11 +401,11 @@ impl DecodedFrame {
             id: FRAME_ID.fetch_add(1, Ordering::Relaxed),
             file_types: None,
             spans: OnceLock::new(),
-            version: None,
+            version: source_version(path),
             pixel_aspect: 1.0,
             tag: loaded.tag,
             straight: loaded.straight,
-        })
+        }))
     }
 
     /// A subsampled file: every channel read at its own sampling

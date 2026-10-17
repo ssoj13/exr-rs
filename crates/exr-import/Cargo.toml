@@ -15,6 +15,9 @@ path = "src/exr_import.rs"
 
 [dependencies]
 exr-core = { path = "../exr-core" }
+exv-format = { path = "../exv-format" }
+exv-codec = { path = "../exv-codec" }
+exv-video = { path = "../exv-video" }
 imath-rs = { path = "../imath-rs" }
 thiserror = "2"
 # Non-EXR decoders only: EXR stays on exr-core (tiles, levels, deep, parity), so `exr`/`htj2k`

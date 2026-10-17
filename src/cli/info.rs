@@ -49,10 +49,24 @@ pub fn run(args: Args) -> CliResult {
 /// A non-EXR still: format, size and channel count from its header, no pixels decoded. It has no
 /// OpenEXR header to dump, so this is a summary; `convert` brings it into EXR.
 fn foreign(path: &str) -> CliResult {
-    let rows = exr_import::probe(std::path::Path::new(path)).map_err(|e| CliError::Other(e.to_string()))?;
+    let p = std::path::Path::new(path);
+    let rows = exr_import::probe(p).map_err(|e| CliError::Other(e.to_string()))?;
     outln!("file: {path}");
     for (k, v) in rows {
         outln!("  {k}: {v}");
+    }
+    if exr_import::is_exv(p) || exr_import::has_exv_magic(p) {
+        let clip = exr_import::ExvClip::open(p, 64 << 20).map_err(|e| CliError::Other(e.to_string()))?;
+        if let Some(headers) = clip.exr_headers() {
+            outln!("  parts:   {}", headers.len());
+            for (i, header) in headers.iter().enumerate() {
+                outln!();
+                if headers.len() > 1 {
+                    outln!("  part {i}:");
+                }
+                print_header(header);
+            }
+        }
     }
     Ok(())
 }
