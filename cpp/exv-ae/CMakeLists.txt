@@ -54,6 +54,40 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 
 	# NO deploy step here: `python bootstrap.py ae|deploy` is the ONE place that copies ExvAE.aex +
 	# exv_capi.dll into AE MediaCore / Support Files (it refuses while a MediaCore host is running).
+elseif(APPLE)
+	add_compile_definitions(MacOS)
+	set_target_properties(${PROJECT_NAME} PROPERTIES
+		BUNDLE TRUE
+		BUNDLE_EXTENSION "plugin"
+		MACOSX_BUNDLE_BUNDLE_NAME "${PROJECT_NAME}"
+		MACOSX_BUNDLE_INFO_STRING "EXV After Effects AEIO Plugin"
+		MACOSX_BUNDLE_GUI_IDENTIFIER "com.exr-rs.ExvAE"
+	)
+	find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
+	find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+	target_link_libraries(${PROJECT_NAME} PRIVATE ${COCOA_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK})
+
+	find_program(REZ_TOOL Rez HINTS /usr/bin /Library/Developer/CommandLineTools/usr/bin)
+	if(REZ_TOOL)
+		set(RSRC_OUT "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.rsrc")
+		add_custom_command(OUTPUT "${RSRC_OUT}"
+			COMMAND "${REZ_TOOL}"
+				-d SystemSevenOrLater=1
+				-useDF
+				-script Roman
+				-i "${AE_SDK_PATH}/Headers"
+				-i "${AE_SDK_PATH}/Headers/SP"
+				-i "${AE_SDK_PATH}/Util"
+				-i "${AE_SDK_PATH}/Resources"
+				-o "${RSRC_OUT}"
+				"${CMAKE_CURRENT_SOURCE_DIR}/src/ExvAE_PiPL.r"
+			DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/ExvAE_PiPL.r"
+			COMMENT "Compiling macOS PiPL resource via Rez")
+		add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources"
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different "${RSRC_OUT}" "$<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/${PROJECT_NAME}.rsrc"
+			DEPENDS "${RSRC_OUT}")
+	endif()
 endif()
 
 # Pure-logic tests (no AE SDK): `bootstrap.py test` builds + runs them via ctest; by hand:

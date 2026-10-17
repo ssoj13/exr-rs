@@ -43,9 +43,11 @@ crates/openexr-py/tests/official/multipart.exr
 ofxTestLog.txt
 ag.cmd
 
-# Release ZIPs written by `bootstrap.py ci` / `release` (ci.py) and AE cmake build dir
+# Release ZIPs written by `bootstrap.py ci` / `release` (ci.py) and C++ cmake build dirs
 /dist/
 /cpp/exv-ae/build/
+/cpp/exv-nuke/build/
+/cpp/exv-os/build/
 
 # Agent notes and internal planning stay on disk, out of the public repository
 AGENTS.md

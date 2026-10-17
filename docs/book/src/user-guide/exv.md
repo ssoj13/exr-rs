@@ -81,19 +81,33 @@ Opening a multi-frame `.exv` in the viewer loads it directly as a timeline seque
 memory-mapped I/O (`ExvClip`) and the `scancache` playhead engine. Embedded Cryptomatte manifests
 and OpenEXR metadata appear in the toolbar and Metadata panel just as they do for `.exr` sequences.
 
-## C ABI (`exv-capi`) and After Effects plug-in (`ExvAE.aex`)
+## C ABI (`exv-capi`), Host Plug-ins, and OS Integration
 
 - [`crates/exv-capi`](https://github.com/ssoj13/exr-rs/tree/main/crates/exv-capi) builds
   `exv_capi.dll` / `libexv_capi.so` / `libexv_capi.dylib` and generates [`docs/exv-capi.h`](https://github.com/ssoj13/exr-rs/blob/main/docs/exv-capi.h)
   via `cbindgen`. It exposes zero-copy frame decoding, multi-frame clip writing, and all `.exv`
   codecs (`EXV_CODEC_BC6H = 7`, `EXV_CODEC_HTJ2K = 6`, `EXV_CODEC_EXV_RT = 5`, `EXV_CODEC_RANS = 1`,
   `EXV_CODEC_WAVELET = 2`).
-- [`cpp/exv-ae`](https://github.com/ssoj13/exr-rs/tree/main/cpp/exv-ae) builds the native Adobe
-  After Effects AEIO plug-in (`ExvAE.aex`) for importing and exporting `.exv` clips with `BC6H`,
-  `HTJ2K`, `EXV-RT`, and `rANS` profiles.
+- **After Effects (`cpp/exv-ae`):** native Adobe After Effects AEIO plug-in (`ExvAE.aex` on Windows,
+  `ExvAE.plugin` bundle with `Rez` PiPL resource on macOS) for importing and exporting `.exv` clips
+  with `BC6H`, `HTJ2K`, `EXV-RT`, and `rANS` profiles.
+- **Foundry Nuke (`cpp/exv-nuke`):** Nuke NDK `DD::Image::Reader` / `DD::Image::Writer` plug-in
+  (`exvReader` / `exvWriter`) plus standalone `exv_nuke_io` engine for floating-point linear
+  scanline I/O (`Row`) with knob-driven profile, GOP, and quality controls.
+- **OS Shell Extensions & Thumbnailers (`cpp/exv-os`):**
+  - **Windows Explorer (`ExvOsThumb.dll`):** COM `IThumbnailProvider` + `IInitializeWithFile`
+    shell extension with self-registration (`regsvr32 ExvOsThumb.dll`) and Reinhard HDR->sRGB
+    tone-mapping.
+  - **Linux (`cpp/exv-os/linux/`):** FreeDesktop shared-mime-info (`image/x-exv`, `video/x-exv`)
+    and GNOME/KDE `.thumbnailer` entry.
+- **Playa & `video-io-rs`:** native `.exv` sequence/video playback and encoding (`BC6H Lossless`,
+  `BC6H Lossy`, `HTJ2K`, `rANS Fast`, `Wavelet`) directly from the render dialog.
 
-Build and deploy the After Effects plug-in on Windows with:
+Build and test the host plug-ins and OS thumbnailer with:
 
 ```sh
-python bootstrap.py ae
+python bootstrap.py ae   # Build (+ deploy on Windows) After Effects AEIO plug-in
+python bootstrap.py nk   # Build & test Foundry Nuke Reader/Writer plug-in
+python bootstrap.py os   # Build & test OS Explorer / Desktop thumbnailer
 ```
+

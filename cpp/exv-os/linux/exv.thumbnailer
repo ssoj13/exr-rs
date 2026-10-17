@@ -1,0 +1,4 @@
+[Thumbnailer Entry]
+TryExec=exr-rs
+Exec=exr-rs preview %i %o -s %s
+MimeType=video/x-exv;image/x-exv;

@@ -20,7 +20,9 @@ Short directives (one/two letters) drive the common loop; full names also work.
   pd  parity-deflate cargo run -p xtask -- parity-deflate (C libdeflate byte-exact)
   s   setup         cargo run -p xtask -- setup          (prove cl/cmake on PATH)
   v   view          cargo run -p exr-rs -- view [--auto] [file|dir|frame]  (GPU viewer; --auto = scan sequence)
-  ae  e             build + deploy the After Effects AEIO plugin (ExvAE.aex + exv_capi.dll)
+  ae  e             build + deploy the After Effects AEIO plugin (ExvAE.aex / ExvAE.plugin + exv_capi)
+  nk  nuke          build + test the Nuke NDK Reader/Writer plugin (exvReader / exvWriter + nuke_io_test)
+  os                build + test the OS thumbnailer / Shell Extension (ExvOsThumb.dll + os_thumb_test)
   d   deploy        copy dist/ (ExvAE.aex + exv_capi.dll) -> AE MediaCore + Support Files
   ci                clippy + tests + release build + portable ZIP in dist/ (ci.py · --target TRIPLE)
   release           release build + portable ZIP in dist/, no checks (ci.py · --target TRIPLE)
@@ -31,6 +33,8 @@ Examples:
   python bootstrap.py b -d         # build debug
   python bootstrap.py b p          # build the OpenEXR python module (maturin wheel)
   python bootstrap.py ae           # build + deploy After Effects AEIO plugin (ExvAE.aex)
+  python bootstrap.py nk           # build + test Nuke NDK core & plugin
+  python bootstrap.py os           # build + test OS shell extension / thumbnailer
   python bootstrap.py i            # install the exr-rs CLI + viewer onto PATH
   python bootstrap.py i p          # install the OpenEXR python module into this Python
   python bootstrap.py t            # the full gate (every stage, non-zero on any failure)
@@ -446,13 +450,16 @@ def cmd_release(rest: list[str]) -> int:
 
 def cmd_clean(_rest: list[str]) -> int:
 	header("CLEAN")
-	ae_build = ROOT_DIR / "cpp" / "exv-ae" / "build"
-	if ae_build.exists():
-		shutil.rmtree(ae_build, ignore_errors=True)
+	for sub in ("exv-ae", "exv-nuke", "exv-os"):
+		bd = ROOT_DIR / "cpp" / sub / "build"
+		if bd.exists():
+			shutil.rmtree(bd, ignore_errors=True)
 	return _report("cargo clean", *run(["cargo", "clean"]))
 
 
 AE_DIR = ROOT_DIR / "cpp" / "exv-ae"
+NUKE_DIR = ROOT_DIR / "cpp" / "exv-nuke"
+OS_DIR = ROOT_DIR / "cpp" / "exv-os"
 DIST_DIR = ROOT_DIR / "dist"
 DLL_NAME = {"Windows": "exv_capi.dll", "Darwin": "libexv_capi.dylib"}.get(platform.system(), "libexv_capi.so")
 AE_MEDIACORE = Path(os.environ.get("EXV_AE_MEDIACORE", "C:/Program Files/Adobe/Common/Plug-ins/7.0/MediaCore"))
@@ -506,9 +513,9 @@ def cmd_deploy(_rest: list[str]) -> int:
 
 
 def cmd_ae(rest: list[str]) -> int:
-	header("BUILD exv-ae (After Effects AEIO + exv_capi.dll)")
-	if not IS_WINDOWS:
-		ok("exv-ae is Windows-only, skipping")
+	header("BUILD exv-ae (After Effects AEIO + exv_capi)")
+	if platform.system() not in ("Windows", "Darwin"):
+		ok("exv-ae is Windows/macOS-only, skipping")
 		return 0
 	debug = "-d" in rest or "--debug" in rest
 	prof, cfg = ("debug", "Debug") if debug else ("release", "Release")
@@ -530,13 +537,73 @@ def cmd_ae(rest: list[str]) -> int:
 		fail("cmake build failed (exv-ae)")
 		return code
 	DIST_DIR.mkdir(parents=True, exist_ok=True)
-	if not (_cp(bd / cfg / "ExvAE.aex", DIST_DIR / "ExvAE.aex") and _cp(target_dir / prof / DLL_NAME, DIST_DIR / DLL_NAME)):
-		fail("exv-ae build produced no ExvAE.aex / exv_capi.dll")
-		return 1
+	if IS_WINDOWS:
+		if not (_cp(bd / cfg / "ExvAE.aex", DIST_DIR / "ExvAE.aex") and _cp(target_dir / prof / DLL_NAME, DIST_DIR / DLL_NAME)):
+			fail("exv-ae build produced no ExvAE.aex / exv_capi.dll")
+			return 1
 	ok(f"exv-ae OK ({fmt_time(t1 + t2)})")
-	if "--no-deploy" in rest:
+	if "--no-deploy" in rest or not IS_WINDOWS:
 		return 0
 	return cmd_deploy(rest)
+
+
+def cmd_nuke(rest: list[str]) -> int:
+	header("BUILD & TEST exv-nuke (Nuke NDK Reader/Writer + exv_capi)")
+	debug = "-d" in rest or "--debug" in rest
+	cfg = "Debug" if debug else "Release"
+	cargo_cmd = ["cargo", "build", "-p", "exv-capi"] + ([] if debug else ["--release"])
+	code, ms = run(cargo_cmd)
+	if _report("exv-capi", code, ms) != 0:
+		return code
+	bd = Path(os.environ.get("EXV_NUKE_BUILD", NUKE_DIR / "build"))
+	cfg_cmd = ["cmake", "-S", str(NUKE_DIR), "-B", str(bd), f"-DCMAKE_BUILD_TYPE={cfg}"]
+	if sdk := os.environ.get("NUKE_SDK_PATH"):
+		cfg_cmd.append(f"-DNUKE_SDK_PATH={sdk}")
+	code, t1 = run(cfg_cmd)
+	if code != 0:
+		fail("cmake configure failed (exv-nuke)")
+		return code
+	code, t2 = run(["cmake", "--build", str(bd), "--config", cfg])
+	if code != 0:
+		fail("cmake build failed (exv-nuke)")
+		return code
+	code, t3 = run(["ctest", "--test-dir", str(bd), "-C", cfg, "--output-on-failure"])
+	if code != 0:
+		fail("ctest failed (exv-nuke)")
+		return code
+	ok(f"exv-nuke OK ({fmt_time(t1 + t2 + t3)})")
+	return 0
+
+
+def cmd_os(rest: list[str]) -> int:
+	header("BUILD & TEST exv-os (OS Thumbnailer / Shell Extension + exv_capi)")
+	debug = "-d" in rest or "--debug" in rest
+	prof, cfg = ("debug", "Debug") if debug else ("release", "Release")
+	target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT_DIR / "target"))
+	cargo_cmd = ["cargo", "build", "-p", "exv-capi"] + ([] if debug else ["--release"])
+	code, ms = run(cargo_cmd)
+	if _report("exv-capi", code, ms) != 0:
+		return code
+	bd = Path(os.environ.get("EXV_OS_BUILD", OS_DIR / "build"))
+	cfg_cmd = ["cmake", "-S", str(OS_DIR), "-B", str(bd), f"-DCMAKE_BUILD_TYPE={cfg}"]
+	code, t1 = run(cfg_cmd)
+	if code != 0:
+		fail("cmake configure failed (exv-os)")
+		return code
+	code, t2 = run(["cmake", "--build", str(bd), "--config", cfg])
+	if code != 0:
+		fail("cmake build failed (exv-os)")
+		return code
+	code, t3 = run(["ctest", "--test-dir", str(bd), "-C", cfg, "--output-on-failure"])
+	if code != 0:
+		fail("ctest failed (exv-os)")
+		return code
+	if IS_WINDOWS:
+		DIST_DIR.mkdir(parents=True, exist_ok=True)
+		_cp(bd / cfg / "ExvOsThumb.dll", DIST_DIR / "ExvOsThumb.dll")
+		_cp(target_dir / prof / DLL_NAME, DIST_DIR / DLL_NAME)
+	ok(f"exv-os OK ({fmt_time(t1 + t2 + t3)})")
+	return 0
 
 
 def cmd_help(_rest: list[str]) -> int:
@@ -556,6 +623,8 @@ DISPATCH = {
 	"setup": cmd_setup,
 	"view": cmd_view,
 	"ae": cmd_ae,
+	"nuke": cmd_nuke,
+	"os": cmd_os,
 	"deploy": cmd_deploy,
 	"ci": cmd_ci,
 	"release": cmd_release,
@@ -573,6 +642,7 @@ ALIASES = {
 	"s": "setup",
 	"v": "view",
 	"e": "ae",
+	"nk": "nuke",
 	"d": "deploy",
 	"cl": "clean",
 	"h": "help",
@@ -597,3 +667,4 @@ def main() -> int:
 
 if __name__ == "__main__":
 	sys.exit(main())
+
